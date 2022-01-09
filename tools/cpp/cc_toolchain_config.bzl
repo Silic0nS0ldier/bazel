@@ -336,6 +336,7 @@ def _impl(ctx):
     )
 
     if (ctx.attr.cpu == "local"):
+        # TODO Potential error source, different platforms need different args
         default_link_flags_feature = feature(
             name = "default_link_flags",
             enabled = True,
@@ -395,7 +396,8 @@ def _impl(ctx):
                     flag_groups = [
                         flag_group(
                             flags = [
-                                "-lstdc++",
+                                # TODO Change based on XCode version (libstdc++ removed in XCode 10)
+                                "-lc++",
                                 "-undefined",
                                 "dynamic_lookup",
                                 "-headerpad_max_install_names",
