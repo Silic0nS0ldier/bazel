@@ -241,6 +241,12 @@ public class ModuleFileFunction implements SkyFunction {
       if (repoDir == null) {
         return null;
       }
+      if (!repoDir.repositoryExists()) {
+        throw errorf(
+          Code.MODULE_NOT_FOUND,
+          "Non-registry override does not exist, reported reason: %s",
+          repoDir.getErrorMsg());
+      }
       RootedPath moduleFilePath =
           RootedPath.toRootedPath(
               Root.fromPath(repoDir.getPath()), LabelConstants.MODULE_DOT_BAZEL_FILE_NAME);
