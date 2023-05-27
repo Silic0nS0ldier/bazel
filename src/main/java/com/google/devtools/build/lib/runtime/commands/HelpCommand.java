@@ -555,7 +555,7 @@ public final class HelpCommand implements BlazeCommand {
         );
       }
 
-      // TODO Configuration options
+      // Configuration options
       {
         Set<Class<? extends OptionsBase>> options = new HashSet<>(runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses());
         //Iterables.addAll(options, blazeModule.getCommandOptions(annotation));
@@ -566,6 +566,50 @@ public final class HelpCommand implements BlazeCommand {
           "configurationOptions",
           configurationOptionsArray
         );
+      }
+
+      // Command options
+      {
+        // Discover commands
+        Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>();
+        Map<String, Set<Class<? extends OptionsBase>>> optionsClassesByCommand = new HashMap();
+        for (Map.Entry<String, BlazeCommand> e : commandsByName.entrySet()) {
+          String cmdName = e.getKey();
+          BlazeCommand command = e.getValue();
+          Command annotation = command.getClass().getAnnotation(Command.class);
+
+          Set<Class<? extends OptionsBase>> options = new HashSet<>();
+          for (BlazeModule blazeModule : runtime.getBlazeModules()) {
+            Iterables.addAll(options, blazeModule.getCommandOptions(annotation));
+          }
+
+          optionsClassesByCommand.put(cmdName, options);
+          optionsClasses.addAll(options);
+        }
+
+        // Process into single array
+        for (Class<? extends OptionsBase> optionClass : optionsClasses) {
+          JsonArray associatedCommands = new JsonArray();
+          for (Map.Entry<String, Set<Class<? extends OptionsBase>>> e : optionsClassesByCommand.entrySet()) {
+            Set<Class<? extends OptionsBase>> s = e.getValue();
+            if (s.contains(optionClass)) {
+              associatedCommands.add(new JsonPrimitive(e.getKey()));
+            }
+          }
+          
+          OptionsParser parser = OptionsParser.builder().optionsClasses(optionsClasses).build();
+          String productName = runtime.getProductName();
+          JsonArray commandOptionsArray = new JsonArray();
+
+          for (OptionDefinition optDef : parser.getOptions()) {
+            commandOptionsArray.add(this.generateOptionJson(optDef, associatedCommands));
+          }
+
+          rootObject.add(
+            "commandOptions",
+            commandOptionsArray
+          );
+        }
       }
 
       // Commands
@@ -616,20 +660,6 @@ public final class HelpCommand implements BlazeCommand {
             );
           }
 
-          // Options
-          {
-            Set<Class<? extends OptionsBase>> options = new HashSet<>();
-            for (BlazeModule blazeModule : runtime.getBlazeModules()) {
-              Iterables.addAll(options, blazeModule.getCommandOptions(annotation));
-            }
-            JsonArray commandOptionsArray = this.generateOptionsJson(options);
-
-            commandInfoObject.add(
-              "options",
-              commandOptionsArray
-            );
-          }
-
           commandsObject.add(
             e.getKey(),
             commandInfoObject
@@ -641,21 +671,6 @@ public final class HelpCommand implements BlazeCommand {
           commandsObject
         );
       }
-
-      // for (Map.Entry<String, BlazeCommand> e : commandsByName.entrySet()) {
-      //   // For now, we print all the configuration options in a list after all the non-configuration
-      //   // options. Note that usesConfigurationOptions is only true for the build command right now.
-      //   if (annotation.usesConfigurationOptions()) {
-      //     options.clear();
-      //     Collections.addAll(options, annotation.options());
-      //     if (annotation.usesConfigurationOptions()) {
-      //       options.addAll(
-      //           runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses());
-      //     }
-      //     appendOptionsHtml(result, options);
-      //     result.append("\n");
-      //   }
-      // }
 
       // Option effect tags
       {
@@ -732,112 +747,123 @@ public final class HelpCommand implements BlazeCommand {
 
     private JsonArray generateOptionsJson(Iterable<Class<? extends OptionsBase>> optionsClasses) {
       OptionsParser parser = OptionsParser.builder().optionsClasses(optionsClasses).build();
-      String productName = runtime.getProductName();
       JsonArray optionsArray = new JsonArray();
 
       for (OptionDefinition optDef : parser.getOptions()) {
-        JsonObject optionInfoObject = new JsonObject();
-        optionInfoObject.add(
-          "helpText",
-          new JsonPrimitive(optDef.getHelpText().replace("%{product}", productName))
-        );
-        char abbrev = optDef.getAbbreviation();
-        optionInfoObject.add(
-          "abbreviation",
-          abbrev == '\0'
-              ? JsonNull.INSTANCE
-              : new JsonPrimitive(abbrev)
-        );
-        optionInfoObject.add(
-          "allowsMultiple",
-          new JsonPrimitive(optDef.allowsMultiple())
-        );
-        optionInfoObject.add(
-          "hasNegativeOption",
-          new JsonPrimitive(optDef.hasNegativeOption())
-        );
-        optionInfoObject.add(
-          "isExpansionOption",
-          new JsonPrimitive(optDef.isExpansionOption())
-        );
-        // TODO could be empty string
-        optionInfoObject.add(
-          "deprecationWarning",
-          new JsonPrimitive(optDef.getDeprecationWarning())
-        );
-        optionInfoObject.add(
-          "oldName",
-          new JsonPrimitive(optDef.getOldOptionName())
-        );
-        optionInfoObject.add(
-          "warnOldName",
-          new JsonPrimitive(optDef.getOldNameWarning())
-        );
-        optionInfoObject.add(
-          "documenationCategory",
-          new JsonPrimitive(optDef.getDocumentationCategory().name().toLowerCase())
-        );
-        optionInfoObject.add(
-          "valueHelp",
-          new JsonPrimitive(optDef.getValueTypeHelpText())
-        );
-        
-        // Expansion options
-        {
-          JsonArray cmdExpansions = new JsonArray();
-          for (String cmd : optDef.getOptionExpansion()) {
-            cmdExpansions.add(new JsonPrimitive(cmd));
-          }
-          optionInfoObject.add(
-            "optionExpansions",
-            cmdExpansions
-          );
-        }
-        
-        // Implicit requirements
-        {
-          JsonArray implicitRequirements = new JsonArray();
-          for (String req : optDef.getImplicitRequirements()) {
-            implicitRequirements.add(new JsonPrimitive(req));
-          }
-          optionInfoObject.add(
-            "implicitRequirements",
-            implicitRequirements
-          );
-        }
-        
-
-        // Option effect tags
-        {
-          JsonArray tags = new JsonArray();
-          for (OptionEffectTag tag : optDef.getOptionEffectTags()) {
-            tags.add(new JsonPrimitive(tag.name().toLowerCase()));
-          }
-          optionInfoObject.add(
-            "optionEffectTags",
-            tags
-          );
-        }
-
-        // Option metadata tags
-        {
-          JsonArray tags = new JsonArray();
-          for (OptionMetadataTag tag : optDef.getOptionMetadataTags()) {
-            tags.add(new JsonPrimitive(tag.name().toLowerCase()));
-          }
-          optionInfoObject.add(
-            "optionMetadataTags",
-            tags
-          );
-        }
-
-        JsonArray pair = new JsonArray();
-        pair.add(new JsonPrimitive(optDef.getOptionName()));
-        pair.add(optionInfoObject);
-        optionsArray.add(pair);
+        optionsArray.add(this.generateOptionJson(optDef, new JsonArray()));
       }
 
       return optionsArray;
+    }
+
+    private JsonArray generateOptionJson(OptionDefinition optDef, JsonArray associatedCommands) {
+      String productName = runtime.getProductName();
+      JsonObject optionInfoObject = new JsonObject();
+      if (!associatedCommands.isEmpty()) {
+        optionInfoObject.add(
+          "associatedCommands",
+          associatedCommands
+        );
+      }
+      optionInfoObject.add(
+        "helpText",
+        new JsonPrimitive(optDef.getHelpText().replace("%{product}", productName))
+      );
+      char abbrev = optDef.getAbbreviation();
+      optionInfoObject.add(
+        "abbreviation",
+        abbrev == '\0'
+            ? JsonNull.INSTANCE
+            : new JsonPrimitive(abbrev)
+      );
+      optionInfoObject.add(
+        "allowsMultiple",
+        new JsonPrimitive(optDef.allowsMultiple())
+      );
+      optionInfoObject.add(
+        "hasNegativeOption",
+        new JsonPrimitive(optDef.hasNegativeOption())
+      );
+      optionInfoObject.add(
+        "isExpansionOption",
+        new JsonPrimitive(optDef.isExpansionOption())
+      );
+      // TODO could be empty string
+      optionInfoObject.add(
+        "deprecationWarning",
+        new JsonPrimitive(optDef.getDeprecationWarning())
+      );
+      optionInfoObject.add(
+        "oldName",
+        new JsonPrimitive(optDef.getOldOptionName())
+      );
+      optionInfoObject.add(
+        "warnOldName",
+        new JsonPrimitive(optDef.getOldNameWarning())
+      );
+      optionInfoObject.add(
+        "documenationCategory",
+        new JsonPrimitive(optDef.getDocumentationCategory().name().toLowerCase())
+      );
+      optionInfoObject.add(
+        "valueHelp",
+        new JsonPrimitive(optDef.getValueTypeHelpText())
+      );
+      
+      // Expansion options
+      {
+        JsonArray cmdExpansions = new JsonArray();
+        for (String cmd : optDef.getOptionExpansion()) {
+          cmdExpansions.add(new JsonPrimitive(cmd));
+        }
+        optionInfoObject.add(
+          "optionExpansions",
+          cmdExpansions
+        );
+      }
+      
+      // Implicit requirements
+      {
+        JsonArray implicitRequirements = new JsonArray();
+        for (String req : optDef.getImplicitRequirements()) {
+          implicitRequirements.add(new JsonPrimitive(req));
+        }
+        optionInfoObject.add(
+          "implicitRequirements",
+          implicitRequirements
+        );
+      }
+      
+
+      // Option effect tags
+      {
+        JsonArray tags = new JsonArray();
+        for (OptionEffectTag tag : optDef.getOptionEffectTags()) {
+          tags.add(new JsonPrimitive(tag.name().toLowerCase()));
+        }
+        optionInfoObject.add(
+          "optionEffectTags",
+          tags
+        );
+      }
+
+      // Option metadata tags
+      {
+        JsonArray tags = new JsonArray();
+        for (OptionMetadataTag tag : optDef.getOptionMetadataTags()) {
+          tags.add(new JsonPrimitive(tag.name().toLowerCase()));
+        }
+        optionInfoObject.add(
+          "optionMetadataTags",
+          tags
+        );
+      }
+
+      JsonArray pair = new JsonArray();
+      pair.add(new JsonPrimitive(optDef.getOptionName()));
+      pair.add(optionInfoObject);
+
+      return pair;
     }
 
     private static String capitalize(String s) {
