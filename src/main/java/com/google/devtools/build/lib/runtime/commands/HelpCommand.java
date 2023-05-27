@@ -533,83 +533,69 @@ public final class HelpCommand implements BlazeCommand {
       Map<String, BlazeCommand> commandsByName = getSortedCommands(runtime);
       JsonObject rootObject = new JsonObject();
 
-      // Startup options
+      // Options
       {
-        JsonArray startupOptionsArray =
-            this.generateOptionsJson(BlazeCommandUtils.getStartupOptions(runtime.getBlazeModules()));
+        Set<Class<? extends OptionsBase>> allOptionsClasses = new HashSet<>();
+        Map<String, Set<Class<? extends OptionsBase>>> allOptionsClassesByScope = new HashMap();
 
-        rootObject.add(
-          "startupOptions",
-          startupOptionsArray
-        );
-      }
+        // Startup options
+        {
+          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet(BlazeCommandUtils.getStartupOptions(runtime.getBlazeModules()));
+          allOptionsClassesByScope.put("startup", optionsClasses);
+          allOptionsClasses.addAll(optionsClasses);
+        }
 
-      // Common options
-      {
-        JsonArray commonOptionsArray =
-            this.generateOptionsJson(BlazeCommandUtils.getCommonOptions(runtime.getBlazeModules()));
+        // Common options
+        {
+          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet(BlazeCommandUtils.getCommonOptions(runtime.getBlazeModules()));
+          allOptionsClassesByScope.put("common", optionsClasses);
+          allOptionsClasses.addAll(optionsClasses);
+        }
 
-        rootObject.add(
-          "commonOptions",
-          commonOptionsArray
-        );
-      }
+        // Configuration options
+        {
+          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>(runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses());
+          allOptionsClassesByScope.put("configuration", optionsClasses);
+          allOptionsClasses.addAll(optionsClasses);
+        }
 
-      // Configuration options
-      {
-        Set<Class<? extends OptionsBase>> options = new HashSet<>(runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses());
-        //Iterables.addAll(options, blazeModule.getCommandOptions(annotation));
-        //runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses();
-        JsonArray configurationOptionsArray =
-            this.generateOptionsJson(options);
-        rootObject.add(
-          "configurationOptions",
-          configurationOptionsArray
-        );
-      }
-
-      // Command options
-      {
-        // Discover commands
-        Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>();
-        Map<String, Set<Class<? extends OptionsBase>>> optionsClassesByCommand = new HashMap();
+        // Command options
         for (Map.Entry<String, BlazeCommand> e : commandsByName.entrySet()) {
           String cmdName = e.getKey();
           BlazeCommand command = e.getValue();
           Command annotation = command.getClass().getAnnotation(Command.class);
 
-          Set<Class<? extends OptionsBase>> options = new HashSet<>();
+          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>();
           for (BlazeModule blazeModule : runtime.getBlazeModules()) {
-            Iterables.addAll(options, blazeModule.getCommandOptions(annotation));
+            Iterables.addAll(optionsClasses, blazeModule.getCommandOptions(annotation));
           }
 
-          optionsClassesByCommand.put(cmdName, options);
-          optionsClasses.addAll(options);
+          allOptionsClassesByScope.put(cmdName, optionsClasses);
+          allOptionsClasses.addAll(optionsClasses);
         }
 
         // Process into single array
-        for (Class<? extends OptionsBase> optionClass : optionsClasses) {
+        JsonArray commandOptionsArray = new JsonArray();
+        for (Class<? extends OptionsBase> optionClass : allOptionsClasses) {
           JsonArray associatedCommands = new JsonArray();
-          for (Map.Entry<String, Set<Class<? extends OptionsBase>>> e : optionsClassesByCommand.entrySet()) {
+          for (Map.Entry<String, Set<Class<? extends OptionsBase>>> e : allOptionsClassesByScope.entrySet()) {
             Set<Class<? extends OptionsBase>> s = e.getValue();
             if (s.contains(optionClass)) {
               associatedCommands.add(new JsonPrimitive(e.getKey()));
             }
           }
           
-          OptionsParser parser = OptionsParser.builder().optionsClasses(optionsClasses).build();
+          OptionsParser parser = OptionsParser.builder().optionsClasses(optionClass).build();
           String productName = runtime.getProductName();
-          JsonArray commandOptionsArray = new JsonArray();
 
           for (OptionDefinition optDef : parser.getOptions()) {
             commandOptionsArray.add(this.generateOptionJson(optDef, associatedCommands));
           }
-
-          rootObject.add(
-            "commandOptions",
-            commandOptionsArray
-          );
         }
+        rootObject.add(
+          "options",
+          commandOptionsArray
+        );
       }
 
       // Commands
@@ -745,24 +731,13 @@ public final class HelpCommand implements BlazeCommand {
       outErr.printOut(gson.toJson(rootObject));
     }
 
-    private JsonArray generateOptionsJson(Iterable<Class<? extends OptionsBase>> optionsClasses) {
-      OptionsParser parser = OptionsParser.builder().optionsClasses(optionsClasses).build();
-      JsonArray optionsArray = new JsonArray();
-
-      for (OptionDefinition optDef : parser.getOptions()) {
-        optionsArray.add(this.generateOptionJson(optDef, new JsonArray()));
-      }
-
-      return optionsArray;
-    }
-
-    private JsonArray generateOptionJson(OptionDefinition optDef, JsonArray associatedCommands) {
+    private JsonArray generateOptionJson(OptionDefinition optDef, JsonArray associatedScopes) {
       String productName = runtime.getProductName();
       JsonObject optionInfoObject = new JsonObject();
-      if (!associatedCommands.isEmpty()) {
+      if (!associatedScopes.isEmpty()) {
         optionInfoObject.add(
-          "associatedCommands",
-          associatedCommands
+          "associatedScopes",
+          associatedScopes
         );
       }
       optionInfoObject.add(
