@@ -600,7 +600,7 @@ public final class HelpCommand implements BlazeCommand {
 
       // Commands
       {
-        JsonObject commandsObject = new JsonObject();
+        JsonArray commandsArray = new JsonArray();
         for (Map.Entry<String, BlazeCommand> e : commandsByName.entrySet()) {
           BlazeCommand command = e.getValue();
           Command annotation = command.getClass().getAnnotation(Command.class);
@@ -609,6 +609,10 @@ public final class HelpCommand implements BlazeCommand {
               replace("%{product}", runtime.getProductName());
 
           JsonObject commandInfoObject = new JsonObject();
+          commandInfoObject.add(
+            "name",
+            new JsonPrimitive(e.getKey())
+          );
           commandInfoObject.add(
             "shortDescription",
             new JsonPrimitive(shortDescription)
@@ -646,21 +650,18 @@ public final class HelpCommand implements BlazeCommand {
             );
           }
 
-          commandsObject.add(
-            e.getKey(),
-            commandInfoObject
-          );
+          commandsArray.add(commandInfoObject);
         }
 
         rootObject.add(
           "commands",
-          commandsObject
+          commandsArray
         );
       }
 
       // Option effect tags
       {
-        JsonObject optionEffectTagsObject = new JsonObject();
+        JsonArray optionEffectTagsArray = new JsonArray();
 
         String productName = runtime.getProductName();
         ImmutableMap<OptionEffectTag, String> effectTagDescriptions =
@@ -671,25 +672,26 @@ public final class HelpCommand implements BlazeCommand {
           String tagDescription = effectTagDescriptions.get(tag);
 
           optionEffectTagInfoObject.add(
+            "name",
+            new JsonPrimitive(tag.name().toLowerCase())
+          );
+          optionEffectTagInfoObject.add(
             "description",
             new JsonPrimitive(tagDescription)
           );
 
-          optionEffectTagsObject.add(
-            tag.name().toLowerCase(),
-            optionEffectTagInfoObject
-          );
+          optionEffectTagsArray.add(optionEffectTagInfoObject);
         }
 
         rootObject.add(
           "optionEffectTags",
-          optionEffectTagsObject
+          optionEffectTagsArray
         );
       }
 
       // Option metadata tags
       {
-        JsonObject optionMetadataTagsObject = new JsonObject();
+        JsonArray optionMetadataTagsArray = new JsonArray();
 
         String productName = runtime.getProductName();
         ImmutableMap<OptionMetadataTag, String> metadataTagDescriptions =
@@ -698,6 +700,10 @@ public final class HelpCommand implements BlazeCommand {
           JsonObject optionMetadataTagInfoObject = new JsonObject();
           String tagDescription = metadataTagDescriptions.get(tag);
 
+          optionMetadataTagInfoObject.add(
+            "name",
+            new JsonPrimitive(tag.name().toLowerCase())
+          );
           optionMetadataTagInfoObject.add(
             "description",
             new JsonPrimitive(tagDescription)
@@ -711,15 +717,12 @@ public final class HelpCommand implements BlazeCommand {
             new JsonPrimitive(tag.equals(OptionMetadataTag.INTERNAL))
           );
 
-          optionMetadataTagsObject.add(
-            tag.name().toLowerCase(),
-            optionMetadataTagInfoObject
-          );
+          optionMetadataTagsArray.add(optionMetadataTagInfoObject);
         }
 
         rootObject.add(
           "optionMetadataTags",
-          optionMetadataTagsObject
+          optionMetadataTagsArray
         );
       }
 
@@ -731,9 +734,15 @@ public final class HelpCommand implements BlazeCommand {
       outErr.printOut(gson.toJson(rootObject));
     }
 
-    private JsonArray generateOptionJson(OptionDefinition optDef, JsonArray associatedScopes) {
+    private JsonObject generateOptionJson(OptionDefinition optDef, JsonArray associatedScopes) {
       String productName = runtime.getProductName();
       JsonObject optionInfoObject = new JsonObject();
+
+      optionInfoObject.add(
+        "name",
+        new JsonPrimitive(optDef.getOptionName())
+      );
+
       if (!associatedScopes.isEmpty()) {
         optionInfoObject.add(
           "associatedScopes",
@@ -834,11 +843,7 @@ public final class HelpCommand implements BlazeCommand {
         );
       }
 
-      JsonArray pair = new JsonArray();
-      pair.add(new JsonPrimitive(optDef.getOptionName()));
-      pair.add(optionInfoObject);
-
-      return pair;
+      return optionInfoObject;
     }
 
     private static String capitalize(String s) {
