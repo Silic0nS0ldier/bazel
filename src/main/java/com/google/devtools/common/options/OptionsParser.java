@@ -598,6 +598,18 @@ public class OptionsParser implements OptionsParsingResult {
         .forEach(visitor);
   }
 
+  public OptionDefinition[] getOptions() {
+    OptionsData data = impl.getOptionsData();
+    return data
+        .getOptionsClasses()
+        // List all options
+        .stream()
+        .flatMap(optionsClass -> OptionsData.getAllOptionDefinitionsForClass(optionsClass).stream())
+        // Sort field for deterministic ordering
+        .sorted(OptionDefinition.BY_OPTION_NAME)
+        .toArray(OptionDefinition[]::new);
+  }
+
   /**
    * Returns a description of the option.
    *
