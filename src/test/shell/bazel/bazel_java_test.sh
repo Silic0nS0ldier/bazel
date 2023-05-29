@@ -1960,5 +1960,41 @@ EOF
   expect_log "in pkg/Library.java: ''"
 }
 
+function test_unused_java_runfiles() {
+  cat >> WORKSPACE <<'EOF'
+EOF
+
+  mkdir -p pkg
+  cat > pkg/BUILD.bazel <<'EOF'
+java_binary(
+  name = "binary",
+  srcs = ["Binary.java"],
+  main_class = "com.example.Binary",
+  deps = [
+    "@bazel_tools//tools/java/runfiles",
+  ],
+)
+EOF
+
+  cat > pkg/Binary.java <<'EOF'
+package com.example;
+
+public class Binary {
+  private static class Class1 {
+  }
+
+  public static void main(String[] args) {
+    System.out.printf("in pkg/Binary.java: '%s'%n", "nada");
+  }
+}
+EOF
+
+  bazel run //pkg:binary &>"$TEST_log" || fail "Run should succeed"
+  expect_log "in pkg/Binary.java: 'nada'"
+
+  bazel run --javacopt="-Werror" //pkg:binary &>"$TEST_log" || fail "Run should succeed"
+  expect_log "in pkg/Binary.java: 'nada'"
+}
+
 
 run_suite "Java integration tests"
