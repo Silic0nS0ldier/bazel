@@ -566,6 +566,7 @@ public final class HelpCommand implements BlazeCommand {
           Command annotation = command.getClass().getAnnotation(Command.class);
 
           Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>();
+          Collections.addAll(optionsClasses, annotation.options());
           for (BlazeModule blazeModule : runtime.getBlazeModules()) {
             Iterables.addAll(optionsClasses, blazeModule.getCommandOptions(annotation));
           }
