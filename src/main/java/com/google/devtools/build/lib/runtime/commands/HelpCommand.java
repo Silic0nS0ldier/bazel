@@ -73,6 +73,8 @@ import com.google.gson.JsonNull;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.common.collect.Iterables;
+import java.util.TreeSet;
+import java.util.TreeMap;
 
 /** The 'blaze help' command, which prints all available commands as well as specific help pages. */
 @Command(
@@ -535,28 +537,28 @@ public final class HelpCommand implements BlazeCommand {
 
       // Options
       {
-        Set<Class<? extends OptionsBase>> allOptionsClasses = new HashSet<>();
-        Map<String, Set<Class<? extends OptionsBase>>> allOptionsClassesByScope = new HashMap();
+        TreeSet<OptionDefinition> allOptions = new TreeSet<>();
+        TreeMap<String, TreeSet<OptionDefinition>> optionsByScopeAssociation = new TreeMap<>();
 
         // Startup options
         {
-          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet(BlazeCommandUtils.getStartupOptions(runtime.getBlazeModules()));
-          allOptionsClassesByScope.put("startup", optionsClasses);
-          allOptionsClasses.addAll(optionsClasses);
+          TreeSet<OptionDefinition> options = extractOptionDefinitions(BlazeCommandUtils.getStartupOptions(runtime.getBlazeModules()));
+          allOptions.addAll(options);
+          optionsByScopeAssociation.put("startup", options);
         }
 
         // Common options
         {
-          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet(BlazeCommandUtils.getCommonOptions(runtime.getBlazeModules()));
-          allOptionsClassesByScope.put("common", optionsClasses);
-          allOptionsClasses.addAll(optionsClasses);
+          TreeSet<OptionDefinition> options = extractOptionDefinitions(BlazeCommandUtils.getCommonOptions(runtime.getBlazeModules()));
+          allOptions.addAll(options);
+          optionsByScopeAssociation.put("common", options);
         }
 
         // Configuration options
         {
-          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>(runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses());
-          allOptionsClassesByScope.put("configuration", optionsClasses);
-          allOptionsClasses.addAll(optionsClasses);
+          TreeSet<OptionDefinition> options = extractOptionDefinitions(new HashSet<>(runtime.getRuleClassProvider().getFragmentRegistry().getOptionsClasses()));
+          allOptions.addAll(options);
+          optionsByScopeAssociation.put("configuration", options);
         }
 
         // Command options
@@ -565,33 +567,32 @@ public final class HelpCommand implements BlazeCommand {
           BlazeCommand command = e.getValue();
           Command annotation = command.getClass().getAnnotation(Command.class);
 
-          Set<Class<? extends OptionsBase>> optionsClasses = new HashSet<>();
-          Collections.addAll(optionsClasses, annotation.options());
+          TreeSet<OptionDefinition> options = extractOptionDefinitions( Arrays.asList(annotation.options()));
           for (BlazeModule blazeModule : runtime.getBlazeModules()) {
-            Iterables.addAll(optionsClasses, blazeModule.getCommandOptions(annotation));
+            options.addAll(extractOptionDefinitions(blazeModule.getCommandOptions(annotation)));
           }
 
-          allOptionsClassesByScope.put(cmdName, optionsClasses);
-          allOptionsClasses.addAll(optionsClasses);
+          allOptions.addAll(options);
+          optionsByScopeAssociation.put(cmdName, options);
         }
 
         // Process into single array
         JsonArray commandOptionsArray = new JsonArray();
-        for (Class<? extends OptionsBase> optionClass : allOptionsClasses) {
-          JsonArray associatedCommands = new JsonArray();
-          for (Map.Entry<String, Set<Class<? extends OptionsBase>>> e : allOptionsClassesByScope.entrySet()) {
-            Set<Class<? extends OptionsBase>> s = e.getValue();
-            if (s.contains(optionClass)) {
-              associatedCommands.add(new JsonPrimitive(e.getKey()));
+        String productName = runtime.getProductName();
+        for (OptionDefinition optionDefinition : allOptions) {
+          // Work out scope/command associations
+          JsonArray associatedScopes = new JsonArray();
+          for (Map.Entry<String, TreeSet<OptionDefinition>> e : optionsByScopeAssociation.entrySet()) {
+            String scope = e.getKey();
+            TreeSet<OptionDefinition> scopeOptions = e.getValue();
+
+            if (scopeOptions.contains(optionDefinition)) {
+              associatedScopes.add(new JsonPrimitive(scope));
             }
           }
-          
-          OptionsParser parser = OptionsParser.builder().optionsClasses(optionClass).build();
-          String productName = runtime.getProductName();
 
-          for (OptionDefinition optDef : parser.getOptions()) {
-            commandOptionsArray.add(this.generateOptionJson(optDef, associatedCommands));
-          }
+          // Construct JSON object
+          commandOptionsArray.add(this.generateOptionJson(optionDefinition, associatedScopes));
         }
         rootObject.add(
           "options",
@@ -845,6 +846,21 @@ public final class HelpCommand implements BlazeCommand {
       }
 
       return optionInfoObject;
+    }
+
+    private TreeSet<OptionDefinition> extractOptionDefinitions(Iterable<Class<? extends OptionsBase>> optionClasses) {
+      TreeSet<OptionDefinition> results = new TreeSet<>();
+
+      for (Class<? extends OptionsBase> optionClass : optionClasses) {
+        OptionsParser parser = OptionsParser.builder().optionsClasses(optionClass).build();
+        String productName = runtime.getProductName();
+
+        for (OptionDefinition optDef : parser.getOptions()) {
+          results.add(optDef);
+        }
+      }
+
+      return results;
     }
 
     private static String capitalize(String s) {
