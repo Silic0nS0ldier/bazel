@@ -166,6 +166,7 @@ public interface Spawn extends DescribableExecutionUnit {
    */
   ImmutableMap<String, String> getCombinedExecProperties();
 
+  // TODO Scoping spawn strategies to a particular execution platform requires that this never return null to be consistent (and not throw)
   @Nullable
   PlatformInfo getExecutionPlatform();
 

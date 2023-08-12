@@ -32,15 +32,18 @@ import com.google.devtools.build.lib.actions.DynamicStrategyRegistry;
 import com.google.devtools.build.lib.actions.SandboxedSpawnStrategy;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnStrategy;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.platform.PlatformScopedSpawnStrategy;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.ExecutionOptions.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.RegexFilter;
+import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -490,6 +493,17 @@ public final class SpawnStrategyRegistry
     @VisibleForTesting
     public SpawnStrategy toStrategy(String identifier, Object requestName)
         throws AbruptExitException {
+      var originalIdentifier = identifier;
+      var extraMatcherDividerPosition = originalIdentifier.lastIndexOf("=");
+      if (extraMatcherDividerPosition > -1) {
+        // Do not modify existing spawn strategies, just wrap them
+        // The idea is that when they are checked for viability, we can do the exec platform check first than do a hand-off
+        // FooMemnonic=//foo:foo=bar=local
+        //            ^         ^   ^ We find the last "=" and use that as the split point.
+        //            ^         ^ Target names can contain "=".
+        //            ^ Already handled by dictionary processors.
+        identifier = originalIdentifier.substring(extraMatcherDividerPosition + 1);
+      }
       SpawnStrategy strategy = identifierToStrategy.get(identifier);
       if (strategy == null) {
         throw createExitException(
@@ -499,6 +513,22 @@ public final class SpawnStrategyRegistry
                 identifier, requestName, Joiner.on(", ").join(identifierToStrategy.keySet())),
             Code.STRATEGY_NOT_FOUND);
       }
+
+      if (extraMatcherDividerPosition > -1) {
+        var execPlatform = originalIdentifier.substring(0, extraMatcherDividerPosition);
+        System.err.println("EXPERIMENT --- Using platform scoped strategy. '" + originalIdentifier + "' has been parsed as;");
+        System.err.println("  Strategy = " + identifier);
+        System.err.println("  Platform = " + execPlatform);
+        try {
+          var execPlatformLabel = Label.parseCanonical(execPlatform);
+          return new PlatformScopedSpawnStrategy(strategy, execPlatformLabel);
+        } catch (LabelSyntaxException ex) {
+          throw createExitException(
+            "Error parsing platform string",
+            Code.STRATEGY_NOT_FOUND);
+        }
+      }
+
       return strategy;
     }
 

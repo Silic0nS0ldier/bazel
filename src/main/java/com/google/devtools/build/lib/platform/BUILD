@@ -12,6 +12,16 @@ filegroup(
 )
 
 java_library(
+    name = "platform_scoped_spawn_strategy",
+    srcs = ["PlatformScopedSpawnStrategy.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions:actions",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
     name = "sleep_prevention_module",
     srcs = ["SleepPreventionModule.java"],
     deps = [

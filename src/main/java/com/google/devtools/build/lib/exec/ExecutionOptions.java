@@ -71,6 +71,8 @@ public class ExecutionOptions extends OptionsBase {
               + " strategy with the highest priority that can execute the action. The default"
               + " value is \"remote,worker,sandboxed,local\". See"
               + " https://blog.bazel.build/2019/06/19/list-strategy.html for details.")
+      // + --spawn_strategy=//foo:foo=remote,worker,sandboxed,local
+      //                    ^ Scopes spawn strategy to exec platform
   public List<String> spawnStrategy;
 
   @Option(
@@ -83,8 +85,11 @@ public class ExecutionOptions extends OptionsBase {
           "Specify how to execute genrules. This flag will be phased out. Instead, use "
               + "--spawn_strategy=<value> to control all actions or --strategy=Genrule=<value> "
               + "to control genrules only.")
+      // + --genrule_strategy=//foo:foo=remote,worker,sandboxed,local
+      //                      ^ Scopes spawn strategy to exec platform
+      // NOTE Not clear if this actually works, scoping implemented at low level
   public List<String> genruleStrategy;
-
+  
   @Option(
       name = "strategy",
       allowMultiple = true,
@@ -99,6 +104,8 @@ public class ExecutionOptions extends OptionsBase {
               + " value is \"remote,worker,sandboxed,local\". This flag overrides the values set"
               + " by --spawn_strategy (and --genrule_strategy if used with mnemonic Genrule). See"
               + " https://blog.bazel.build/2019/06/19/list-strategy.html for details.")
+      // + --strategy=Foo=//foo:foo=remote,worker,sandboxed,local
+      //                  ^ Scopes down further to this exec platform only
   public List<Map.Entry<String, List<String>>> strategy;
 
   @Option(
@@ -119,6 +126,8 @@ public class ExecutionOptions extends OptionsBase {
               + "Example: --strategy_regexp='Compiling.*/bar=local "
               + " --strategy_regexp=Compiling=sandboxed will run 'Compiling //foo/bar/baz' with "
               + "the 'local' strategy, but reversing the order would run it with 'sandboxed'. ")
+      // + --strategy_regexp=//foo.*\.cc,-//foo/bar=//bar:bar=local
+      //                                            ^ Regex is hard to parse as a human, but this scopes it to a specific exec platform
   public List<Map.Entry<RegexFilter, List<String>>> strategyByRegexp;
 
   @Option(
