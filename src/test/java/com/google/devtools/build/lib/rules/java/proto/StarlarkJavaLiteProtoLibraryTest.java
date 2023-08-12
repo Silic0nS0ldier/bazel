@@ -142,7 +142,7 @@ public class StarlarkJavaLiteProtoLibraryTest extends BuildViewTestCase {
             "--java_out=lite,immutable,no_enforce_api_compatibility:"
                 + genfilesDir
                 + "/x/protolib-lite-src.jar",
-            "-Ix/file.proto=x/file.proto",
+            "-I.",
             "x/file.proto")
         .inOrder();
   }
@@ -217,7 +217,7 @@ public class StarlarkJavaLiteProtoLibraryTest extends BuildViewTestCase {
             "--java_out=lite,immutable,no_enforce_api_compatibility:"
                 + genfilesDir
                 + "/cross/bravo-lite-src.jar",
-            "-Icross/bravo.proto=cross/bravo.proto",
+            "-I.",
             "cross/bravo.proto")
         .inOrder();
 
@@ -318,7 +318,7 @@ public class StarlarkJavaLiteProtoLibraryTest extends BuildViewTestCase {
         /* doAnalysis= */ true,
         new EventBus());
     // Implicitly check that `update()` above didn't throw an exception. This implicitly checks that
-    // ctx.attr.dep.java.{transitive_deps, outputs}, above, is defined.
+    // ctx.attr.dep.java.{transitive_compile_time_jars, outputs}, above, is defined.
   }
 
   @Test

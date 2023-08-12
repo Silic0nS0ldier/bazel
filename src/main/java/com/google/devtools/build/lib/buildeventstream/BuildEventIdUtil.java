@@ -100,12 +100,16 @@ public final class BuildEventIdUtil {
     return BuildEventId.newBuilder().setFetch(fetchId).build();
   }
 
-  public static BuildEventId configurationId(String id) {
-    return configurationId(configurationIdMessage(id));
+  public static BuildEventId configurationId(@Nullable BuildConfigurationKey key) {
+    return configurationId(configurationIdMessage(key));
   }
 
   private static BuildEventId configurationId(ConfigurationId id) {
     return BuildEventId.newBuilder().setConfiguration(id).build();
+  }
+
+  public static BuildEventId configurationId(String id) {
+    return configurationId(configurationIdMessage(id));
   }
 
   public static ConfigurationId configurationIdMessage(@Nullable BuildConfigurationKey key) {
@@ -116,6 +120,12 @@ public final class BuildEventIdUtil {
 
   public static ConfigurationId configurationIdMessage(String checksum) {
     return ConfigurationId.newBuilder().setId(checksum).build();
+  }
+
+  public static BuildEventId execRequestId() {
+    return BuildEventId.newBuilder()
+        .setExecRequest(BuildEventId.ExecRequestId.getDefaultInstance())
+        .build();
   }
 
   public static BuildEventId nullConfigurationId() {
@@ -177,12 +187,12 @@ public final class BuildEventIdUtil {
     return BuildEventId.newBuilder().setTargetCompleted(targetId).build();
   }
 
-  public static BuildEventId configuredLabelId(Label label, BuildEventId configuration) {
-    BuildEventId.ConfigurationId configId = configuration.getConfiguration();
+  public static BuildEventId configuredLabelId(
+      Label label, BuildEventId.ConfigurationId configurationId) {
     BuildEventId.ConfiguredLabelId labelId =
         BuildEventId.ConfiguredLabelId.newBuilder()
             .setLabel(label.toString())
-            .setConfiguration(configId)
+            .setConfiguration(configurationId)
             .build();
     return BuildEventId.newBuilder().setConfiguredLabel(labelId).build();
   }
@@ -229,7 +239,7 @@ public final class BuildEventIdUtil {
   }
 
   public static BuildEventId testResult(
-      Label target, Integer run, Integer shard, Integer attempt, BuildEventId configuration) {
+      Label target, int run, int shard, int attempt, BuildEventId configuration) {
     BuildEventId.ConfigurationId configId = configuration.getConfiguration();
     BuildEventId.TestResultId resultId =
         BuildEventId.TestResultId.newBuilder()
@@ -243,7 +253,7 @@ public final class BuildEventIdUtil {
   }
 
   public static BuildEventId testResult(
-      Label target, Integer run, Integer shard, BuildEventId configuration) {
+      Label target, int run, int shard, BuildEventId configuration) {
     return testResult(target, run, shard, 1, configuration);
   }
 

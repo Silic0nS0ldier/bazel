@@ -28,14 +28,16 @@ import com.google.devtools.build.lib.actions.CommandLineLimits;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.config.OutputDirectories.InvalidMnemonicException;
+import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
-import com.google.devtools.build.lib.cmdline.BazelModuleContext;
+import com.google.devtools.build.lib.buildeventstream.NullConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.concurrent.BlazeInterners;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.packages.BuiltinRestriction;
 import com.google.devtools.build.lib.skyframe.BuildConfigurationKey;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.starlarkbuildapi.BuildConfigurationApi;
@@ -53,8 +55,6 @@ import javax.annotation.Nullable;
 import net.starlark.java.annot.StarlarkAnnotations;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.eval.EvalException;
-import net.starlark.java.eval.Module;
-import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkThread;
 
 /**
@@ -389,7 +389,7 @@ public class BuildConfigurationValue
   @Override
   public boolean hasSeparateGenfilesDirectoryForStarlark(StarlarkThread thread)
       throws EvalException {
-    checkPrivateAccess(thread);
+    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
     return hasSeparateGenfilesDirectory();
   }
 
@@ -498,18 +498,8 @@ public class BuildConfigurationValue
 
   @Override
   public boolean isSiblingRepositoryLayoutForStarlark(StarlarkThread thread) throws EvalException {
-    checkPrivateAccess(thread);
+    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
     return isSiblingRepositoryLayout();
-  }
-
-  private static void checkPrivateAccess(StarlarkThread thread) throws EvalException {
-    RepositoryName repository =
-        BazelModuleContext.of(Module.ofInnermostEnclosingStarlarkFunction(thread))
-            .label()
-            .getRepository();
-    if (!"@_builtins".equals(repository.getNameWithAt())) {
-      throw Starlark.errorf("private API only for use in builtins");
-    }
   }
 
   /**
@@ -562,6 +552,11 @@ public class BuildConfigurationValue
    */
   public boolean shouldInstrumentTestTargets() {
     return options.instrumentTestTargets;
+  }
+
+  /** Returns a boolean of whether to collect code coverage for generated files or not. */
+  public boolean shouldCollectCodeCoverageForGeneratedFiles() {
+    return options.collectCodeCoverageForGeneratedFiles;
   }
 
   /**
@@ -633,7 +628,7 @@ public class BuildConfigurationValue
 
   @Override
   public boolean stampBinariesForStarlark(StarlarkThread thread) throws EvalException {
-    checkPrivateAccess(thread);
+    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
     return stampBinaries();
   }
 
@@ -710,7 +705,7 @@ public class BuildConfigurationValue
 
   @Override
   public boolean isToolConfigurationForStarlark(StarlarkThread thread) throws EvalException {
-    checkPrivateAccess(thread);
+    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
     return isToolConfiguration();
   }
 
@@ -830,16 +825,12 @@ public class BuildConfigurationValue
 
   @Override
   public boolean runfilesEnabledForStarlark(StarlarkThread thread) throws EvalException {
-    checkPrivateAccess(thread);
+    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
     return runfilesEnabled(this.options);
   }
 
   public boolean inprocessSymlinkCreation() {
     return options.inprocessSymlinkCreation;
-  }
-
-  public boolean skipRunfilesManifests() {
-    return options.skipRunfilesManifests;
   }
 
   public boolean remotableSourceManifestActions() {
@@ -895,7 +886,7 @@ public class BuildConfigurationValue
     return starlarkVisibleFragments.keySet();
   }
 
-  public BuildEventId getEventId() {
+  private BuildEventId getEventId() {
     return BuildEventIdUtil.configurationId(checksum());
   }
 
@@ -927,6 +918,17 @@ public class BuildConfigurationValue
       return BuildEventIdUtil.nullConfigurationIdMessage();
     }
     return BuildEventIdUtil.configurationIdMessage(configuration.checksum());
+  }
+
+  public static BuildEventId configurationId(@Nullable BuildConfigurationValue configuration) {
+    if (configuration == null) {
+      return BuildEventIdUtil.nullConfigurationId();
+    }
+    return configuration.getEventId();
+  }
+
+  public static BuildEvent buildEvent(@Nullable BuildConfigurationValue configuration) {
+    return configuration == null ? NullConfiguration.INSTANCE : configuration.toBuildEvent();
   }
 
   public ImmutableSet<String> getReservedActionMnemonics() {

@@ -41,11 +41,12 @@ import net.starlark.java.eval.StarlarkThread;
 /** A collection of global Starlark build API functions that apply to WORKSPACE files. */
 public class WorkspaceGlobals implements WorkspaceGlobalsApi {
 
-  private final boolean allowOverride;
+  private final boolean allowWorkspaceFunction;
   private final ImmutableMap<String, RuleClass> ruleClassMap;
 
-  public WorkspaceGlobals(boolean allowOverride, ImmutableMap<String, RuleClass> ruleClassMap) {
-    this.allowOverride = allowOverride;
+  public WorkspaceGlobals(
+      boolean allowWorkspaceFunction, ImmutableMap<String, RuleClass> ruleClassMap) {
+    this.allowWorkspaceFunction = allowWorkspaceFunction;
     this.ruleClassMap = ruleClassMap;
   }
 
@@ -54,7 +55,7 @@ public class WorkspaceGlobals implements WorkspaceGlobalsApi {
       String name,
       StarlarkThread thread)
       throws EvalException, InterruptedException {
-    if (!allowOverride) {
+    if (!allowWorkspaceFunction) {
       throw Starlark.errorf(
           "workspace() function should be used only at the top of the WORKSPACE file");
     }
@@ -97,9 +98,11 @@ public class WorkspaceGlobals implements WorkspaceGlobalsApi {
 
   private static ImmutableList<TargetPattern> parsePatterns(
       List<String> patterns, Package.Builder builder, StarlarkThread thread) throws EvalException {
-    BazelModuleContext bzlModule =
+    @Nullable // moduleContext is null if we're called directly from a WORKSPACE file.
+    BazelModuleContext moduleContext =
         BazelModuleContext.of(Module.ofInnermostEnclosingStarlarkFunction(thread));
-    RepositoryName myName = getRepositoryName((bzlModule != null ? bzlModule.label() : null));
+    RepositoryName myName =
+        getRepositoryName((moduleContext != null ? moduleContext.label() : null));
     RepositoryMapping renaming = builder.getRepositoryMappingFor(myName);
     TargetPattern.Parser parser =
         new TargetPattern.Parser(PathFragment.EMPTY_FRAGMENT, myName, renaming);
