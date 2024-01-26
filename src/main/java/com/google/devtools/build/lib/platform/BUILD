@@ -123,3 +123,13 @@ java_library(
         "//third_party:jsr305",
     ],
 )
+
+java_library(
+    name = "platform_filtered_spawn_strategy",
+    srcs = ["PlatformFilteredSpawnStrategy.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions:actions",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//third_party:guava",
+    ],
+)

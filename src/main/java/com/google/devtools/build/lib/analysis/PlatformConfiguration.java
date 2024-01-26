@@ -38,9 +38,12 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   private final ImmutableList<String> extraToolchains;
   private final List<Map.Entry<RegexFilter, List<Label>>> targetFilterToAdditionalExecConstraints;
   private final RegexFilter toolchainResolutionDebugRegexFilter;
+  private final boolean requirePlatformScopedStrategies;
+  private final List<Map.Entry<String, List<String>>> allowedStrategiesExecPlatform;
 
   public PlatformConfiguration(BuildOptions buildOptions) {
     PlatformOptions platformOptions = buildOptions.get(PlatformOptions.class);
+    ExecutionOptions executionOptions = buildOptions.get(ExecutionOptions.class);
 
     this.hostPlatform = platformOptions.hostPlatform;
     this.extraExecutionPlatforms = ImmutableList.copyOf(platformOptions.extraExecutionPlatforms);
@@ -49,6 +52,8 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     this.targetFilterToAdditionalExecConstraints =
         platformOptions.targetFilterToAdditionalExecConstraints;
     this.toolchainResolutionDebugRegexFilter = platformOptions.toolchainResolutionDebug;
+    this.requirePlatformScopedStrategies = executionOptions.requirePlatformScopedStrategies;
+    this.allowedStrategiesExecPlatform = executionOptions.allowedStrategiesExecPlatform;
   }
 
   @Override
@@ -136,4 +141,12 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
         .map(Label::getCanonicalForm)
         .anyMatch(this.toolchainResolutionDebugRegexFilter);
   }
+
+  public boolean getRequirePlatformScopedStrategies() {
+    return this.requirePlatformScopedStrategies;
+  }
+
+  // TODO getter for allowedStrategiesExecPlatform
+  // Or perhaps behaviour should be implemented here?
+  // `reportInvalidOptions()` makes the scope of this hard to determine
 }

@@ -17,6 +17,7 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.CpuResourceConverter;
 import com.google.devtools.build.lib.util.OptionsUtils;
 import com.google.devtools.build.lib.util.RamResourceConverter;
@@ -120,6 +121,25 @@ public class ExecutionOptions extends OptionsBase {
               + " --strategy_regexp=Compiling=sandboxed will run 'Compiling //foo/bar/baz' with "
               + "the 'local' strategy, but reversing the order would run it with 'sandboxed'. ")
   public List<Map.Entry<RegexFilter, List<String>>> strategyByRegexp;
+
+  @Option(
+      name = "allowed_strategies_exec_platform",
+      allowMultiple = true,
+      converter = Converters.StringToStringListConverter.class,
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help = "...")
+  // TODO Make key a label type
+  public List<Map.Entry<String, List<String>>> allowedStrategiesExecPlatform;
+
+  @Option(
+      name = "require_platform_scoped_strategies",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help = "...")
+  public boolean requirePlatformScopedStrategies;
 
   @Option(
       name = "materialize_param_files",

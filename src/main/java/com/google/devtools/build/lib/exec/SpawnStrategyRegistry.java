@@ -263,6 +263,7 @@ public final class SpawnStrategyRegistry
     // Using List values here rather than multimaps as there is no need for the latter's
     // functionality: The values are always replaced as a whole, no adding/creation required.
     private final HashMap<String, List<String>> mnemonicToIdentifiers = new HashMap<>();
+    private final HashMap<String, List<String>> execPlatformToIdentifiers = new HashMap<>();
     private final HashMap<String, List<String>> mnemonicToRemoteDynamicIdentifiers =
         new HashMap<>();
     private final HashMap<String, List<String>> mnemonicToLocalDynamicIdentifiers = new HashMap<>();
@@ -300,6 +301,12 @@ public final class SpawnStrategyRegistry
     @CanIgnoreReturnValue
     public Builder addMnemonicFilter(String mnemonic, List<String> identifiers) {
       mnemonicToIdentifiers.put(mnemonic, identifiers);
+      return this;
+    }
+
+    @CanIgnoreReturnValue
+    public Builder addExecPlatformFilter(String execPlatform, List<String> identifiers) {
+      execPlatformToIdentifiers.put(execPlatform, identifiers);
       return this;
     }
 
@@ -491,6 +498,27 @@ public final class SpawnStrategyRegistry
                 identifier, requestName, Joiner.on(", ").join(identifierToStrategy.keySet())),
             Code.STRATEGY_NOT_FOUND);
       }
+
+      // Exec plat filter
+      if (this.execPlatformToIdentifiers.size() > 0) {
+        // 1. Filter to exec platforms which do not allow strategy identifier
+        var forbiddenExecPlatforms = new List<Label>();
+        for (var entry : this.execPlatformToIdentifiers) {
+          if (!entry.getValue().contains(identifier)) {
+            try {
+              var execPlatformLabel = Label.parseCanonical(entry.getKey());
+              forbiddenExecPlatforms.add(execPlatformLabel);
+            } catch (LabelSyntaxException ex) {
+              throw createExitException(
+                "Error parsing platform string",
+                Code.STRATEGY_NOT_FOUND);
+            }
+          }
+        }
+        // 2. Use those for the filter
+        return new PlatformFilteredSpawnStrategy(strategy, forbiddenExecPlatforms)
+      }
+
       return strategy;
     }
 

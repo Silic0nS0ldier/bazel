@@ -132,6 +132,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     targetPatternBuilder.addAll(TargetPatternUtil.toSigned(bzlmodNonRootModuleExecutionPlatforms));
 
     // Expand target patterns.
+    // This is the usable form for us
     ImmutableList<Label> platformLabels;
     try {
       platformLabels =
@@ -143,6 +144,11 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     } catch (TargetPatternUtil.InvalidTargetPatternException e) {
       throw new RegisteredExecutionPlatformsFunctionException(
           new InvalidExecutionPlatformLabelException(e), Transience.PERSISTENT);
+    }
+
+    // run strategies check
+    if (platformConfiguration.getRequirePlatformScopedStrategies()) {
+      // TODO Check that each platform has allowed strategies set
     }
 
     // Load the configured target for each, and get the declared execution platforms providers.

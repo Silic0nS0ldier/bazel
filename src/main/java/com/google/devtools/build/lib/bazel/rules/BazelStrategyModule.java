@@ -90,5 +90,12 @@ public class BazelStrategyModule extends BlazeModule {
     for (Map.Entry<RegexFilter, List<String>> entry : options.strategyByRegexp) {
       registryBuilder.addDescriptionFilter(entry.getKey(), entry.getValue());
     }
+
+    // NOTE Whereas the prior "filters" function as overrides
+    // this actually is a filter.
+    // TODO Should the latter `add*Filter` methods be renamed to clarify their behaviour?
+    for (Map.Entry<String, List<String>> entry : options.allowedStrategiesExecPlatform) {
+      registryBuilder.addExecPlatformFilter(entry.getKey(), entry.getValue());
+    }
   }
 }
