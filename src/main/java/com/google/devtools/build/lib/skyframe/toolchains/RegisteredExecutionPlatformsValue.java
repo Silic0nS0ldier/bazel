@@ -94,5 +94,6 @@ public abstract class RegisteredExecutionPlatformsValue implements SkyValue {
         ImmutableList.copyOf(registeredExecutionPlatformKeys));
   }
 
+  // can get exec platforms from here
   public abstract ImmutableList<ConfiguredTargetKey> registeredExecutionPlatformKeys();
 }

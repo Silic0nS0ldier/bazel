@@ -1530,7 +1530,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
     ErrorSensingEventHandler<Void> nosyEventHandler =
         ErrorSensingEventHandler.withoutPropertyValueTracking(eventHandler);
     topLevelTargetConfig.reportInvalidOptions(nosyEventHandler);
-    if (nosyEventHandler.hasErrors()) {
+    if (nosyEventHandler.hasErrors()) {// _Maybe_ the place to report missing platform allowlists
       throw new InvalidConfigurationException(
           "Build options are invalid", Code.INVALID_BUILD_OPTIONS);
     }

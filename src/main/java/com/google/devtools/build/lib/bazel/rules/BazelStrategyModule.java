@@ -94,7 +94,7 @@ public class BazelStrategyModule extends BlazeModule {
     // NOTE Whereas the prior "filters" function as overrides
     // this actually is a filter.
     // TODO Should the latter `add*Filter` methods be renamed to clarify their behaviour?
-    for (Map.Entry<String, List<String>> entry : options.allowedStrategiesExecPlatform) {
+    for (Map.Entry<Label, List<String>> entry : options.allowedStrategiesByExecPlatform) {
       registryBuilder.addExecPlatformFilter(entry.getKey(), entry.getValue());
     }
   }

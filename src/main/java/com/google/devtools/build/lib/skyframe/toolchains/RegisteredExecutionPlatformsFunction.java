@@ -147,7 +147,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     }
 
     // run strategies check
-    if (platformConfiguration.getRequirePlatformScopedStrategies()) {
+    if (platformConfiguration.getRequireAllowedStrategiesByExecPlatform()) {
       // TODO Check that each platform has allowed strategies set
     }
 
@@ -158,6 +158,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
       return null;
     }
 
+    // Is this hit before or after cli option errors are reported? probably after
     return RegisteredExecutionPlatformsValue.create(registeredExecutionPlatformKeys);
   }
 

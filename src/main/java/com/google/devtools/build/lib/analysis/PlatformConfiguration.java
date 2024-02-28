@@ -38,8 +38,8 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   private final ImmutableList<String> extraToolchains;
   private final List<Map.Entry<RegexFilter, List<Label>>> targetFilterToAdditionalExecConstraints;
   private final RegexFilter toolchainResolutionDebugRegexFilter;
-  private final boolean requirePlatformScopedStrategies;
-  private final List<Map.Entry<String, List<String>>> allowedStrategiesExecPlatform;
+  private final boolean requireAllowedStrategiesByExecPlatform;
+  private final List<Map.Entry<String, List<String>>> allowedStrategiesByExecPlatform;
 
   public PlatformConfiguration(BuildOptions buildOptions) {
     PlatformOptions platformOptions = buildOptions.get(PlatformOptions.class);
@@ -52,8 +52,8 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     this.targetFilterToAdditionalExecConstraints =
         platformOptions.targetFilterToAdditionalExecConstraints;
     this.toolchainResolutionDebugRegexFilter = platformOptions.toolchainResolutionDebug;
-    this.requirePlatformScopedStrategies = executionOptions.requirePlatformScopedStrategies;
-    this.allowedStrategiesExecPlatform = executionOptions.allowedStrategiesExecPlatform;
+    this.requireAllowedStrategiesByExecPlatform = executionOptions.requireAllowedStrategiesByExecPlatform;
+    this.allowedStrategiesByExecPlatform = executionOptions.allowedStrategiesByExecPlatform;
   }
 
   @Override
@@ -142,11 +142,11 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
         .anyMatch(this.toolchainResolutionDebugRegexFilter);
   }
 
-  public boolean getRequirePlatformScopedStrategies() {
-    return this.requirePlatformScopedStrategies;
+  public boolean getRequireAllowedStrategiesByExecPlatform() {
+    return this.requireAllowedStrategiesByExecPlatform;
   }
 
-  // TODO getter for allowedStrategiesExecPlatform
+  // TODO getter for allowedStrategiesByExecPlatform
   // Or perhaps behaviour should be implemented here?
   // `reportInvalidOptions()` makes the scope of this hard to determine
 }

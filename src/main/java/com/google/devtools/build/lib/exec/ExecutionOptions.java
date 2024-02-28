@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.exec;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
@@ -27,6 +28,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.BoolOrEnumConverter;
 import com.google.devtools.common.options.Converters;
 import com.google.devtools.common.options.Converters.CommaSeparatedNonEmptyOptionListConverter;
+import com.google.devtools.common.options.Converters.CommaSeparatedOptionSetConverter;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
@@ -123,23 +125,22 @@ public class ExecutionOptions extends OptionsBase {
   public List<Map.Entry<RegexFilter, List<String>>> strategyByRegexp;
 
   @Option(
-      name = "allowed_strategies_exec_platform",
+      name = "allowed_strategies_by_exec_platform",
       allowMultiple = true,
-      converter = Converters.StringToStringListConverter.class,
+      converter = LabelToCommaSeparatedOptionSetConverter.class,
       defaultValue = "null",
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
       help = "...")
-  // TODO Make key a label type
-  public List<Map.Entry<String, List<String>>> allowedStrategiesExecPlatform;
+  public List<Map.Entry<Label, ImmutableList<String>>> allowedStrategiesByExecPlatform;
 
   @Option(
-      name = "require_platform_scoped_strategies",
+      name = "require_allowed_strategies_by_exec_platform",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
       help = "...")
-  public boolean requirePlatformScopedStrategies;
+  public boolean requireAllowedStrategiesByExecPlatform;
 
   @Option(
       name = "materialize_param_files",
@@ -660,6 +661,34 @@ public class ExecutionOptions extends OptionsBase {
     public ShowSubcommandsConverter() {
       super(
           ShowSubcommands.class, "subcommand option", ShowSubcommands.TRUE, ShowSubcommands.FALSE);
+    }
+  }
+
+  /** Flag converter for assigning a Label to a String. */
+  // TODO This significantly duplicates com.google.devtools.build.lib.analysis.config.CoreOptionConverters.LabelToStringEntryConverter
+  //      Can this be addressed? It might be nice to make converters composable.
+  //      e.g. Have a generic `LabelToConverter<ValueType>`, assuming it can be done and won't lead to behaviour changes.
+  public static class LabelToCommaSeparatedOptionSetConverter implements Converter<Map.Entry<Label, ImmutableList<String>>> {
+    @Override
+    public Map.Entry<Label, String> convert(String input, Object conversionContext)
+        throws OptionsParsingException {
+      // TODO(twigg): This doesn't work well if the labels can themselves have an '='
+      long equalsCount = input.chars().filter(c -> c == '=').count();
+      if (equalsCount != 1 || input.charAt(0) == '=' || input.charAt(input.length() - 1) == '=') {
+        throw new OptionsParsingException(
+            "Variable definitions must be in the form of a 'name=value' assignment. 'name' and"
+                + " 'value' must be non-empty and may not include '='.");
+      }
+      int pos = input.indexOf("=");
+      Label name = convertOptionsLabel(input.substring(0, pos), conversionContext);
+      String valueStr = input.substring(pos + 1);
+      ImmutableList<String> value = CommaSeparatedOptionSetConverter.convert(valueStr);
+      return Maps.immutableEntry(name, value);
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "a 'label=value[,value]' assignment";
     }
   }
 }
