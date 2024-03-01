@@ -149,4 +149,8 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   // TODO getter for allowedStrategiesByExecPlatform
   // Or perhaps behaviour should be implemented here?
   // `reportInvalidOptions()` makes the scope of this hard to determine
+  public List<Map.Entry<String, List<String>>> getAllowedStrategiesByExecPlatform() {
+    // TODO Should make immutable
+    return this.allowedStrategiesByExecPlatform;
+  }
 }

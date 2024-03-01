@@ -149,6 +149,14 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     // run strategies check
     if (platformConfiguration.getRequireAllowedStrategiesByExecPlatform()) {
       // TODO Check that each platform has allowed strategies set
+      var u = platformConfiguration.getAllowedStrategiesByExecPlatform();
+
+      // TODO Loop through `platformLabels` list, collecting every item that is not in `u`
+      // TODO Convert `u` into a set (or similar data structure) for quick existance checks when there are many exec platforms
+      // TODO Include missing platforms in thrown error.
+
+      throw new RegisteredExecutionPlatformsFunctionException(
+        new ExecutionPlatformMissingAllowedStrategies());
     }
 
     // Load the configured target for each, and get the declared execution platforms providers.
@@ -292,6 +300,12 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
               .setMessage(getMessage())
               .setAnalysis(Analysis.newBuilder().setCode(Code.INVALID_EXECUTION_PLATFORM))
               .build());
+    }
+  }
+
+  static final class ExecutionPlatformMissingAllowedStrategies extends Exception {
+    ExecutionPlatformMissingAllowedStrategies() {
+      super("Execution platforms must have allowed spawn strategies declared, but some are missing.")
     }
   }
 
