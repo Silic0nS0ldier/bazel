@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.packages.Attribute.StarlarkComputedDefaultT
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.TriState;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.skydoc.rendering.LabelRenderer;
 import com.google.devtools.build.skydoc.rendering.proto.StardocOutputProtos.AttributeInfo;
 import java.util.HashMap;
@@ -46,10 +47,10 @@ public class RuleDocumentationAttribute
       ImmutableMap.<Type<?>, String>builder()
           .put(Type.BOOLEAN, "Boolean")
           .put(Type.INTEGER, "Integer")
-          .put(Type.INTEGER_LIST, "List of integers")
+          .put(Types.INTEGER_LIST, "List of integers")
           .put(Type.STRING, "String")
-          .put(Type.STRING_DICT, "Dictionary: String -> String")
-          .put(Type.STRING_LIST, "List of strings")
+          .put(Types.STRING_DICT, "Dictionary: String -> String")
+          .put(Types.STRING_LIST, "List of strings")
           .put(BuildType.TRISTATE, "Integer")
           .put(BuildType.LABEL, "<a href=\"${link build-ref#labels}\">Label</a>")
           .put(
@@ -173,9 +174,9 @@ public class RuleDocumentationAttribute
       case STRING:
         return Type.STRING;
       case STRING_LIST:
-        return Type.STRING_LIST;
+        return Types.STRING_LIST;
       case INT_LIST:
-        return Type.INTEGER_LIST;
+        return Types.INTEGER_LIST;
       case LABEL_LIST:
         return BuildType.LABEL_LIST;
       case BOOLEAN:
@@ -183,9 +184,9 @@ public class RuleDocumentationAttribute
       case LABEL_STRING_DICT:
         return BuildType.LABEL_KEYED_STRING_DICT;
       case STRING_DICT:
-        return Type.STRING_DICT;
+        return Types.STRING_DICT;
       case STRING_LIST_DICT:
-        return Type.STRING_LIST_DICT;
+        return Types.STRING_LIST_DICT;
       case OUTPUT:
         return BuildType.OUTPUT;
       case OUTPUT_LIST:
@@ -229,8 +230,8 @@ public class RuleDocumentationAttribute
       // We cannot print anything useful here other than "optional". Let's assume the doc string for
       // the attribute explains the details.
       return null;
-    } else if (value instanceof TriState) {
-      switch ((TriState) value) {
+    } else if (value instanceof TriState triState) {
+      switch (triState) {
         case AUTO:
           return "-1";
         case NO:

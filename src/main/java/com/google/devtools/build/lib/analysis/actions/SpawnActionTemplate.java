@@ -21,7 +21,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionEnvironment;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
-import com.google.devtools.build.lib.actions.ActionKeyCacher;
+import com.google.devtools.build.lib.actions.ActionKeyComputer;
 import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionLookupKey;
 import com.google.devtools.build.lib.actions.ActionOwner;
@@ -36,7 +36,6 @@ import com.google.devtools.build.lib.actions.CommandLineLimits;
 import com.google.devtools.build.lib.actions.CommandLines;
 import com.google.devtools.build.lib.actions.MiddlemanType;
 import com.google.devtools.build.lib.actions.ResourceSetOrBuilder;
-import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.analysis.config.CoreOptions.OutputPathsMode;
@@ -52,7 +51,7 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 /** An {@link ActionTemplate} that expands into {@link SpawnAction}s at execution time. */
-public final class SpawnActionTemplate extends ActionKeyCacher
+public final class SpawnActionTemplate extends ActionKeyComputer
     implements ActionTemplate<SpawnAction> {
   private final SpecialArtifact inputTreeArtifact;
   private final SpecialArtifact outputTreeArtifact;
@@ -441,7 +440,6 @@ public final class SpawnActionTemplate extends ActionKeyCacher
         ActionEnvironment env,
         ImmutableMap<String, String> executionInfo,
         CharSequence progressMessage,
-        RunfilesSupplier runfilesSupplier,
         String mnemonic) {
       super(
           owner,
@@ -453,7 +451,6 @@ public final class SpawnActionTemplate extends ActionKeyCacher
           env,
           executionInfo,
           progressMessage,
-          runfilesSupplier,
           mnemonic,
           /* outputPathsMode= */ OutputPathsMode.OFF);
     }
@@ -480,7 +477,6 @@ public final class SpawnActionTemplate extends ActionKeyCacher
           @Nullable BuildConfigurationValue configuration,
           ImmutableMap<String, String> executionInfo,
           CharSequence progressMessage,
-          RunfilesSupplier runfilesSupplier,
           String mnemonic) {
         return new ExpandedSpawnAction(
             owner,
@@ -492,7 +488,6 @@ public final class SpawnActionTemplate extends ActionKeyCacher
             env,
             executionInfo,
             progressMessage,
-            runfilesSupplier,
             mnemonic);
       }
     }

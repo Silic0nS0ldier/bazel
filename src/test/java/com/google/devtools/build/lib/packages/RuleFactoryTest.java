@@ -137,7 +137,7 @@ public final class RuleFactoryTest extends PackageLoadingTestCase {
     Path myPkgPath = scratch.resolve("/workspace/WORKSPACE");
     Package.Builder pkgBuilder =
         packageFactory.newExternalPackageBuilder(
-            RootedPath.toRootedPath(root, myPkgPath),
+            WorkspaceFileValue.key(RootedPath.toRootedPath(root, myPkgPath)),
             "TESTING",
             RepositoryMapping.ALWAYS_FALLBACK,
             StarlarkSemantics.DEFAULT);
@@ -259,7 +259,7 @@ public final class RuleFactoryTest extends PackageLoadingTestCase {
               Location.fromFile(myPkgPath.toString()),
               /* interiorCallStack= */ null);
       if (TargetUtils.isTestRule(rule)) {
-        assertAttr(ruleClass, "tags", Type.STRING_LIST);
+        assertAttr(ruleClass, "tags", Types.STRING_LIST);
         assertAttr(ruleClass, "size", Type.STRING);
         assertAttr(ruleClass, "flaky", Type.BOOLEAN);
         assertAttr(ruleClass, "shard_count", Type.INTEGER);

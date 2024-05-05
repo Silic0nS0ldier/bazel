@@ -136,6 +136,9 @@ public final class Attribute implements Comparable<Attribute> {
      */
     NONCONFIGURABLE,
 
+    /** True if the "configurable" attribute was user-set. */
+    CONFIGURABLE_ATTR_WAS_USER_SET,
+
     /**
      * Whether we should skip dependency validation checks done by {@link
      * com.google.devtools.build.lib.analysis.RuleContext.PrerequisiteValidator} (for visibility,
@@ -180,22 +183,10 @@ public final class Attribute implements Comparable<Attribute> {
 
     /** Whether this attribute was defined using Starlark's {@code attrs} module. */
     STARLARK_DEFINED,
-  }
 
-  // TODO(bazel-team): modify this interface to extend Predicate and have an extra error
-  // message function like AllowedValues does
-  /** A predicate-like class that determines whether an edge between two rules is valid or not. */
-  public interface ValidityPredicate {
-    /**
-     * This method should return null if the edge is valid, or a suitable error message if it is
-     * not. Note that warnings are not supported.
-     */
-    @Nullable
-    String checkValid(Rule from, String toRuleClass);
+    /** Whether to run the transitive validation actions from this attribute. */
+    SKIP_VALIDATIONS,
   }
-
-  @SerializationConstant
-  public static final ValidityPredicate ANY_EDGE = (from, toRuleClass) -> null;
 
   /** A predicate class to check if the value of the attribute comes from a predefined set. */
   public static class AllowedValueSet implements PredicateWithMessage<Object> {
@@ -253,7 +244,6 @@ public final class Attribute implements Comparable<Attribute> {
     private final RuleClassNamePredicate allowedRuleClassesForLabels;
     private final RuleClassNamePredicate allowedRuleClassesForLabelsWarning;
     private final FileTypeSet allowedFileTypesForLabels;
-    private final ValidityPredicate validityPredicate;
     private final Object value;
     private final AttributeValueSource valueSource;
     private final boolean valueSet;
@@ -272,7 +262,6 @@ public final class Attribute implements Comparable<Attribute> {
         RuleClassNamePredicate allowedRuleClassesForLabels,
         RuleClassNamePredicate allowedRuleClassesForLabelsWarning,
         FileTypeSet allowedFileTypesForLabels,
-        ValidityPredicate validityPredicate,
         AttributeValueSource valueSource,
         boolean valueSet,
         PredicateWithMessage<Object> allowedValues,
@@ -284,7 +273,6 @@ public final class Attribute implements Comparable<Attribute> {
       this.allowedRuleClassesForLabels = allowedRuleClassesForLabels;
       this.allowedRuleClassesForLabelsWarning = allowedRuleClassesForLabelsWarning;
       this.allowedFileTypesForLabels = allowedFileTypesForLabels;
-      this.validityPredicate = validityPredicate;
       this.value = value;
       this.valueSource = valueSource;
       this.valueSet = valueSet;
@@ -300,7 +288,6 @@ public final class Attribute implements Comparable<Attribute> {
               allowedRuleClassesForLabels,
               allowedRuleClassesForLabelsWarning,
               allowedFileTypesForLabels,
-              validityPredicate,
               value,
               valueSource,
               valueSet,
@@ -356,7 +343,6 @@ public final class Attribute implements Comparable<Attribute> {
           allowedRuleClassesForLabels,
           allowedRuleClassesForLabelsWarning,
           allowedFileTypesForLabels,
-          validityPredicate,
           allowedValues,
           requiredProviders,
           aspects);
@@ -380,7 +366,6 @@ public final class Attribute implements Comparable<Attribute> {
           && Objects.equals(
               allowedRuleClassesForLabelsWarning, that.allowedRuleClassesForLabelsWarning)
           && Objects.equals(allowedFileTypesForLabels, that.allowedFileTypesForLabels)
-          && Objects.equals(validityPredicate, that.validityPredicate)
           && Objects.equals(value, that.value)
           && Objects.equals(valueSource, that.valueSource)
           && valueSet == that.valueSet
@@ -414,7 +399,6 @@ public final class Attribute implements Comparable<Attribute> {
     private RuleClassNamePredicate allowedRuleClassesForLabels = ANY_RULE;
     private RuleClassNamePredicate allowedRuleClassesForLabelsWarning = NO_RULE;
     private FileTypeSet allowedFileTypesForLabels;
-    private ValidityPredicate validityPredicate = ANY_EDGE;
     private Object value;
     private String doc;
     private AttributeValueSource valueSource = AttributeValueSource.DIRECT;
@@ -1012,14 +996,6 @@ public final class Attribute implements Comparable<Attribute> {
       return this;
     }
 
-    /** Sets the predicate-like edge validity checker. */
-    @CanIgnoreReturnValue
-    public Builder<TYPE> validityPredicate(ValidityPredicate validityPredicate) {
-      propertyFlags.add(PropertyFlag.STRICT_LABEL_CHECKING);
-      this.validityPredicate = validityPredicate;
-      return this;
-    }
-
     /** The value of the attribute must be one of allowedValues. */
     @CanIgnoreReturnValue
     public Builder<TYPE> allowedValues(PredicateWithMessage<Object> allowedValues) {
@@ -1044,6 +1020,12 @@ public final class Attribute implements Comparable<Attribute> {
     public Builder<TYPE> nonconfigurable(String reason) {
       Preconditions.checkState(!reason.isEmpty());
       return setPropertyFlag(PropertyFlag.NONCONFIGURABLE, "nonconfigurable");
+    }
+
+    @CanIgnoreReturnValue
+    public Builder<TYPE> configurableAttrWasUserSet() {
+      return setPropertyFlag(
+          PropertyFlag.CONFIGURABLE_ATTR_WAS_USER_SET, "configurable_attr_was_user_set");
     }
 
     public Builder<TYPE> tool(String reason) {
@@ -1077,7 +1059,6 @@ public final class Attribute implements Comparable<Attribute> {
           allowedRuleClassesForLabels,
           allowedRuleClassesForLabelsWarning,
           allowedFileTypesForLabels,
-          validityPredicate,
           valueSource,
           valueSet,
           allowedValues,
@@ -1227,12 +1208,11 @@ public final class Attribute implements Comparable<Attribute> {
 
   /**
    * A computed default is a default value for a Rule attribute that is a function of other
-   * attributes of the rule.
+   * attributes of the rule or package.
    *
-   * <p>Attributes whose defaults are computed are first initialized to the default for their type,
-   * and then the computed defaults are evaluated after all non-computed defaults have been
-   * initialized. There is no defined order among computed defaults, so they must not depend on each
-   * other.
+   * <p>Attributes with computed defaults defer their evaluation until after the package is loaded
+   * (and thus all other attributes without computed defaults are determined). There is no defined
+   * order among computed defaults, so they must not depend on each other.
    *
    * <p>If a computed default reads the value of another attribute, at least one of the following
    * must be true:
@@ -1242,12 +1222,15 @@ public final class Attribute implements Comparable<Attribute> {
    *   <li>The other attribute must be non-configurable ({@link Builder#nonconfigurable}
    * </ol>
    *
+   * <p>Note that merely checking if an attribute is explicitly specified does not count as
+   * 'reading' it as, currently, this determination cannot be configuration-dependent.
+   *
    * <p>The reason for enforced declarations is that, since attribute values might be configurable,
-   * a computed default that depends on them may itself take multiple values. Since we have no
-   * access to a target's configuration at the time these values are computed, we need the ability
-   * to probe the default's *complete* dependency space. Declared dependencies allow us to do so
-   * sanely. Non-configurable attributes don't have this problem because their value is fixed and
-   * known even without configuration information.
+   * a computed default that depends on them may itself take multiple values. As we have no access
+   * to a target's configuration at the time these values are computed, we need the ability to probe
+   * the default's *complete* dependency space. Declared dependencies allow us to do so sanely.
+   * Non-configurable attributes don't have this problem because their value is fixed and known even
+   * without configuration information.
    *
    * <p>Implementations of this interface must be immutable.
    */
@@ -1326,7 +1309,7 @@ public final class Attribute implements Comparable<Attribute> {
      * you are doing.
      */
     public boolean resolvableWithRawAttributes() {
-      return false;
+      return dependencies.isEmpty();
     }
 
     /**
@@ -1813,12 +1796,6 @@ public final class Attribute implements Comparable<Attribute> {
    */
   private final FileTypeSet allowedFileTypesForLabels;
 
-  /**
-   * This predicate-like object checks if the edge between two rules using this attribute is valid
-   * in the dependency graph. Returns null if valid, otherwise an error message.
-   */
-  private final ValidityPredicate validityPredicate;
-
   private final PredicateWithMessage<Object> allowedValues;
 
   private final RequiredProviders requiredProviders;
@@ -1849,7 +1826,6 @@ public final class Attribute implements Comparable<Attribute> {
       RuleClassNamePredicate allowedRuleClassesForLabels,
       RuleClassNamePredicate allowedRuleClassesForLabelsWarning,
       FileTypeSet allowedFileTypesForLabels,
-      ValidityPredicate validityPredicate,
       PredicateWithMessage<Object> allowedValues,
       RequiredProviders requiredProviders,
       AspectsList aspects) {
@@ -1871,7 +1847,6 @@ public final class Attribute implements Comparable<Attribute> {
     this.allowedRuleClassesForLabels = allowedRuleClassesForLabels;
     this.allowedRuleClassesForLabelsWarning = allowedRuleClassesForLabelsWarning;
     this.allowedFileTypesForLabels = allowedFileTypesForLabels;
-    this.validityPredicate = validityPredicate;
     this.allowedValues = allowedValues;
     this.requiredProviders = requiredProviders;
     this.aspects = aspects;
@@ -1886,7 +1861,6 @@ public final class Attribute implements Comparable<Attribute> {
             allowedRuleClassesForLabels,
             allowedRuleClassesForLabelsWarning,
             allowedFileTypesForLabels,
-            validityPredicate,
             allowedValues,
             requiredProviders,
             aspects);
@@ -1942,6 +1916,10 @@ public final class Attribute implements Comparable<Attribute> {
   /** Returns true if this label type parameter is checked by silent ruleclass filtering. */
   public boolean isSilentRuleClassFilter() {
     return getPropertyFlag(PropertyFlag.SILENT_RULECLASS_FILTER);
+  }
+
+  public boolean skipValidations() {
+    return getPropertyFlag(PropertyFlag.SKIP_VALIDATIONS);
   }
 
   /** Returns true if this label type parameter skips the analysis time filetype check. */
@@ -2038,6 +2016,11 @@ public final class Attribute implements Comparable<Attribute> {
         && !getPropertyFlag(PropertyFlag.NONCONFIGURABLE);
   }
 
+  /** Returns true if the "configurable" attribute parameter was user-set */
+  public boolean configurableAttrWasUserSet() {
+    return getPropertyFlag(PropertyFlag.CONFIGURABLE_ATTR_WAS_USER_SET);
+  }
+
   /**
    * Returns true if this attribute is used as a tool dependency, either because the attribute
    * declares it directly (with {@link Attribute.Builder#tool}), or because the value's {@link
@@ -2103,10 +2086,6 @@ public final class Attribute implements Comparable<Attribute> {
 
   public FileTypeSet getAllowedFileTypesPredicate() {
     return allowedFileTypesForLabels;
-  }
-
-  public ValidityPredicate getValidityPredicate() {
-    return validityPredicate;
   }
 
   public PredicateWithMessage<Object> getAllowedValues() {
@@ -2265,10 +2244,6 @@ public final class Attribute implements Comparable<Attribute> {
         "attribute `%s`: can't override allowed files",
         name);
     failIf(
-        validityPredicate != Attribute.ANY_EDGE,
-        "attribute `%s`: can't override allowed files",
-        name);
-    failIf(
         !requiredProviders.acceptsAny(), "attribute `%s`: can't override required providers", name);
     failIf(
         !propertyFlags.equals(
@@ -2307,7 +2282,6 @@ public final class Attribute implements Comparable<Attribute> {
         && Objects.equals(
             allowedRuleClassesForLabelsWarning, attribute.allowedRuleClassesForLabelsWarning)
         && Objects.equals(allowedFileTypesForLabels, attribute.allowedFileTypesForLabels)
-        && Objects.equals(validityPredicate, attribute.validityPredicate)
         && Objects.equals(allowedValues, attribute.allowedValues)
         && Objects.equals(requiredProviders, attribute.requiredProviders)
         && Objects.equals(aspects, attribute.aspects);
@@ -2327,7 +2301,6 @@ public final class Attribute implements Comparable<Attribute> {
     builder.allowedRuleClassesForLabels = allowedRuleClassesForLabels;
     builder.allowedRuleClassesForLabelsWarning = allowedRuleClassesForLabelsWarning;
     builder.requiredProvidersBuilder = requiredProviders.copyAsBuilder();
-    builder.validityPredicate = validityPredicate;
     builder.transitionFactory = transitionFactory;
     builder.propertyFlags = newEnumSet(propertyFlags, PropertyFlag.class);
     builder.value = defaultValue;

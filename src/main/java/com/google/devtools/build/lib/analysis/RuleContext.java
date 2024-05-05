@@ -25,6 +25,7 @@ import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
+import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
@@ -79,12 +80,13 @@ import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.StarlarkAspectClass;
 import com.google.devtools.build.lib.packages.StarlarkProviderWrapper;
-import com.google.devtools.build.lib.packages.SymbolGenerator;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
+import com.google.devtools.build.lib.skyframe.IncrementalArtifactConflictFinder;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OrderedSetMultimap;
@@ -106,6 +108,7 @@ import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkThread;
+import net.starlark.java.eval.SymbolGenerator;
 import net.starlark.java.syntax.Identifier;
 import net.starlark.java.syntax.Location;
 
@@ -192,6 +195,8 @@ public class RuleContext extends TargetContext
    */
   @Nullable private StarlarkRuleContext starlarkRuleContext;
 
+  private final Supplier<IncrementalArtifactConflictFinder> conflictFinder;
+
   /** The constructor is intentionally package private to be only used by {@link AspectContext}. */
   RuleContext(
       Builder builder,
@@ -211,7 +216,7 @@ public class RuleContext extends TargetContext
     this.attributes = attributes;
     this.features = computeFeatures();
     this.ruleClassNameForLogging = builder.getRuleClassNameForLogging();
-    this.actionOwnerSymbolGenerator = new SymbolGenerator<>(builder.actionOwnerSymbol);
+    this.actionOwnerSymbolGenerator = SymbolGenerator.create(builder.actionOwnerSymbol);
     this.reporter = builder.reporter;
     this.toolchainContexts = builder.toolchainContexts;
     this.execGroupCollection = execGroupCollection;
@@ -220,6 +225,7 @@ public class RuleContext extends TargetContext
         builder.transitivePackagesForRunfileRepoMappingManifest;
     this.starlarkThread = createStarlarkThread(builder.mutability); // uses above state
     this.prerequisitesCollection = prerequisitesCollection;
+    this.conflictFinder = builder.conflictFinder;
   }
 
   static RuleContext create(
@@ -250,8 +256,8 @@ public class RuleContext extends TargetContext
   private FeatureSet computeFeatures() {
     FeatureSet pkg = rule.getPackage().getPackageArgs().features();
     FeatureSet rule =
-        attributes().has("features", Type.STRING_LIST)
-            ? FeatureSet.parse(attributes().get("features", Type.STRING_LIST))
+        attributes().has("features", Types.STRING_LIST)
+            ? FeatureSet.parse(attributes().get("features", Types.STRING_LIST))
             : FeatureSet.EMPTY;
     return FeatureSet.mergeWithGlobalFeatures(
         FeatureSet.merge(pkg, rule), getConfiguration().getDefaultFeatures());
@@ -1014,9 +1020,14 @@ public class RuleContext extends TargetContext
 
   private StarlarkThread createStarlarkThread(Mutability mutability) {
     AnalysisEnvironment env = getAnalysisEnvironment();
-    StarlarkThread thread = new StarlarkThread(mutability, env.getStarlarkSemantics());
+    StarlarkThread thread =
+        StarlarkThread.create(
+            mutability,
+            env.getStarlarkSemantics(),
+            /* contextDescription= */ "",
+            getSymbolGenerator());
     thread.setPrintHandler(Event.makeDebugPrintHandler(env.getEventHandler()));
-    new BazelRuleAnalysisThreadContext(getSymbolGenerator(), this).storeInThread(thread);
+    new BazelRuleAnalysisThreadContext(this).storeInThread(thread);
     return thread;
   }
 
@@ -1077,6 +1088,16 @@ public class RuleContext extends TargetContext
     } catch (EvalException e) {
       throw throwWithRuleError(e.getMessageWithStack());
     }
+  }
+
+  /**
+   * Returns the conflict finder if {@link
+   * com.google.devtools.build.lib.skyframe.ConflictCheckingMode#UPON_CONFIGURED_OBJECT_CREATION}
+   * and null otherwise.
+   */
+  @Nullable
+  public IncrementalArtifactConflictFinder getConflictFinder() {
+    return conflictFinder.get();
   }
 
   /**
@@ -1449,34 +1470,6 @@ public class RuleContext extends TargetContext
   }
 
   /**
-   * Returns true if {@code label} is visible from {@code prerequisite}.
-   *
-   * <p>This only computes the logic as implemented by the visibility system. The final decision
-   * whether a dependency is allowed is made by {@link PrerequisiteValidator}.
-   */
-  public static boolean isVisible(Label label, TransitiveInfoCollection prerequisite) {
-    // Check visibility attribute
-    for (PackageGroupContents specification :
-        prerequisite.getProvider(VisibilityProvider.class).getVisibility().toList()) {
-      if (specification.containsPackage(label.getPackageIdentifier())) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Returns true if {@code rule} is visible from {@code prerequisite}.
-   *
-   * <p>This only computes the logic as implemented by the visibility system. The final decision
-   * whether a dependency is allowed is made by {@link PrerequisiteValidator}.
-   */
-  public static boolean isVisible(Rule rule, TransitiveInfoCollection prerequisite) {
-    return isVisible(rule.getLabel(), prerequisite);
-  }
-
-  /**
    * @return the set of features applicable for the current rule.
    */
   public ImmutableSet<String> getFeatures() {
@@ -1525,6 +1518,8 @@ public class RuleContext extends TargetContext
     private ToolchainCollection<ResolvedToolchainContext> toolchainContexts;
     private ExecGroupCollection.Builder execGroupCollectionBuilder;
     private ImmutableMap<String, String> rawExecProperties;
+
+    private Supplier<IncrementalArtifactConflictFinder> conflictFinder = () -> null;
     @Nullable private RequiredConfigFragmentsProvider requiredConfigFragments;
     @Nullable private NestedSet<Package> transitivePackagesForRunfileRepoMappingManifest;
 
@@ -1591,11 +1586,12 @@ public class RuleContext extends TargetContext
         ExecGroupCollection.Builder execGroupCollectionBuilder, AttributeMap attributes)
         throws InvalidExecGroupException {
       if (rawExecProperties == null) {
-        if (!attributes.has(RuleClass.EXEC_PROPERTIES_ATTR, Type.STRING_DICT)) {
+        if (!attributes.has(RuleClass.EXEC_PROPERTIES_ATTR, Types.STRING_DICT)) {
           rawExecProperties = ImmutableMap.of();
         } else {
           rawExecProperties =
-              ImmutableMap.copyOf(attributes.get(RuleClass.EXEC_PROPERTIES_ATTR, Type.STRING_DICT));
+              ImmutableMap.copyOf(
+                  attributes.get(RuleClass.EXEC_PROPERTIES_ATTR, Types.STRING_DICT));
         }
       }
 
@@ -1612,10 +1608,10 @@ public class RuleContext extends TargetContext
 
         // TODO(adonovan): define in terms of Starlark.len?
         boolean isEmpty = false;
-        if (attributeValue instanceof List) {
-          isEmpty = ((List<?>) attributeValue).isEmpty();
-        } else if (attributeValue instanceof Map) {
-          isEmpty = ((Map<?, ?>) attributeValue).isEmpty();
+        if (attributeValue instanceof List<?> list) {
+          isEmpty = list.isEmpty();
+        } else if (attributeValue instanceof Map<?, ?> map) {
+          isEmpty = map.isEmpty();
         }
         if (isEmpty) {
           reporter.attributeError(attr.getName(), "attribute must be non empty");
@@ -1731,6 +1727,12 @@ public class RuleContext extends TargetContext
       return this;
     }
 
+    @CanIgnoreReturnValue
+    public Builder setConflictFinder(Supplier<IncrementalArtifactConflictFinder> conflictFinder) {
+      this.conflictFinder = conflictFinder;
+      return this;
+    }
+
     /**
      * Filter only attribute-based prerequisites, validate them and return them in a map from {@link
      * DependencyKind} to list of configured targets.
@@ -1827,11 +1829,6 @@ public class RuleContext extends TargetContext
         ConfiguredTargetAndData prerequisite, Attribute attribute) {
       String ruleClass = prerequisite.getRuleClass();
       if (!ruleClass.isEmpty()) {
-        String reason =
-            attribute.getValidityPredicate().checkValid(target.getAssociatedRule(), ruleClass);
-        if (reason != null) {
-          reportBadPrerequisite(attribute, prerequisite, reason, false);
-        }
         validateRuleDependency(prerequisite, attribute);
         return;
       }
@@ -1899,23 +1896,8 @@ public class RuleContext extends TargetContext
       return reporter;
     }
 
-    boolean separateAspectDeps() {
-      return env.getStarlarkSemantics().getBool(BuildLanguageOptions.SEPARATE_ASPECT_DEPS);
-    }
-
     public BuildConfigurationValue getConfiguration() {
       return configuration;
-    }
-
-    /**
-     * @return true if {@code rule} is visible from {@code prerequisite}.
-     *     <p>This only computes the logic as implemented by the visibility system. The final
-     *     decision whether a dependency is allowed is made by {@link PrerequisiteValidator}, who is
-     *     supposed to call this method to determine whether a dependency is allowed as per
-     *     visibility rules.
-     */
-    public boolean isVisible(TransitiveInfoCollection prerequisite) {
-      return RuleContext.isVisible(target.getAssociatedRule(), prerequisite);
     }
 
     @Nullable

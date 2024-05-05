@@ -15,8 +15,10 @@ package com.google.devtools.build.lib.bazel;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.google.common.eventbus.Subscribe;
 import com.google.common.primitives.Booleans;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.buildtool.buildevent.BuildCompleteEvent;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.exec.CompactSpawnLogContext;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
@@ -40,10 +42,17 @@ import javax.annotation.Nullable;
 
 /** Module providing on-demand spawn logging. */
 public final class SpawnLogModule extends BlazeModule {
+  private static final String EXEC_LOG_FILENAME = "execution_log.binpb.zstd";
+
   @Nullable private SpawnLogContext spawnLogContext;
+  @Nullable private Path outputPath;
+
+  @Nullable private AbruptExitException abruptExit = null;
 
   private void clear() {
     spawnLogContext = null;
+    outputPath = null;
+    abruptExit = null;
   }
 
   private void initOutputs(CommandEnvironment env) throws IOException {
@@ -88,15 +97,21 @@ public final class SpawnLogModule extends BlazeModule {
     Path outputBase = env.getOutputBase();
 
     if (executionOptions.executionLogCompactFile != null) {
-      spawnLogContext =
-          new CompactSpawnLogContext(
-              workingDirectory.getRelative(executionOptions.executionLogCompactFile),
-              env.getExecRoot().asFragment(),
-              env.getOptions().getOptions(RemoteOptions.class),
-              env.getRuntime().getFileSystem().getDigestFunction(),
-              env.getXattrProvider());
+      outputPath = workingDirectory.getRelative(executionOptions.executionLogCompactFile);
+
+      try {
+        spawnLogContext =
+            new CompactSpawnLogContext(
+                outputPath,
+                env.getExecRoot().asFragment(),
+                env.getOptions().getOptions(RemoteOptions.class),
+                env.getRuntime().getFileSystem().getDigestFunction(),
+                env.getXattrProvider());
+      } catch (InterruptedException e) {
+        env.getReporter()
+            .handle(Event.error("Error while setting up the execution log: " + e.getMessage()));
+      }
     } else {
-      Path outputPath = null;
       Encoding encoding = null;
 
       if (executionOptions.executionLogBinaryFile != null) {
@@ -109,7 +124,7 @@ public final class SpawnLogModule extends BlazeModule {
 
       // Use a well-known temporary path to avoid accumulation of potentially large files in /tmp
       // due to abnormally terminated invocations (e.g., when running out of memory).
-      Path tempPath = outputBase.getRelative("execution.log");
+      Path tempPath = outputBase.getRelative(EXEC_LOG_FILENAME);
 
       spawnLogContext =
           new ExpandedSpawnLogContext(
@@ -149,24 +164,34 @@ public final class SpawnLogModule extends BlazeModule {
           .exit(
               new AbruptExitException(
                   createDetailedExitCode(
-                      "Error initializing execution log",
+                      String.format("Error initializing execution log: %s", e.getMessage()),
                       Code.EXECUTION_LOG_INITIALIZATION_FAILURE)));
     }
   }
 
-  @Override
-  public void afterCommand() throws AbruptExitException {
+  @Subscribe
+  public void buildComplete(BuildCompleteEvent event) {
+    // The log must be finalized in buildComplete() instead of afterCommand(), because it's our
+    // last chance to publish it to the build event protocol.
+
     if (spawnLogContext == null) {
       // No logging requested.
+      clear();
       return;
     }
 
     try {
       spawnLogContext.close();
+      if (spawnLogContext.shouldPublish()) {
+        event.getResult().getBuildToolLogCollection().addLocalFile(EXEC_LOG_FILENAME, outputPath);
+      }
     } catch (IOException e) {
-      String message = e.getMessage() == null ? "Error writing execution log" : e.getMessage();
-      throw new AbruptExitException(
-          createDetailedExitCode(message, Code.EXECUTION_LOG_WRITE_FAILURE), e);
+      abruptExit =
+          new AbruptExitException(
+              createDetailedExitCode(
+                  String.format("Error writing execution log: %s", e.getMessage()),
+                  Code.EXECUTION_LOG_WRITE_FAILURE),
+              e);
     } finally {
       clear();
     }
@@ -178,5 +203,12 @@ public final class SpawnLogModule extends BlazeModule {
             .setMessage(message)
             .setExecution(Execution.newBuilder().setCode(detailedCode))
             .build());
+  }
+
+  @Override
+  public void afterCommand() throws AbruptExitException {
+    if (abruptExit != null) {
+      throw abruptExit;
+    }
   }
 }

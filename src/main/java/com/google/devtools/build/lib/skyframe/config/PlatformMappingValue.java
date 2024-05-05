@@ -16,12 +16,12 @@ package com.google.devtools.build.lib.skyframe.config;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
-import com.google.auto.value.AutoValue;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -30,7 +30,6 @@ import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.cmdline.RepositoryMapping;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.skyframe.serialization.VisibleForSerialization;
@@ -39,7 +38,6 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
-import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
 import com.google.devtools.common.options.OptionsParsingResult;
 import java.util.List;
@@ -83,10 +81,15 @@ public final class PlatformMappingValue implements SkyValue {
       }
     }
 
-    @AutoCodec.Instantiator
-    @VisibleForSerialization
-    static Key create(PathFragment workspaceRelativeMappingPath, boolean wasExplicitlySetByUser) {
+    private static Key create(
+        PathFragment workspaceRelativeMappingPath, boolean wasExplicitlySetByUser) {
       return interner.intern(new Key(workspaceRelativeMappingPath, wasExplicitlySetByUser));
+    }
+
+    @VisibleForSerialization
+    @AutoCodec.Interner
+    static Key intern(Key key) {
+      return interner.intern(key);
     }
 
     private final PathFragment path;
@@ -144,11 +147,10 @@ public final class PlatformMappingValue implements SkyValue {
   }
 
   private final ImmutableMap<Label, NativeAndStarlarkFlags> platformsToFlags;
-  private final ImmutableMap<ImmutableSet<String>, Label> flagsToPlatforms;
+  private final ImmutableMap<NativeAndStarlarkFlags, Label> flagsToPlatforms;
   private final ImmutableSet<Class<? extends FragmentOptions>> optionsClasses;
   private final LoadingCache<NativeAndStarlarkFlags, OptionsParsingResult> parserCache;
   private final LoadingCache<BuildOptions, BuildOptions> mappingCache;
-  private final RepositoryMapping mainRepositoryMapping;
 
   /**
    * Creates a new mapping value which will match on the given platforms (if a target platform is
@@ -159,21 +161,18 @@ public final class PlatformMappingValue implements SkyValue {
    * @param flagsToPlatforms mapping from a set of command line style flags to a target platform
    *     that should be set if the flags match the mapped options
    * @param optionsClasses default options classes that should be used for options parsing
-   * @param mainRepositoryMapping the main repo mapping used to parse label-valued options
    */
   PlatformMappingValue(
       ImmutableMap<Label, NativeAndStarlarkFlags> platformsToFlags,
-      ImmutableMap<ImmutableSet<String>, Label> flagsToPlatforms,
-      ImmutableSet<Class<? extends FragmentOptions>> optionsClasses,
-      RepositoryMapping mainRepositoryMapping) {
+      ImmutableMap<NativeAndStarlarkFlags, Label> flagsToPlatforms,
+      ImmutableSet<Class<? extends FragmentOptions>> optionsClasses) {
     this.platformsToFlags = checkNotNull(platformsToFlags);
     this.flagsToPlatforms = checkNotNull(flagsToPlatforms);
     this.optionsClasses = checkNotNull(optionsClasses);
-    this.mainRepositoryMapping = checkNotNull(mainRepositoryMapping);
     this.parserCache =
         Caffeine.newBuilder()
             .initialCapacity(platformsToFlags.size() + flagsToPlatforms.size())
-            .build(flags -> parse(flags, this.mainRepositoryMapping));
+            .build(NativeAndStarlarkFlags::parse);
     this.mappingCache = Caffeine.newBuilder().weakKeys().build(this::computeMapping);
   }
 
@@ -201,7 +200,8 @@ public final class PlatformMappingValue implements SkyValue {
     try {
       return mappingCache.get(original);
     } catch (CompletionException e) {
-      Throwables.propagateIfPossible(e.getCause(), OptionsParsingException.class);
+      throwIfInstanceOf(e.getCause(), OptionsParsingException.class);
+      throwIfUnchecked(e.getCause());
       throw e;
     }
   }
@@ -234,13 +234,12 @@ public final class PlatformMappingValue implements SkyValue {
           originalOptions.applyParsingResult(parseWithCache(platformsToFlags.get(targetPlatform)));
     } else {
       boolean mappingFound = false;
-      for (Map.Entry<ImmutableSet<String>, Label> flagsToPlatform : flagsToPlatforms.entrySet()) {
-        if (originalOptions.matches(
-            parseWithCache(
-                NativeAndStarlarkFlags.create(flagsToPlatform.getKey(), ImmutableMap.of())))) {
+      for (Map.Entry<NativeAndStarlarkFlags, Label> flagsToPlatform : flagsToPlatforms.entrySet()) {
+        NativeAndStarlarkFlags flags = flagsToPlatform.getKey();
+        Label platformLabel = flagsToPlatform.getValue();
+        if (originalOptions.matches(parseWithCache(flags))) {
           modifiedOptions = originalOptions.clone();
-          modifiedOptions.get(PlatformOptions.class).platforms =
-              ImmutableList.of(flagsToPlatform.getValue());
+          modifiedOptions.get(PlatformOptions.class).platforms = ImmutableList.of(platformLabel);
           mappingFound = true;
           break;
         }
@@ -261,23 +260,10 @@ public final class PlatformMappingValue implements SkyValue {
     try {
       return parserCache.get(args);
     } catch (CompletionException e) {
-      Throwables.propagateIfPossible(e.getCause(), OptionsParsingException.class);
+      throwIfInstanceOf(e.getCause(), OptionsParsingException.class);
+      throwIfUnchecked(e.getCause());
       throw e;
     }
-  }
-
-  private OptionsParsingResult parse(NativeAndStarlarkFlags args, RepositoryMapping mainRepoMapping)
-      throws OptionsParsingException {
-    OptionsParser parser =
-        OptionsParser.builder()
-            .optionsClasses(optionsClasses)
-            // We need the ability to re-map internal options in the mappings file.
-            .ignoreInternalOptions(false)
-            .withConversionContext(mainRepoMapping)
-            .build();
-    parser.parse(args.nativeFlags().asList());
-    parser.setStarlarkOptions(args.starlarkFlags());
-    return parser;
   }
 
   @Override
@@ -285,10 +271,9 @@ public final class PlatformMappingValue implements SkyValue {
     if (this == obj) {
       return true;
     }
-    if (!(obj instanceof PlatformMappingValue)) {
+    if (!(obj instanceof PlatformMappingValue that)) {
       return false;
     }
-    PlatformMappingValue that = (PlatformMappingValue) obj;
     return this.flagsToPlatforms.equals(that.flagsToPlatforms)
         && this.platformsToFlags.equals(that.platformsToFlags)
         && this.optionsClasses.equals(that.optionsClasses);
@@ -306,23 +291,5 @@ public final class PlatformMappingValue implements SkyValue {
         .add("platformsToFlags", platformsToFlags)
         .add("optionsClasses", optionsClasses)
         .toString();
-  }
-
-  /**
-   * Container for storing a {@code platform -> flags} native and Starlark flag settings in separate
-   * buckets.
-   *
-   * <p>This is necessary because native and Starlark flags are parsed with different logic.
-   */
-  @AutoValue
-  abstract static class NativeAndStarlarkFlags {
-    abstract ImmutableSet<String> nativeFlags();
-
-    abstract ImmutableMap<String, Object> starlarkFlags();
-
-    static NativeAndStarlarkFlags create(
-        ImmutableSet<String> nativeFlags, ImmutableMap<String, Object> starlarkFlags) {
-      return new AutoValue_PlatformMappingValue_NativeAndStarlarkFlags(nativeFlags, starlarkFlags);
-    }
   }
 }

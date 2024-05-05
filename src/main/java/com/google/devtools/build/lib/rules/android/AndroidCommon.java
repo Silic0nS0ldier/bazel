@@ -33,7 +33,6 @@ import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector.InstrumentationSpec;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.collect.IterablesChain;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
@@ -43,7 +42,6 @@ import com.google.devtools.build.lib.packages.BuiltinProvider;
 import com.google.devtools.build.lib.packages.Info;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
-import com.google.devtools.build.lib.packages.SymbolGenerator;
 import com.google.devtools.build.lib.packages.TriState;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.android.ZipFilterBuilder.CheckHashMismatchMode;
@@ -74,6 +72,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
+import net.starlark.java.eval.SymbolGenerator;
 
 /**
  * A helper class for android rules.
@@ -100,16 +99,19 @@ public class AndroidCommon {
   private static final ResourceSet DEX_RESOURCE_SET =
       ResourceSet.createWithRamCpu(/* memoryMb= */ 4096.0, /* cpu= */ DEX_THREADS);
 
-  public static final <T extends Info> Iterable<T> getTransitivePrerequisites(
+  static <T extends Info> Iterable<T> getTransitivePrerequisites(
       RuleContext ruleContext, BuiltinProvider<T> key) {
-    IterablesChain.Builder<T> builder = IterablesChain.builder();
+    ImmutableList.Builder<List<T>> builder = ImmutableList.builder();
     AttributeMap attributes = ruleContext.attributes();
     for (String attr : TRANSITIVE_ATTRIBUTES) {
       if (attributes.has(attr, BuildType.LABEL_LIST)) {
-        builder.add(ruleContext.getPrerequisites(attr, key));
+        List<T> prereqs = ruleContext.getPrerequisites(attr, key);
+        if (!prereqs.isEmpty()) {
+          builder.add(prereqs);
+        }
       }
     }
-    return builder.build();
+    return Iterables.concat(builder.build());
   }
 
   private final RuleContext ruleContext;
@@ -857,7 +859,8 @@ public class AndroidCommon {
     CcLinkingContext ccLinkingContext =
         CcLinkingContext.builder()
             .setOwner(label)
-            .addUserLinkFlags(ImmutableList.of(LinkOptions.of(linkOpts, symbolGenerator)))
+            .addUserLinkFlags(
+                ImmutableList.of(LinkOptions.of(linkOpts, symbolGenerator.generate())))
             .build();
 
     CcInfo linkoptsCcInfo = CcInfo.builder().setCcLinkingContext(ccLinkingContext).build();

@@ -11,16 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 package com.google.devtools.build.lib.packages.semantics;
 
 import static com.google.common.truth.Truth.assertThat;
 
-import com.google.common.collect.ImmutableClassToInstanceMap;
-import com.google.devtools.build.lib.skyframe.serialization.DeserializationContext;
 import com.google.devtools.build.lib.skyframe.serialization.DynamicCodec;
-import com.google.devtools.build.lib.skyframe.serialization.SerializationContext;
+import com.google.devtools.build.lib.skyframe.serialization.ImmutableDeserializationContext;
+import com.google.devtools.build.lib.skyframe.serialization.ObjectCodecs;
 import com.google.devtools.build.lib.skyframe.serialization.testutils.TestUtils;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParser;
@@ -87,12 +85,10 @@ public class ConsistencyTest {
       StarlarkSemantics deserialized =
           (StarlarkSemantics)
               TestUtils.fromBytes(
-                  new DeserializationContext(ImmutableClassToInstanceMap.of()),
+                  new ImmutableDeserializationContext(),
                   codec,
                   TestUtils.toBytes(
-                      new SerializationContext(ImmutableClassToInstanceMap.of()),
-                      codec,
-                      semantics));
+                      new ObjectCodecs().getSerializationContextForTesting(), codec, semantics));
       assertThat(deserialized).isEqualTo(semantics);
     }
   }
@@ -150,7 +146,6 @@ public class ConsistencyTest {
         "--incompatible_no_package_distribs=" + rand.nextBoolean(),
         "--incompatible_no_rule_outputs_param=" + rand.nextBoolean(),
         "--incompatible_run_shell_command_string=" + rand.nextBoolean(),
-        "--incompatible_struct_has_no_methods=" + rand.nextBoolean(),
         "--incompatible_require_linker_input_cc_api=" + rand.nextBoolean(),
         "--incompatible_use_cc_configure_from_rules_cc=" + rand.nextBoolean(),
         "--incompatible_unambiguous_label_stringification=" + rand.nextBoolean(),
@@ -200,7 +195,6 @@ public class ConsistencyTest {
         .setBool(BuildLanguageOptions.INCOMPATIBLE_NO_PACKAGE_DISTRIBS, rand.nextBoolean())
         .setBool(BuildLanguageOptions.INCOMPATIBLE_NO_RULE_OUTPUTS_PARAM, rand.nextBoolean())
         .setBool(BuildLanguageOptions.INCOMPATIBLE_RUN_SHELL_COMMAND_STRING, rand.nextBoolean())
-        .setBool(BuildLanguageOptions.INCOMPATIBLE_STRUCT_HAS_NO_METHODS, rand.nextBoolean())
         .setBool(BuildLanguageOptions.INCOMPATIBLE_REQUIRE_LINKER_INPUT_CC_API, rand.nextBoolean())
         .setBool(
             BuildLanguageOptions.INCOMPATIBLE_USE_CC_CONFIGURE_FROM_RULES_CC, rand.nextBoolean())

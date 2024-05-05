@@ -13,7 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.android;
 
-import static com.google.devtools.build.lib.packages.Attribute.ANY_EDGE;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
@@ -21,6 +20,7 @@ import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.analysis.config.ExecutionTransitionFactory;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.StarlarkProviderIdentifier;
@@ -53,8 +53,7 @@ public class AarImportBaseRule implements RuleDefinition {
         .add(
             attr("exports", LABEL_LIST)
                 .allowedRuleClasses("aar_import", "java_import")
-                .allowedFileTypes()
-                .validityPredicate(ANY_EDGE))
+                .allowedFileTypes())
         /* <!-- #BLAZE_RULE(aar_import).ATTRIBUTE(srcjar) -->
         A JAR file that contains source code for the compiled JAR files in the AAR.
         <!-- #END_BLAZE_RULE.ATTRIBUTE --> */
@@ -92,6 +91,18 @@ public class AarImportBaseRule implements RuleDefinition {
                 .cfg(ExecutionTransitionFactory.createFactory())
                 .exec()
                 .value(env.getToolsLabel("//tools/zip:zipper")))
+        .add(
+            attr("$constraint_arm64", LABEL)
+                .value(Label.parseCanonicalUnchecked("@platforms//cpu:arm64")))
+        .add(
+            attr("$constraint_armv7", LABEL)
+                .value(Label.parseCanonicalUnchecked("@platforms//cpu:armv7")))
+        .add(
+            attr("$constraint_x86", LABEL)
+                .value(Label.parseCanonicalUnchecked("@platforms//cpu:x86_32")))
+        .add(
+            attr("$constraint_x86_64", LABEL)
+                .value(Label.parseCanonicalUnchecked("@platforms//cpu:x86_64")))
         .advertiseStarlarkProvider(StarlarkProviderIdentifier.forKey(JavaInfo.PROVIDER.getKey()))
         .requiresConfigurationFragments(AndroidConfiguration.class, JavaConfiguration.class)
         .build();

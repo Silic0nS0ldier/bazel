@@ -21,9 +21,9 @@ import com.google.common.base.Joiner;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandAction;
+import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.util.ScratchAttributeWriter;
 import com.google.devtools.build.lib.packages.util.MockObjcSupport;
-import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -41,17 +41,20 @@ public class AppleToolchainSelectionTest extends ObjcRuleTestCase {
     addAppleBinaryStarlarkRule(scratch);
     scratch.file(
         "a/BUILD",
-        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
-        "apple_binary_starlark(",
-        "    name = 'bin',",
-        "    platform_type = 'ios',",
-        "    deps = ['//b:lib'],",
-        ")");
+        """
+        load("//test_starlark:apple_binary_starlark.bzl", "apple_binary_starlark")
+
+        apple_binary_starlark(
+            name = "bin",
+            platform_type = "ios",
+            deps = ["//b:lib"],
+        )
+        """);
     Action lipoAction = actionProducingArtifact("//a:bin", "_lipobin");
     Artifact binArtifact = lipoAction.getInputs().getSingleton();
-    CppLinkAction linkAction = (CppLinkAction) getGeneratingAction(binArtifact);
-    CppLinkAction ccArchiveAction =
-        (CppLinkAction)
+    SpawnAction linkAction = (SpawnAction) getGeneratingAction(binArtifact);
+    SpawnAction ccArchiveAction =
+        (SpawnAction)
             getGeneratingAction(getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
     Artifact ccObjectFile = getFirstArtifactEndingWith(ccArchiveAction.getInputs(), ".o");
     CommandAction ccCompileAction = (CommandAction) getGeneratingAction(ccObjectFile);
@@ -68,21 +71,24 @@ public class AppleToolchainSelectionTest extends ObjcRuleTestCase {
     addAppleBinaryStarlarkRule(scratch);
     scratch.file(
         "a/BUILD",
-        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
-        "apple_binary_starlark(",
-        "    name = 'bin',",
-        "    platform_type = 'ios',",
-        "    deps = ['//b:lib'],",
-        ")");
+        """
+        load("//test_starlark:apple_binary_starlark.bzl", "apple_binary_starlark")
+
+        apple_binary_starlark(
+            name = "bin",
+            platform_type = "ios",
+            deps = ["//b:lib"],
+        )
+        """);
     Action lipoAction = actionProducingArtifact("//a:bin", "_lipobin");
     Artifact binArtifact =
         lipoAction.getInputs().toList().stream()
             .filter(artifact -> artifact.getPath().toString().contains("armv7"))
             .findAny()
             .get();
-    CppLinkAction linkAction = (CppLinkAction) getGeneratingAction(binArtifact);
-    CppLinkAction ccArchiveAction =
-        (CppLinkAction)
+    SpawnAction linkAction = (SpawnAction) getGeneratingAction(binArtifact);
+    SpawnAction ccArchiveAction =
+        (SpawnAction)
             getGeneratingAction(getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
     Artifact ccObjectFile = getFirstArtifactEndingWith(ccArchiveAction.getInputs(), ".o");
     CommandAction ccCompileAction = (CommandAction) getGeneratingAction(ccObjectFile);
@@ -98,21 +104,25 @@ public class AppleToolchainSelectionTest extends ObjcRuleTestCase {
     addAppleBinaryStarlarkRule(scratch);
     scratch.file(
         "a/BUILD",
-        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
-        "apple_binary_starlark(",
-        "    name = 'bin',",
-        "    platform_type = 'ios',",
-        "    deps = ['//b:lib'],",
-        ")");
+        """
+        load("//test_starlark:apple_binary_starlark.bzl", "apple_binary_starlark")
+
+        apple_binary_starlark(
+            name = "bin",
+            platform_type = "ios",
+            deps = ["//b:lib"],
+        )
+        """);
     Action lipoAction = actionProducingArtifact("//a:bin", "_lipobin");
     Artifact binArtifact =
         lipoAction.getInputs().toList().stream()
             .filter(artifact -> artifact.getPath().toString().contains("arm64"))
             .findAny()
             .get();
-    CppLinkAction linkAction = (CppLinkAction) getGeneratingAction(binArtifact);
-    CppLinkAction objcLibArchiveAction = (CppLinkAction) getGeneratingAction(
-        getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
+    SpawnAction linkAction = (SpawnAction) getGeneratingAction(binArtifact);
+    SpawnAction objcLibArchiveAction =
+        (SpawnAction)
+            getGeneratingAction(getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
     assertThat(Joiner.on(" ").join(objcLibArchiveAction.getArguments())).contains("ios_arm64");
   }
 
@@ -127,16 +137,20 @@ public class AppleToolchainSelectionTest extends ObjcRuleTestCase {
     addAppleBinaryStarlarkRule(scratch);
     scratch.file(
         "a/BUILD",
-        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
-        "apple_binary_starlark(",
-        "    name = 'bin',",
-        "    platform_type = 'watchos',",
-        "    deps = ['//b:lib'],",
-        ")");
+        """
+        load("//test_starlark:apple_binary_starlark.bzl", "apple_binary_starlark")
+
+        apple_binary_starlark(
+            name = "bin",
+            platform_type = "watchos",
+            deps = ["//b:lib"],
+        )
+        """);
 
     CommandAction linkAction = linkAction("//a:bin");
-    CppLinkAction objcLibCompileAction = (CppLinkAction) getGeneratingAction(
-        getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
+    SpawnAction objcLibCompileAction =
+        (SpawnAction)
+            getGeneratingAction(getFirstArtifactEndingWith(linkAction.getInputs(), "liblib.a"));
     assertThat(Joiner.on(" ").join(objcLibCompileAction.getArguments())).contains("watchos_armv7k");
   }
 }

@@ -179,6 +179,7 @@ public class ContainingPackageLookupFunctionTest extends FoundationTestCase {
     RepositoryDelegatorFunction.REPOSITORY_OVERRIDES.set(differencer, ImmutableMap.of());
     RepositoryDelegatorFunction.FORCE_FETCH.set(
         differencer, RepositoryDelegatorFunction.FORCE_FETCH_DISABLED);
+    RepositoryDelegatorFunction.DISABLE_NATIVE_REPO_RULES.set(differencer, false);
     RepositoryDelegatorFunction.VENDOR_DIRECTORY.set(differencer, Optional.empty());
 
     RepositoryDelegatorFunction.RESOLVED_FILE_INSTEAD_OF_WORKSPACE.set(
@@ -275,18 +276,26 @@ public class ContainingPackageLookupFunctionTest extends FoundationTestCase {
     ContainingPackageLookupValue valueA2 = ContainingPackageLookupValue.NONE;
     ContainingPackageLookupValue valueB1 =
         ContainingPackageLookupValue.withContainingPackage(
-            PackageIdentifier.createInMainRepo("b"), Root.fromPath(rootDirectory));
+            PackageIdentifier.createInMainRepo("b"),
+            Root.fromPath(rootDirectory),
+            /* hasProjectFile= */ false);
     ContainingPackageLookupValue valueB2 =
         ContainingPackageLookupValue.withContainingPackage(
-            PackageIdentifier.createInMainRepo("b"), Root.fromPath(rootDirectory));
+            PackageIdentifier.createInMainRepo("b"),
+            Root.fromPath(rootDirectory),
+            /* hasProjectFile= */ false);
     PackageIdentifier cFrag = PackageIdentifier.createInMainRepo("c");
     ContainingPackageLookupValue valueC1 =
-        ContainingPackageLookupValue.withContainingPackage(cFrag, Root.fromPath(rootDirectory));
+        ContainingPackageLookupValue.withContainingPackage(
+            cFrag, Root.fromPath(rootDirectory), /* hasProjectFile= */ false);
     ContainingPackageLookupValue valueC2 =
-        ContainingPackageLookupValue.withContainingPackage(cFrag, Root.fromPath(rootDirectory));
+        ContainingPackageLookupValue.withContainingPackage(
+            cFrag, Root.fromPath(rootDirectory), /* hasProjectFile= */ false);
     ContainingPackageLookupValue valueCOther =
         ContainingPackageLookupValue.withContainingPackage(
-            cFrag, Root.fromPath(rootDirectory.getRelative("other_root")));
+            cFrag,
+            Root.fromPath(rootDirectory.getRelative("other_root")),
+            /* hasProjectFile= */ false);
     new EqualsTester()
         .addEqualityGroup(valueA1, valueA2)
         .addEqualityGroup(valueB1, valueB2)

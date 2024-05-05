@@ -38,6 +38,7 @@ import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.authandtls.credentialhelper.CredentialHelperEnvironment;
 import com.google.devtools.build.lib.authandtls.credentialhelper.CredentialModule;
+import com.google.devtools.build.lib.authandtls.credentialhelper.GetCredentialsResponse;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.exec.BinTools;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
@@ -249,6 +250,12 @@ public final class RemoteModuleTest {
       // Remote downloader uses Remote Asset API, and Bazel doesn't have any capability requirement
       // on the endpoint. Expecting the request count is 0.
       assertThat(cacheCapabilitiesImpl.getRequestCount()).isEqualTo(0);
+
+      // Retrieve the execution capabilities so that the asynchronous task that eagerly requests
+      // them doesn't leak and accidentally interfere with other test cases.
+      assertThat(remoteModule.getActionContextProvider().getRemoteCache().getCacheCapabilities())
+          .isEqualTo(EXEC_AND_CACHE_CAPS.getCacheCapabilities());
+
       assertCircuitBreakerInstance();
     } finally {
       executionServer.shutdownNow();
@@ -393,8 +400,7 @@ public final class RemoteModuleTest {
     Scratch scratch = new Scratch(fileSystem);
     scratch.file(netrc, "machine foo.example.org login baruser password barpass");
     AuthAndTLSOptions authAndTLSOptions = Options.getDefaults(AuthAndTLSOptions.class);
-    Cache<URI, ImmutableMap<String, ImmutableList<String>>> credentialCache =
-        Caffeine.newBuilder().build();
+    Cache<URI, GetCredentialsResponse> credentialCache = Caffeine.newBuilder().build();
 
     Credentials credentials =
         RemoteModule.createCredentials(

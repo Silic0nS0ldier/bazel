@@ -2,6 +2,7 @@
 
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("//src:build_defs.bzl", "transition_java_language_8_archive")
 load("//src:release_archive.bzl", "release_archive")
 load(":embedded_tools.bzl", "srcsfile")
 load(":rule_size_test.bzl", "rule_size_test")
@@ -293,6 +294,7 @@ genrule(
     executable = 1,
     output_to_bindir = 1,
     visibility = [
+        "//:__pkg__",  # For distribution archive lockfile generation
         "//scripts:__pkg__",  # For bash completion generation
         "//scripts/packages:__pkg__",  # For installer generation
         "//src/java:__subpackages__",  # For command line reference generation
@@ -397,7 +399,6 @@ genrule(
         "//src/main/java/com/google/devtools/build/lib/packages/metrics:dist_jars",
         "//src/main/java/com/google/devtools/build/lib/skyframe/proto:dist_jars",
         "//src/main/java/com/google/devtools/build/lib/starlarkdebug/proto:dist_jars",
-        "//src/main/java/com/google/devtools/build/skydoc/rendering/proto:dist_jars",
         "//src/main/java/com/google/devtools/build/skyframe:dist_jars",
         "@googleapis//:dist_jars",
         "@remoteapis//:dist_jars",
@@ -487,6 +488,12 @@ release_archive(
     ],
 )
 
+transition_java_language_8_archive(
+    name = "java_tools_java8.zip",
+    archive_zip = ":java_tools.zip",
+    visibility = ["//src/test/shell/bazel:__pkg__"],
+)
+
 release_archive(
     name = "turbine_direct_graal_zip",
     srcs = ["//src/java_tools/buildjar/java/com/google/devtools/build/java/turbine:turbine_direct_graal"],
@@ -506,6 +513,12 @@ release_archive(
         "//src/tools/singlejar:singlejar_deploy_zip",
         "//third_party/ijar:ijar_deploy_zip",
     ],
+)
+
+transition_java_language_8_archive(
+    name = "java_tools_prebuilt_java8.zip",
+    archive_zip = ":java_tools_prebuilt.zip",
+    visibility = ["//src/test/shell/bazel:__pkg__"],
 )
 
 # Following targets used by the java_tools_binaries Buildkite pipeline to upload
@@ -567,6 +580,12 @@ release_archive(
     ],
 )
 
+JDK_VERSIONS = [
+    "11",
+    "17",
+    "21",
+]
+
 filegroup(
     name = "test_repos",
     srcs = [
@@ -580,11 +599,6 @@ filegroup(
         "@remote_java_tools_darwin_x86_64//:java_tools/src/tools/singlejar/singlejar_local",
         "@remote_java_tools_linux//:java_tools/src/tools/singlejar/singlejar_local",
         "@remote_java_tools_windows//:java_tools/src/tools/singlejar/singlejar_local.exe",
-        "@remotejdk11_linux//:WORKSPACE",
-        "@remotejdk11_linux_aarch64//:WORKSPACE",
-        "@remotejdk11_macos//:WORKSPACE",
-        "@remotejdk11_macos_aarch64//:WORKSPACE",
-        "@remotejdk11_win//:WORKSPACE",
         "@rules_cc//:LICENSE",
         "@rules_java//:WORKSPACE",
         "@rules_license//:WORKSPACE",
@@ -592,11 +606,13 @@ filegroup(
         "@rules_proto//proto:defs",
         "@rules_python//:WORKSPACE",
         "@rules_testing//:LICENSE",
-    ] + [
-        "@remotejdk%s_%s//:WORKSPACE" % (version, os)
-        for version in ("17", "21")
-        for os in ("macos", "macos_aarch64", "linux", "win")
-    ] + [
+    ] + select({
+        "//src/conditions:linux_x86_64": ["@remotejdk%s_linux//:WORKSPACE" % v for v in JDK_VERSIONS],
+        "//src/conditions:darwin_x86_64": ["@remotejdk%s_macos//:WORKSPACE" % v for v in JDK_VERSIONS],
+        "//src/conditions:darwin_arm64": ["@remotejdk%s_macos_aarch64//:WORKSPACE" % v for v in JDK_VERSIONS],
+        "//src/conditions:windows_x86_64": ["@remotejdk%s_win//:WORKSPACE" % v for v in JDK_VERSIONS],
+        "//conditions:default": [],
+    }) + [
         "@bazel_tools_repo_cache//:files",
         "@workspace_repo_cache//:files",
     ],

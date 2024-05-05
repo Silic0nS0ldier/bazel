@@ -25,6 +25,8 @@ class BazelWorkspaceTest(test_base.TestBase):
     self.DisableBzlmod()
 
   def testWorkspaceDotBazelFileInMainRepo(self):
+    # Make sure no existing MODULE.bazel file.
+    os.remove("MODULE.bazel")
     workspace_dot_bazel = self.ScratchFile("WORKSPACE.bazel")
     self.ScratchFile("BUILD", [
         "py_binary(",
@@ -58,7 +60,15 @@ class BazelWorkspaceTest(test_base.TestBase):
     # Test WORKSPACE.bazel takes priority over WORKSPACE
     self.ScratchFile("B/WORKSPACE")
     workspace_dot_bazel = self.ScratchFile(
-        "B/WORKSPACE.bazel", ["local_repository(name = 'A', path='../A')"])
+        "B/WORKSPACE.bazel",
+        [
+            (
+                'load("@bazel_tools//tools/build_defs/repo:local.bzl",'
+                ' "local_repository")'
+            ),
+            "local_repository(name = 'A', path='../A')",
+        ],
+    )
     self.ScratchFile("B/bin.py")
     self.ScratchFile("B/BUILD", [
         "py_binary(",
@@ -78,8 +88,16 @@ class BazelWorkspaceTest(test_base.TestBase):
     self.assertIn("no such package '@@A//'", "".join(stderr))
 
     # Test a WORKSPACE.bazel directory won't confuse Bazel
-    self.ScratchFile("B/WORKSPACE",
-                     ["local_repository(name = 'A', path='../A')"])
+    self.ScratchFile(
+        "B/WORKSPACE",
+        [
+            (
+                'load("@bazel_tools//tools/build_defs/repo:local.bzl",'
+                ' "local_repository")'
+            ),
+            "local_repository(name = 'A', path='../A')",
+        ],
+    )
     self.ScratchDir("B/WORKSPACE.bazel")
     self.RunBazel(args=["build", ":bin"], cwd=work_dir)
 

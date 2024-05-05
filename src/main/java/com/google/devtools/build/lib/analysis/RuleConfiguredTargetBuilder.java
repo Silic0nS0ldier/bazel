@@ -20,9 +20,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
+import com.google.devtools.build.lib.actions.ActionConflictException;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.analysis.constraints.ConstraintSemantics;
@@ -258,6 +258,12 @@ public final class RuleConfiguredTargetBuilder {
       ruleContext.ruleError(e.getMessage());
       return null;
     }
+
+    if (ruleContext.getConflictFinder() != null) {
+      for (ActionAnalysisMetadata action : actions) {
+        ruleContext.getConflictFinder().conflictCheckPerAction(action);
+      }
+    }
     return new RuleConfiguredTarget(ruleContext, providers, actions);
   }
 
@@ -378,7 +384,8 @@ public final class RuleConfiguredTargetBuilder {
       // not fail the overall build, since those dependencies should have their own builds
       // and tests that should surface any failing validations.
       Attribute attribute = ruleContext.attributes().getAttributeDefinition(attributeName);
-      if (!attribute.isToolDependency()
+      if (!attribute.skipValidations()
+          && !attribute.isToolDependency()
           && !attribute.isImplicit()
           && attribute.getType().getLabelClass() == LabelClass.DEPENDENCY) {
 
@@ -469,7 +476,6 @@ public final class RuleConfiguredTargetBuilder {
             .addTools(additionalTestActionTools.build())
             .setExecutionRequirements(
                 (ExecutionInfo) providersBuilder.getProvider(ExecutionInfo.PROVIDER.getKey()))
-            .setShardCount(explicitShardCount)
             .build();
     return new TestProvider(testParams);
   }

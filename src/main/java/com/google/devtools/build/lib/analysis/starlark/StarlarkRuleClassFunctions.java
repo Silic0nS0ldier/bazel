@@ -28,7 +28,7 @@ import static com.google.devtools.build.lib.packages.BuiltinRestriction.allowlis
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.packages.Type.STRING;
-import static com.google.devtools.build.lib.packages.Type.STRING_LIST;
+import static com.google.devtools.build.lib.packages.Types.STRING_LIST;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
@@ -59,6 +59,7 @@ import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.packages.AllowlistChecker;
+import com.google.devtools.build.lib.packages.AllowlistChecker.LocationCheck;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Attribute.StarlarkComputedDefaultTemplate;
 import com.google.devtools.build.lib.packages.AttributeTransitionData;
@@ -78,7 +79,6 @@ import com.google.devtools.build.lib.packages.LabelConverter;
 import com.google.devtools.build.lib.packages.MacroClass;
 import com.google.devtools.build.lib.packages.MacroInstance;
 import com.google.devtools.build.lib.packages.Package;
-import com.google.devtools.build.lib.packages.Package.NameConflictException;
 import com.google.devtools.build.lib.packages.PredicateWithMessage;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
@@ -93,8 +93,10 @@ import com.google.devtools.build.lib.packages.StarlarkDefinedAspect;
 import com.google.devtools.build.lib.packages.StarlarkExportable;
 import com.google.devtools.build.lib.packages.StarlarkProvider;
 import com.google.devtools.build.lib.packages.StarlarkProviderIdentifier;
+import com.google.devtools.build.lib.packages.TargetDefinitionContext.NameConflictException;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import com.google.devtools.build.lib.starlarkbuildapi.StarlarkRuleFunctionsApi;
@@ -125,6 +127,7 @@ import net.starlark.java.syntax.Location;
 
 /** A helper class to provide an easier API for Starlark rule definitions. */
 public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
+
   // A cache for base rule classes (especially tests).
   private static final LoadingCache<String, Label> labelCache =
       Caffeine.newBuilder().build(Label::parseCanonical);
@@ -141,7 +144,7 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
                   .allowedFileTypes(FileTypeSet.NO_FILE)
                   .mandatoryProviders(ImmutableList.of(TemplateVariableInfo.PROVIDER.id()))
                   .dontCheckConstraints())
-          .add(attr(RuleClass.EXEC_PROPERTIES_ATTR, Type.STRING_DICT).value(ImmutableMap.of()))
+          .add(attr(RuleClass.EXEC_PROPERTIES_ATTR, Types.STRING_DICT).value(ImmutableMap.of()))
           .add(
               attr(RuleClass.EXEC_COMPATIBLE_WITH_ATTR, BuildType.LABEL_LIST)
                   .allowedFileTypes()
@@ -293,16 +296,15 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
               Dict.cast(fields, String.class, String.class, "fields"), Starlark::trimDocString));
     }
     if (init == Starlark.NONE) {
-      return builder.build();
-    } else {
-      if (init instanceof StarlarkCallable) {
-        builder.setInit((StarlarkCallable) init);
-      } else {
-        throw Starlark.errorf("got %s for init, want callable value", Starlark.type(init));
-      }
-      StarlarkProvider provider = builder.build();
-      return Tuple.of(provider, provider.createRawConstructor());
+      return builder.buildWithIdentityToken(thread.getNextIdentityToken());
     }
+    if (init instanceof StarlarkCallable callable) {
+      builder.setInit(callable);
+    } else {
+      throw Starlark.errorf("got %s for init, want callable value", Starlark.type(init));
+    }
+    StarlarkProvider provider = builder.buildWithIdentityToken(thread.getNextIdentityToken());
+    return Tuple.of(provider, provider.createRawConstructor());
   }
 
   @FormatMethod
@@ -314,7 +316,8 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
   }
 
   @Override
-  public StarlarkCallable macro(StarlarkFunction implementation, StarlarkThread thread)
+  public StarlarkCallable macro(
+      StarlarkFunction implementation, Dict<?, ?> attrs, Object doc, StarlarkThread thread)
       throws EvalException {
     // Ordinarily we would use StarlarkMethod#enableOnlyWithFlag, but this doesn't work for
     // top-level symbols (due to StarlarkGlobalsImpl relying on the Starlark#addMethods overload
@@ -326,7 +329,28 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
     }
 
     MacroClass.Builder builder = new MacroClass.Builder(implementation);
-    return new MacroFunction(builder);
+    builder.addAttribute(RuleClass.NAME_ATTRIBUTE);
+    for (Map.Entry<String, Descriptor> descriptorEntry :
+        Dict.cast(attrs, String.class, Descriptor.class, "attrs").entrySet()) {
+      String attrName = descriptorEntry.getKey();
+      Descriptor descriptor = descriptorEntry.getValue();
+
+      if (MacroClass.RESERVED_MACRO_ATTR_NAMES.contains(attrName)) {
+        throw Starlark.errorf("Cannot declare a macro attribute named '%s'", attrName);
+      }
+
+      if (!descriptor.getValueSource().equals(AttributeValueSource.DIRECT)) {
+        throw Starlark.errorf(
+            "In macro attribute '%s': Macros do not support computed defaults or late-bound"
+                + " defaults",
+            attrName);
+      }
+
+      Attribute attr = descriptor.build(attrName);
+      builder.addAttribute(attr);
+    }
+    return new MacroFunction(
+        builder, Starlark.toJavaOptional(doc, String.class).map(Starlark::trimDocString));
   }
 
   // TODO(bazel-team): implement attribute copy and other rule properties
@@ -575,6 +599,29 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
 
       Attribute attr = descriptor.build(name);
 
+      // "configurable" may only be user-set for symbolic macros, not rules.
+      if (attr.configurableAttrWasUserSet()) {
+        throw Starlark.errorf(
+            "attribute '%s' has the 'configurable' argument set, which is not allowed in rule"
+                + " definitions",
+            name);
+      }
+      if (attr.skipValidations()) {
+        // This is mitigation for internal Blaze builds, and not planned to be a Bazel feature,
+        // and therefore has no extendable allowlists.
+        if (!builder.contains("$allowlist_skip_validations")) {
+          Attribute.Builder<Label> allowlistAttr =
+              attr("$allowlist_skip_validations", LABEL)
+                  .cfg(ExecutionTransitionFactory.createFactory())
+                  .mandatoryBuiltinProviders(ImmutableList.of(PackageSpecificationProvider.class))
+                  .value(
+                      Label.parseCanonicalUnchecked(
+                          "//tools/allowlists/skip_validations_allowlist"));
+          builder.add(allowlistAttr);
+          builder.addAllowlistChecker(SKIP_VALIDATIONS_ALLOWLIST_CHECKER);
+        }
+      }
+
       hasStarlarkDefinedTransition |= attr.hasStarlarkDefinedTransition();
       if (attr.hasAnalysisTestTransition()) {
         if (!builder.isAnalysisTest()) {
@@ -666,16 +713,12 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
 
     TransitionFactory<RuleTransitionData> transitionFactory = null;
     if (!cfg.equals(Starlark.NONE)) {
-      if (cfg instanceof StarlarkDefinedConfigTransition) {
+      if (cfg instanceof StarlarkDefinedConfigTransition starlarkDefinedConfigTransition) {
         // defined in Starlark via, cfg = transition
-        StarlarkDefinedConfigTransition starlarkDefinedConfigTransition =
-            (StarlarkDefinedConfigTransition) cfg;
         transitionFactory = new StarlarkRuleTransitionProvider(starlarkDefinedConfigTransition);
         hasStarlarkDefinedTransition = true;
-      } else if (cfg instanceof StarlarkExposedRuleTransitionFactory) {
+      } else if (cfg instanceof StarlarkExposedRuleTransitionFactory transition) {
         // only used for native Android transitions (platforms and feature flags)
-        StarlarkExposedRuleTransitionFactory transition =
-            (StarlarkExposedRuleTransitionFactory) cfg;
         transition.addToStarlarkRule(ruleDefinitionEnvironment, builder);
         transitionFactory = transition;
       } else {
@@ -868,6 +911,14 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
       boolean hasDefault = nameDescriptorPair.second.hasDefault();
       Attribute attribute = nameDescriptorPair.second.build(nameDescriptorPair.first);
 
+      // "configurable" may only be user-set for symbolic macros, not aspects.
+      if (attribute.configurableAttrWasUserSet()) {
+        throw Starlark.errorf(
+            "attribute '%s' has the 'configurable' argument set, which is not allowed in aspect"
+                + " definitions",
+            nativeName);
+      }
+
       if (!Attribute.isImplicit(nativeName) && !Attribute.isLateBound(nativeName)) {
         if (attribute.getType() == Type.STRING) {
           // isValueSet() is always true for attr.string as default value is "" by default.
@@ -1010,13 +1061,36 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
     // Initially null, then non-null once exported.
     @Nullable private MacroClass macroClass = null;
 
-    public MacroFunction(MacroClass.Builder builder) {
+    // Initially null, then non-null once exported.
+    @Nullable private Label starlarkLabel;
+
+    @Nullable private final String documentation;
+
+    public MacroFunction(MacroClass.Builder builder, Optional<String> documentation) {
       this.builder = builder;
+      this.documentation = documentation.orElse(null);
     }
 
     @Override
     public String getName() {
       return macroClass != null ? macroClass.getName() : "unexported macro";
+    }
+
+    /**
+     * Returns the value of the doc parameter passed to {@code macro()} in Starlark, or an empty
+     * Optional if a doc string was not provided.
+     */
+    public Optional<String> getDocumentation() {
+      return Optional.ofNullable(documentation);
+    }
+
+    /**
+     * Returns the label of the .bzl module where macro() was called, or null if the rule has not
+     * been exported yet.
+     */
+    @Nullable
+    public Label getExtensionLabel() {
+      return starlarkLabel;
     }
 
     // TODO(#19922): Define getDocumentation() and interaction with ModuleInfoExtractor, analogous
@@ -1026,9 +1100,12 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
     public Object call(StarlarkThread thread, Tuple args, Dict<String, Object> kwargs)
         throws EvalException, InterruptedException {
       BazelStarlarkContext.checkLoadingPhase(thread, getName());
-      Package.Builder pkgBuilder = thread.getThreadLocal(Package.Builder.class);
+      Package.Builder pkgBuilder = Package.Builder.fromOrNull(thread);
       if (pkgBuilder == null) {
-        throw new EvalException(
+        throw Starlark.errorf(
+            // TODO: #19922 - Clarify error. Maybe we weren't called during .bzl loading but at some
+            // other bad time. Also, it's ambiguous to the user whether, strictly speaking,
+            // evaluating a symbolic macro happens while evaluating a BUILD file.
             "Cannot instantiate a macro when loading a .bzl file. "
                 + "Macros may only be instantiated while evaluating a BUILD file.");
       }
@@ -1043,32 +1120,35 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
         throw Starlark.errorf("unexpected positional arguments");
       }
 
-      Object nameUnchecked = kwargs.get("name");
-      if (nameUnchecked == null) {
-        throw Starlark.errorf("macro requires a `name` attribute");
-      }
-      if (!(nameUnchecked instanceof String)) {
-        throw Starlark.errorf(
-            "Expected a String for attribute 'name'; got %s",
-            nameUnchecked.getClass().getSimpleName());
-      }
-      String instanceName = (String) nameUnchecked;
+      MacroInstance macroInstance = macroClass.instantiateAndAddMacro(pkgBuilder, kwargs);
 
-      MacroInstance macroInstance = new MacroInstance(macroClass, instanceName);
-      try {
-        pkgBuilder.addMacro(macroInstance);
-      } catch (NameConflictException e) {
-        throw new EvalException(e);
-      }
+      // TODO: #19922 - Instead of evaluating macros synchronously with their declaration, evaluate
+      // them lazily as the targets they declare are requested. But this would mean that targets
+      // declared in a symbolic macro are invisible to native.existing_rules() calls in a legacy
+      // macro. Therefore, this is blocked on either changing the semantics of existing_rules() or
+      // deprecating it entirely.
+      MacroClass.executeMacroImplementation(macroInstance, pkgBuilder, thread.getSemantics());
+
       return Starlark.NONE;
     }
 
+    /** Export a MacroFunction from a Starlark file with a given name. */
     @Override
-    public void export(EventHandler handler, Label label, String exportedName) {
+    public void export(EventHandler handler, Label starlarkLabel, String exportedName) {
       checkState(builder != null && macroClass == null);
       builder.setName(exportedName);
       this.macroClass = builder.build();
       this.builder = null;
+      this.starlarkLabel = starlarkLabel;
+    }
+
+    /**
+     * Returns an exported macro's MacroClass (representing its schema and implementation function),
+     * or null if the macro has not been exported yet.
+     */
+    @Nullable
+    public MacroClass getMacroClass() {
+      return macroClass;
     }
 
     @Override
@@ -1172,9 +1252,10 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
       if (ruleClass == null) {
         throw new EvalException("Invalid rule class hasn't been exported by a bzl file");
       }
-      Package.Builder pkgBuilder = thread.getThreadLocal(Package.Builder.class);
+      Package.Builder pkgBuilder = Package.Builder.fromOrNull(thread);
       if (pkgBuilder == null) {
         throw new EvalException(
+            // TODO: #19922 - Clarify message. See analogous TODO for macros, above.
             "Cannot instantiate a rule when loading a .bzl file. "
                 + "Rules may be instantiated only in a BUILD thread.");
       }
@@ -1408,6 +1489,14 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
           .setAllowlistAttr("extend_rule")
           .setErrorMessage("Non-allowlisted attempt to extend a rule.")
           .setLocationCheck(AllowlistChecker.LocationCheck.DEFINITION)
+          .build();
+
+  @SerializationConstant
+  static final AllowlistChecker SKIP_VALIDATIONS_ALLOWLIST_CHECKER =
+      AllowlistChecker.builder()
+          .setAllowlistAttr("skip_validations")
+          .setErrorMessage("Non-allowlisted use of skip_validations")
+          .setLocationCheck(LocationCheck.DEFINITION)
           .build();
 
   @Override

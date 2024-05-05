@@ -305,6 +305,10 @@ py_test(
     size = "medium",
     srcs = ["bzlmod/bazel_fetch_test.py"],
     data = ["//tools/build_defs/repo:http_src"],
+    shard_count = 5,
+    tags = [
+        "requires-network",
+    ],
     deps = [
         ":bzlmod_test_utils",
         ":test_base",
@@ -408,5 +412,21 @@ py_test(
     deps = [
         ":bzlmod_test_utils",
         ":test_base",
+    ],
+)
+
+py_test(
+    name = "external_repo_completion_test",
+    size = "large",
+    srcs = ["bzlmod/external_repo_completion_test.py"],
+    data = ["//scripts:bash_completion"],
+    tags = [
+        "no_windows",  # //scripts:bash_completion does not build on Windows
+        "requires-network",
+    ],
+    deps = [
+        ":bzlmod_test_utils",
+        ":test_base",
+        requirement("bazel-runfiles"),
     ],
 )

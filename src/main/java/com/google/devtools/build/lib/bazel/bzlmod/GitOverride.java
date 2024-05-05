@@ -18,7 +18,6 @@ package com.google.devtools.build.lib.bazel.bzlmod;
 import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.bazel.bzlmod.BazelModuleInspectorValue.AugmentedModule.ResolutionReason;
-import com.google.devtools.build.lib.cmdline.RepositoryName;
 
 /** Specifies that a module should be retrieved from a Git repository. */
 @AutoValue
@@ -26,12 +25,13 @@ public abstract class GitOverride implements NonRegistryOverride {
   public static GitOverride create(
       String remote,
       String commit,
-      ImmutableList<String> patches,
+      ImmutableList<Object> patches,
       ImmutableList<String> patchCmds,
       int patchStrip,
-      boolean initSubmodules) {
+      boolean initSubmodules,
+      String stripPrefix) {
     return new AutoValue_GitOverride(
-        remote, commit, patches, patchCmds, patchStrip, initSubmodules);
+        remote, commit, patches, patchCmds, patchStrip, initSubmodules, stripPrefix);
   }
 
   /** The URL pointing to the git repository. */
@@ -40,8 +40,8 @@ public abstract class GitOverride implements NonRegistryOverride {
   /** The commit hash to use. */
   public abstract String getCommit();
 
-  /** The patches to apply after fetching from Git. Should be a list of labels. */
-  public abstract ImmutableList<String> getPatches();
+  /** The labels of patches to apply after fetching from Git. */
+  public abstract ImmutableList<Object> getPatches();
 
   /** The patch commands to execute after fetching from Git. Should be a list of commands. */
   public abstract ImmutableList<String> getPatchCmds();
@@ -52,19 +52,21 @@ public abstract class GitOverride implements NonRegistryOverride {
   /** Whether submodules in the fetched repo should be recursively initialized. */
   public abstract boolean getInitSubmodules();
 
+  /** The directory prefix to strip from the extracted files. */
+  public abstract String getStripPrefix();
+
   /** Returns the {@link RepoSpec} that defines this repository. */
   @Override
-  public RepoSpec getRepoSpec(RepositoryName repoName) {
-    GitRepoSpecBuilder builder = new GitRepoSpecBuilder();
-    builder
-        .setRepoName(repoName.getName())
+  public RepoSpec getRepoSpec() {
+    return new GitRepoSpecBuilder()
         .setRemote(getRemote())
         .setCommit(getCommit())
         .setPatches(getPatches())
         .setPatchCmds(getPatchCmds())
         .setPatchArgs(ImmutableList.of("-p" + getPatchStrip()))
-        .setInitSubmodules(getInitSubmodules());
-    return builder.build();
+        .setInitSubmodules(getInitSubmodules())
+        .setStripPrefix(getStripPrefix())
+        .build();
   }
 
   @Override

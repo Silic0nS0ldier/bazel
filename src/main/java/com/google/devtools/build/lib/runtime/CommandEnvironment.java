@@ -30,13 +30,13 @@ import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.analysis.AnalysisOptions;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BuildInfoEvent;
+import com.google.devtools.build.lib.analysis.config.AdditionalConfigurationChangeEvent;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
 import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.QuiescingExecutors;
 import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.SingleBuildFileCache;
 import com.google.devtools.build.lib.pkgcache.PackageManager;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
@@ -48,6 +48,7 @@ import com.google.devtools.build.lib.runtime.proto.InvocationPolicyOuterClass.In
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.skyframe.BuildResultListener;
+import com.google.devtools.build.lib.skyframe.SkyfocusOptions;
 import com.google.devtools.build.lib.skyframe.SkyframeBuildView;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.skyframe.WorkspaceInfoFromDiff;
@@ -62,6 +63,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.SyscallCache;
 import com.google.devtools.build.lib.vfs.XattrProvider;
+import com.google.devtools.common.options.OptionAndRawValue;
 import com.google.devtools.common.options.OptionsParsingResult;
 import com.google.devtools.common.options.OptionsProvider;
 import com.google.protobuf.Any;
@@ -127,6 +129,8 @@ public class CommandEnvironment {
   private String workspaceName;
   private boolean hasSyncedPackageLoading = false;
   private boolean buildInfoPosted = false;
+  private Optional<AdditionalConfigurationChangeEvent> additionalConfigurationChangeEvent =
+      Optional.empty();
   @Nullable private WorkspaceInfoFromDiff workspaceInfoFromDiff;
 
   // This AtomicReference is set to:
@@ -146,6 +150,10 @@ public class CommandEnvironment {
 
   @GuardedBy("outputDirectoryHelperLock")
   private ActionOutputDirectoryHelper outputDirectoryHelper;
+
+  // List of flags and their values that were added by invocation policy. May contain multiple
+  // occurrences of the same flag.
+  ImmutableList<OptionAndRawValue> invocationPolicyFlags = ImmutableList.of();
 
   private class BlazeModuleEnvironment implements BlazeModule.ModuleEnvironment {
     @Nullable
@@ -438,6 +446,14 @@ public class CommandEnvironment {
 
   public OptionsParsingResult getOptions() {
     return options;
+  }
+
+  public void setInvocationPolicyFlags(ImmutableList<OptionAndRawValue> invocationPolicyFlags) {
+    this.invocationPolicyFlags = invocationPolicyFlags;
+  }
+
+  public ImmutableList<OptionAndRawValue> getInvocationPolicyFlags() {
+    return invocationPolicyFlags;
   }
 
   /**
@@ -735,6 +751,8 @@ public class CommandEnvironment {
 
   /**
    * Initializes and syncs the graph with the given options, readying it for the next evaluation.
+   *
+   * @throws IllegalStateException if the method has already been called in this environment.
    */
   public void syncPackageLoading(OptionsProvider options)
       throws InterruptedException, AbruptExitException {
@@ -758,6 +776,11 @@ public class CommandEnvironment {
                 timestampGranularityMonitor,
                 quiescingExecutors,
                 options);
+  }
+
+  /** Returns true if {@link #syncPackageLoading} has already been called. */
+  public boolean hasSyncedPackageLoading() {
+    return hasSyncedPackageLoading;
   }
 
   public void recordLastExecutionTime() {
@@ -826,10 +849,6 @@ public class CommandEnvironment {
     skyframeExecutor.setOutputService(outputService);
     skyframeExecutor.noteCommandStart();
 
-    var executionOptions = options.getOptions(ExecutionOptions.class);
-    skyframeExecutor.setClearNestedSetAfterActionExecution(
-        executionOptions != null && executionOptions.clearNestedSetAfterActionExecution);
-
     // Start the performance and memory profilers.
     runtime.beforeCommand(this, commonOptions);
 
@@ -837,6 +856,15 @@ public class CommandEnvironment {
 
     // Modules that are subscribed to CommandStartEvent may create pending exceptions.
     throwPendingException();
+
+    if (commandActuallyBuilds()) {
+      // Need to determine if Skyfocus will run for this command. If so, the evaluator
+      // will need to be configured to remember additional state (e.g. root keys) that it
+      // otherwise doesn't need to for a non-Skyfocus build. Alternately, it might reset
+      // the evaluator, which is why this runs before injecting precomputed values below.
+      skyframeExecutor.prepareForSkyfocus(
+          options.getOptions(SkyfocusOptions.class), reporter, runtime.getProductName());
+    }
   }
 
   /** Returns the name of the file system we are writing output to. */
@@ -945,6 +973,15 @@ public class CommandEnvironment {
     buildInfoPosted = true;
   }
 
+  @Subscribe
+  public void additionalConfigurationChangeEvent(AdditionalConfigurationChangeEvent event) {
+    additionalConfigurationChangeEvent = Optional.of(event);
+  }
+
+  public Optional<AdditionalConfigurationChangeEvent> getAdditionalConfigurationChangeEvent() {
+    return additionalConfigurationChangeEvent;
+  }
+
   /**
    * Returns the number of the invocation attempt, starting at 1 and increasing by 1 for each new
    * attempt. Can be used to determine if there is a build retry by {@code
@@ -952,5 +989,25 @@ public class CommandEnvironment {
    */
   public int getAttemptNumber() {
     return attemptNumber;
+  }
+
+  /**
+   * Checks if the command builds.
+   *
+   * <p>Not all 'build = true' annotated commands actually run a build.
+   */
+  public boolean commandActuallyBuilds() {
+    if (!command.builds()) {
+      return false;
+    }
+    // 'clean' and 'info' set 'build = true' to make build options accessible to users (and info
+    // uses them), but does not run a build.
+    if (command.name().equals("clean")) {
+      return false;
+    }
+    if (command.name().equals("info")) {
+      return false;
+    }
+    return true;
   }
 }

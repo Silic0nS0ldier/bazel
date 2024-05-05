@@ -74,6 +74,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import net.starlark.java.eval.StarlarkSemantics;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -191,6 +192,7 @@ public abstract class PackageLookupFunctionTest extends FoundationTestCase {
     RepositoryDelegatorFunction.REPOSITORY_OVERRIDES.set(differencer, ImmutableMap.of());
     RepositoryDelegatorFunction.FORCE_FETCH.set(
         differencer, RepositoryDelegatorFunction.FORCE_FETCH_DISABLED);
+    RepositoryDelegatorFunction.DISABLE_NATIVE_REPO_RULES.set(differencer, false);
     RepositoryDelegatorFunction.VENDOR_DIRECTORY.set(differencer, Optional.empty());
 
     RepositoryDelegatorFunction.RESOLVED_FILE_INSTEAD_OF_WORKSPACE.set(
@@ -393,6 +395,8 @@ public abstract class PackageLookupFunctionTest extends FoundationTestCase {
             PackageLookupValue.success(root2, BuildFileName.BUILD),
             PackageLookupValue.success(root2, BuildFileName.BUILD))
         .addEqualityGroup(
+            PackageLookupValue.success(root2, BuildFileName.BUILD, /* hasProjectFile= */ true))
+        .addEqualityGroup(
             PackageLookupValue.NO_BUILD_FILE_VALUE, PackageLookupValue.NO_BUILD_FILE_VALUE)
         .addEqualityGroup(
             PackageLookupValue.DELETED_PACKAGE_VALUE, PackageLookupValue.DELETED_PACKAGE_VALUE)
@@ -589,5 +593,17 @@ public abstract class PackageLookupFunctionTest extends FoundationTestCase {
       assertThat(incorrectPackageLookupValue.getCorrectedPackageIdentifier().toString())
           .isEqualTo(expectedCorrectedPackageIdentifier);
     }
+  }
+
+  @Test
+  // TODO b/331316530: Temporarily removed to avoid build memory regressions. Re-enable as opt in.
+  @Ignore
+  public void testInvalidProjectFile() throws Exception {
+    scratch.file("mypackage/BUILD");
+    scratch.dir("mypackage/PROJECT.scl");
+    PackageLookupValue packageLookupValue = lookupPackage("mypackage");
+    assertThat(packageLookupValue.packageExists()).isFalse();
+    assertThat(packageLookupValue.getErrorReason()).isEqualTo(ErrorReason.INVALID_PROJECT_FILE);
+    assertThat(packageLookupValue.getErrorMsg()).isNotNull();
   }
 }

@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.FilesetOutputSymlink;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.vfs.Path;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -69,12 +68,12 @@ public final class SpawnInputUtils {
 
   public static ActionInput getRunfilesFilesetInputWithName(
       Spawn spawn, ActionExecutionContext context, String artifactName, String inputName) {
-    Artifact filesetArtifact = getRunfilesArtifactWithName(spawn, artifactName);
+    Artifact filesetArtifact = getRunfilesArtifactWithName(spawn, context, artifactName);
     checkState(filesetArtifact.isFileset(), filesetArtifact);
 
     ImmutableList<FilesetOutputSymlink> filesetLinks;
     try {
-      filesetLinks = context.getArtifactExpander().getFileset(filesetArtifact);
+      filesetLinks = context.getArtifactExpander().expandFileset(filesetArtifact);
     } catch (MissingExpansionException e) {
       throw new IllegalStateException(e);
     }
@@ -100,17 +99,18 @@ public final class SpawnInputUtils {
 
   public static Artifact getExpandedToArtifact(
       String name, Artifact expandableArtifact, Spawn spawn, ActionExecutionContext context) {
-    ArrayList<Artifact> expansion = new ArrayList<>();
-    context.getArtifactExpander().expand(expandableArtifact, expansion);
-    return expansion.stream()
+    return context.getArtifactExpander().expandTreeArtifact(expandableArtifact).stream()
         .filter(artifact -> artifact.getExecPathString().contains(name))
         .findFirst()
         .orElseThrow(
             () -> noSuchInput("artifact expanded from " + expandableArtifact, name, spawn));
   }
 
-  public static Artifact getRunfilesArtifactWithName(Spawn spawn, String name) {
-    return spawn.getRunfilesSupplier().getRunfilesTrees().stream()
+  public static Artifact getRunfilesArtifactWithName(
+      Spawn spawn, ActionExecutionContext context, String name) {
+    return spawn.getInputFiles().toList().stream()
+        .filter(i -> i instanceof Artifact && ((Artifact) i).isMiddlemanArtifact())
+        .map(i -> context.getInputMetadataProvider().getRunfilesMetadata(i).getRunfilesTree())
         .flatMap(t -> t.getArtifacts().toList().stream())
         .filter(artifact -> artifact.getExecPathString().contains(name))
         .findFirst()

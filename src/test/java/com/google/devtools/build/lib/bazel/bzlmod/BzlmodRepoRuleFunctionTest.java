@@ -129,8 +129,13 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
                 .put(SkyFunctions.BAZEL_MODULE_RESOLUTION, new BazelModuleResolutionFunction())
                 .put(
                     SkyFunctions.MODULE_FILE,
-                    new ModuleFileFunction(registryFactory, workspaceRoot, ImmutableMap.of()))
-                .put(SkyFunctions.REPO_SPEC, new RepoSpecFunction(registryFactory))
+                    new ModuleFileFunction(
+                        ruleClassProvider.getBazelStarlarkEnvironment(),
+                        workspaceRoot,
+                        ImmutableMap.of()))
+                .put(SkyFunctions.REGISTRY, new RegistryFunction(registryFactory))
+                .put(SkyFunctions.REPO_SPEC, new RepoSpecFunction())
+                .put(SkyFunctions.YANKED_VERSIONS, new YankedVersionsFunction())
                 .put(
                     SkyFunctions.MODULE_EXTENSION_REPO_MAPPING_ENTRIES,
                     new ModuleExtensionRepoMappingEntriesFunction())
@@ -167,7 +172,7 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
             .addModule(createModuleKey("ccc", "2.0"), "module(name='ccc', version='2.0')");
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
-    RepositoryName repo = RepositoryName.create("ccc~2.0");
+    RepositoryName repo = RepositoryName.create("ccc~");
     EvaluationResult<BzlmodRepoRuleValue> result =
         evaluator.evaluate(ImmutableList.of(BzlmodRepoRuleValue.key(repo)), evaluationContext);
     if (result.hasError()) {
@@ -178,8 +183,8 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
 
     assertThat(repoRule.getRuleClassObject().isStarlark()).isFalse();
     assertThat(repoRule.getRuleClass()).isEqualTo("local_repository");
-    assertThat(repoRule.getName()).isEqualTo("ccc~2.0");
-    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ccc~2.0");
+    assertThat(repoRule.getName()).isEqualTo("ccc~");
+    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ccc~v2.0");
   }
 
   @Test
@@ -198,7 +203,7 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
             .addModule(createModuleKey("ccc", "2.0"), "module(name='ccc', version='2.0')");
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
-    RepositoryName repo = RepositoryName.create("ccc~override");
+    RepositoryName repo = RepositoryName.create("ccc~");
     EvaluationResult<BzlmodRepoRuleValue> result =
         evaluator.evaluate(ImmutableList.of(BzlmodRepoRuleValue.key(repo)), evaluationContext);
     if (result.hasError()) {
@@ -209,7 +214,7 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
 
     assertThat(repoRule.getRuleClassObject().isStarlark()).isFalse();
     assertThat(repoRule.getRuleClass()).isEqualTo("local_repository");
-    assertThat(repoRule.getName()).isEqualTo("ccc~override");
+    assertThat(repoRule.getName()).isEqualTo("ccc~");
     assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/foo/bar/C");
   }
 
@@ -231,7 +236,7 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
             .addModule(createModuleKey("ccc", "3.0"), "module(name='ccc', version='3.0')");
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
-    RepositoryName repo = RepositoryName.create("ccc~3.0");
+    RepositoryName repo = RepositoryName.create("ccc~");
     EvaluationResult<BzlmodRepoRuleValue> result =
         evaluator.evaluate(ImmutableList.of(BzlmodRepoRuleValue.key(repo)), evaluationContext);
     if (result.hasError()) {
@@ -242,8 +247,8 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
 
     assertThat(repoRule.getRuleClassObject().isStarlark()).isFalse();
     assertThat(repoRule.getRuleClass()).isEqualTo("local_repository");
-    assertThat(repoRule.getName()).isEqualTo("ccc~3.0");
-    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ccc~3.0");
+    assertThat(repoRule.getName()).isEqualTo("ccc~");
+    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ccc~v3.0");
   }
 
   @Test
@@ -267,7 +272,7 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
             .addModule(createModuleKey("ddd", "2.0"), "module(name='ddd', version='2.0')");
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
-    RepositoryName repo = RepositoryName.create("ddd~2.0");
+    RepositoryName repo = RepositoryName.create("ddd~v2.0");
     EvaluationResult<BzlmodRepoRuleValue> result =
         evaluator.evaluate(ImmutableList.of(BzlmodRepoRuleValue.key(repo)), evaluationContext);
     if (result.hasError()) {
@@ -278,8 +283,8 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
 
     assertThat(repoRule.getRuleClassObject().isStarlark()).isFalse();
     assertThat(repoRule.getRuleClass()).isEqualTo("local_repository");
-    assertThat(repoRule.getName()).isEqualTo("ddd~2.0");
-    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ddd~2.0");
+    assertThat(repoRule.getName()).isEqualTo("ddd~v2.0");
+    assertThat(repoRule.getAttr("path", Type.STRING)).isEqualTo("/usr/local/modules/ddd~v2.0");
   }
 
   @Test
@@ -297,5 +302,4 @@ public final class BzlmodRepoRuleFunctionTest extends FoundationTestCase {
     BzlmodRepoRuleValue bzlmodRepoRuleValue = result.get(BzlmodRepoRuleValue.key(repo));
     assertThat(bzlmodRepoRuleValue).isEqualTo(BzlmodRepoRuleValue.REPO_RULE_NOT_FOUND_VALUE);
   }
-
 }

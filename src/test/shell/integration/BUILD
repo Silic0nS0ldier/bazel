@@ -465,7 +465,7 @@ sh_test(
         ":test-deps",
         "@bazel_tools//tools/bash/runfiles",
     ],
-    shard_count = 6,
+    shard_count = 8,
     tags = ["no_windows"],
     toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
 )
@@ -508,6 +508,27 @@ sh_test(
     ],
     shard_count = 3,
     tags = [
+        "no_windows",
+    ],
+)
+
+sh_test(
+    name = "bazel_worker_with_cgroups_test",
+    size = "large",
+    srcs = ["bazel_worker_test.sh"],
+    args = [
+        "'--worker_sandboxing=no --experimental_worker_use_cgroups_on_linux'",
+        "non-sandboxed",
+        "proto",
+    ],
+    data = [
+        ":test-deps",
+        "//src/test/java/com/google/devtools/build/lib/worker:ExampleWorker_deploy.jar",
+    ],
+    shard_count = 3,
+    tags = [
+        # MacOS does not have cgroups so it can't support hardened sandbox
+        "no_macos",
         "no_windows",
     ],
 )
@@ -583,6 +604,29 @@ sh_test(
     ],
     shard_count = 3,
     tags = [
+        # MacOS does not have cgroups so it can't support hardened sandbox
+        "no_macos",
+        "no_windows",
+    ],
+)
+
+sh_test(
+    name = "bazel_sandboxed_worker_with_cgroups_test",
+    size = "large",
+    srcs = ["bazel_worker_test.sh"],
+    args = [
+        "'--worker_sandboxing --experimental_worker_use_cgroups_on_linux'",
+        "sandboxed",
+        "proto",
+    ],
+    data = [
+        ":test-deps",
+        "//src/test/java/com/google/devtools/build/lib/worker:ExampleWorker_deploy.jar",
+    ],
+    shard_count = 3,
+    tags = [
+        # MacOS does not have cgroups so it can't support hardened sandbox
+        "no_macos",
         "no_windows",
     ],
 )
@@ -831,13 +875,23 @@ sh_test(
         ":test-deps",
         "@bazel_tools//tools/bash/runfiles",
     ],
-    shard_count = 5,
+    shard_count = 10,
     tags = ["no_windows"],
 )
 
 sh_test(
     name = "toolchain_transition_test",
     srcs = ["toolchain_transition_test.sh"],
+    data = [
+        ":test-deps",
+        "@bazel_tools//tools/bash/runfiles",
+    ],
+    tags = ["no_windows"],
+)
+
+sh_test(
+    name = "rule_transition_test",
+    srcs = ["rule_transition_test.sh"],
     data = [
         ":test-deps",
         "@bazel_tools//tools/bash/runfiles",
@@ -894,6 +948,27 @@ sh_test(
         ":test-deps",
         "@bazel_tools//tools/bash/runfiles",
     ],
+    shard_count = 3,
+)
+
+sh_test(
+    name = "dump_test",
+    srcs = ["dump_test.sh"],
+    data = [
+        ":test-deps",
+        "@bazel_tools//tools/bash/runfiles",
+    ],
+    shard_count = 1,
+)
+
+sh_test(
+    name = "platform_mapping_test",
+    srcs = ["platform_mapping_test.sh"],
+    data = [
+        ":test-deps",
+        "@bazel_tools//tools/bash/runfiles",
+    ],
+    shard_count = 5,
     tags = ["no_windows"],
 )
 

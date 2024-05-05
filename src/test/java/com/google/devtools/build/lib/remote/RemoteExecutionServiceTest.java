@@ -69,8 +69,7 @@ import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
 import com.google.devtools.build.lib.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.actions.PathMapper;
 import com.google.devtools.build.lib.actions.ResourceSet;
-import com.google.devtools.build.lib.actions.RunfilesSupplier;
-import com.google.devtools.build.lib.actions.RunfilesSupplier.RunfilesTree;
+import com.google.devtools.build.lib.actions.RunfilesTree;
 import com.google.devtools.build.lib.actions.SimpleSpawn;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnResult;
@@ -111,6 +110,7 @@ import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.OutputPermissions;
+import com.google.devtools.build.lib.vfs.OutputService;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
@@ -146,6 +146,8 @@ public class RemoteExecutionServiceTest {
 
   @Mock private RemoteOutputChecker remoteOutputChecker; // download nothing by default.
 
+  @Mock private OutputService outputService;
+
   private final DigestUtil digestUtil =
       new DigestUtil(SyscallCache.NO_CACHE, DigestHashFunction.SHA256);
   private final Reporter reporter = new Reporter(new EventBus());
@@ -155,6 +157,7 @@ public class RemoteExecutionServiceTest {
   private FileSystem fs;
   private Path execRoot;
   private ArtifactRoot artifactRoot;
+  private ArtifactRoot middlemanRoot;
   private TempPathGenerator tempPathGenerator;
   private FakeActionInputFileCache fakeFileCache;
   private RemotePathResolver remotePathResolver;
@@ -175,6 +178,9 @@ public class RemoteExecutionServiceTest {
     execRoot.createDirectoryAndParents();
 
     artifactRoot = ArtifactRoot.asDerivedRoot(execRoot, RootType.Output, "outputs");
+    middlemanRoot =
+        ArtifactRoot.asDerivedRoot(execRoot, RootType.Middleman, PathFragment.create("out"));
+
     checkNotNull(artifactRoot.getRoot().asPath()).createDirectoryAndParents();
 
     tempPathGenerator = new TempPathGenerator(fs.getPath("/execroot/_tmp/actions/remote"));
@@ -307,7 +313,11 @@ public class RemoteExecutionServiceTest {
         Tree.newBuilder()
             .setRoot(
                 Directory.newBuilder()
-                    .addFiles(FileNode.newBuilder().setName("bar").setDigest(barDigest)))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("bar")
+                            .setDigest(barDigest)
+                            .setIsExecutable(true)))
             .build();
     Digest treeDigest = cache.addContents(remoteActionExecutionContext, tree.toByteArray());
     ActionResult.Builder builder = ActionResult.newBuilder();
@@ -402,8 +412,16 @@ public class RemoteExecutionServiceTest {
         Tree.newBuilder()
             .setRoot(
                 Directory.newBuilder()
-                    .addFiles(FileNode.newBuilder().setName("foo").setDigest(fooDigest))
-                    .addFiles(FileNode.newBuilder().setName("subdir/bar").setDigest(barDigest)))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("foo")
+                            .setDigest(fooDigest)
+                            .setIsExecutable(true))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("subdir/bar")
+                            .setDigest(barDigest)
+                            .setIsExecutable(true)))
             .build();
     Digest treeDigest = cache.addContents(remoteActionExecutionContext, tree.toByteArray());
     ActionResult.Builder builder = ActionResult.newBuilder();
@@ -470,7 +488,8 @@ public class RemoteExecutionServiceTest {
     Digest quxDigest = cache.addContents(remoteActionExecutionContext, "qux-contents");
     Directory wobbleDirMessage =
         Directory.newBuilder()
-            .addFiles(FileNode.newBuilder().setName("qux").setDigest(quxDigest))
+            .addFiles(
+                FileNode.newBuilder().setName("qux").setDigest(quxDigest).setIsExecutable(true))
             .build();
     Digest wobbleDirDigest =
         cache.addContents(remoteActionExecutionContext, wobbleDirMessage.toByteArray());
@@ -478,7 +497,11 @@ public class RemoteExecutionServiceTest {
         Tree.newBuilder()
             .setRoot(
                 Directory.newBuilder()
-                    .addFiles(FileNode.newBuilder().setName("qux").setDigest(quxDigest))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("qux")
+                            .setDigest(quxDigest)
+                            .setIsExecutable(true))
                     .addDirectories(
                         DirectoryNode.newBuilder().setName("wobble").setDigest(wobbleDirDigest)))
             .addChildren(wobbleDirMessage)
@@ -519,8 +542,16 @@ public class RemoteExecutionServiceTest {
         Tree.newBuilder()
             .setRoot(
                 Directory.newBuilder()
-                    .addFiles(FileNode.newBuilder().setName("foo").setDigest(fooDigest))
-                    .addFiles(FileNode.newBuilder().setName("bar").setDigest(barDigest)))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("foo")
+                            .setDigest(fooDigest)
+                            .setIsExecutable(true))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("bar")
+                            .setDigest(barDigest)
+                            .setIsExecutable(true)))
             .build();
     Digest subdirTreeDigest =
         cache.addContents(remoteActionExecutionContext, subdirTreeMessage.toByteArray());
@@ -560,7 +591,8 @@ public class RemoteExecutionServiceTest {
 
     // arrange
     Digest fileDigest = cache.addContents(remoteActionExecutionContext, "file");
-    FileNode file = FileNode.newBuilder().setName("file").setDigest(fileDigest).build();
+    FileNode file =
+        FileNode.newBuilder().setName("file").setDigest(fileDigest).setIsExecutable(true).build();
     Directory fooDir = Directory.newBuilder().addFiles(file).build();
     Digest fooDigest = cache.addContents(remoteActionExecutionContext, fooDir.toByteArray());
     DirectoryNode fooDirNode =
@@ -816,7 +848,11 @@ public class RemoteExecutionServiceTest {
         Tree.newBuilder()
             .setRoot(
                 Directory.newBuilder()
-                    .addFiles(FileNode.newBuilder().setName("bar").setDigest(barDigest)))
+                    .addFiles(
+                        FileNode.newBuilder()
+                            .setName("bar")
+                            .setDigest(barDigest)
+                            .setIsExecutable(true)))
             .build();
     Digest treeDigest = cache.addContents(remoteActionExecutionContext, tree.toByteArray());
     ActionResult.Builder builder = ActionResult.newBuilder();
@@ -851,7 +887,10 @@ public class RemoteExecutionServiceTest {
             .setRoot(
                 Directory.newBuilder()
                     .addFiles(
-                        FileNode.newBuilder().setName("outputfile").setDigest(treeFileDigest)))
+                        FileNode.newBuilder()
+                            .setName("outputfile")
+                            .setDigest(treeFileDigest)
+                            .setIsExecutable(true)))
             .build();
     Digest treeDigest = cache.addContents(remoteActionExecutionContext, tree.toByteArray());
     Digest otherFileDigest =
@@ -1202,8 +1241,10 @@ public class RemoteExecutionServiceTest {
     // dir/a/file2
     Digest d1 = cache.addContents(remoteActionExecutionContext, "content1");
     Digest d2 = cache.addContents(remoteActionExecutionContext, "content2");
-    FileNode file1 = FileNode.newBuilder().setName("file1").setDigest(d1).build();
-    FileNode file2 = FileNode.newBuilder().setName("file2").setDigest(d2).build();
+    FileNode file1 =
+        FileNode.newBuilder().setName("file1").setDigest(d1).setIsExecutable(true).build();
+    FileNode file2 =
+        FileNode.newBuilder().setName("file2").setDigest(d2).setIsExecutable(true).build();
     Directory a = Directory.newBuilder().addFiles(file2).build();
     Digest da = cache.addContents(remoteActionExecutionContext, a);
     Directory root =
@@ -1252,8 +1293,10 @@ public class RemoteExecutionServiceTest {
     // dir/a/file2
     Digest d1 = cache.addContents(remoteActionExecutionContext, "content1");
     Digest d2 = cache.addContents(remoteActionExecutionContext, "content2");
-    FileNode file1 = FileNode.newBuilder().setName("file1").setDigest(d1).build();
-    FileNode file2 = FileNode.newBuilder().setName("file2").setDigest(d2).build();
+    FileNode file1 =
+        FileNode.newBuilder().setName("file1").setDigest(d1).setIsExecutable(true).build();
+    FileNode file2 =
+        FileNode.newBuilder().setName("file2").setDigest(d2).setIsExecutable(true).build();
     Directory a = Directory.newBuilder().addFiles(file2).build();
     Digest da = cache.addContents(remoteActionExecutionContext, a);
     Directory root =
@@ -1304,8 +1347,10 @@ public class RemoteExecutionServiceTest {
     // dir/a/file2
     Digest d1 = cache.addContents(remoteActionExecutionContext, "content1");
     Digest d2 = cache.addContents(remoteActionExecutionContext, "content2");
-    FileNode file1 = FileNode.newBuilder().setName("file1").setDigest(d1).build();
-    FileNode file2 = FileNode.newBuilder().setName("file2").setDigest(d2).build();
+    FileNode file1 =
+        FileNode.newBuilder().setName("file1").setDigest(d1).setIsExecutable(true).build();
+    FileNode file2 =
+        FileNode.newBuilder().setName("file2").setDigest(d2).setIsExecutable(true).build();
     Directory a = Directory.newBuilder().addFiles(file2).build();
     Digest da = cache.addContents(remoteActionExecutionContext, a);
     Directory root =
@@ -1468,7 +1513,6 @@ public class RemoteExecutionServiceTest {
             /* arguments= */ ImmutableList.of(),
             /* environment= */ ImmutableMap.of(),
             /* executionInfo= */ ImmutableMap.of(REMOTE_EXECUTION_INLINE_OUTPUTS, "outputs/file1"),
-            /* runfilesSupplier= */ null,
             /* filesetMappings= */ ImmutableMap.of(),
             /* inputs= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
             /* tools= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
@@ -1578,9 +1622,9 @@ public class RemoteExecutionServiceTest {
                     Directory.newBuilder()
                         .addFiles(
                             FileNode.newBuilder()
-                                .setIsExecutable(true)
                                 .setName("qux")
                                 .setDigest(quxDigest)
+                                .setIsExecutable(true)
                                 .build())
                         .build())
                 .build());
@@ -1681,7 +1725,12 @@ public class RemoteExecutionServiceTest {
         fakeFileCache.createScratchInput(ActionInputHelper.fromPath("outputs/bar/qux"), "abc");
     final Directory testDirMessage =
         Directory.newBuilder()
-            .addFiles(FileNode.newBuilder().setName("wobble").setDigest(wobbleDigest).build())
+            .addFiles(
+                FileNode.newBuilder()
+                    .setName("wobble")
+                    .setDigest(wobbleDigest)
+                    .setIsExecutable(true)
+                    .build())
             .build();
     final Digest testDigest = digestUtil.compute(testDirMessage);
     final Tree barTree =
@@ -1690,9 +1739,9 @@ public class RemoteExecutionServiceTest {
                 Directory.newBuilder()
                     .addFiles(
                         FileNode.newBuilder()
-                            .setIsExecutable(true)
                             .setName("qux")
-                            .setDigest(quxDigest))
+                            .setDigest(quxDigest)
+                            .setIsExecutable(true))
                     .addDirectories(
                         DirectoryNode.newBuilder().setName("test").setDigest(testDigest)))
             .addChildren(testDirMessage)
@@ -2049,9 +2098,12 @@ public class RemoteExecutionServiceTest {
         NestedSetBuilder.create(Order.STABLE_ORDER, dummyFile, foo2File);
     fakeFileCache.createScratchInput(foo2File, "foo2");
 
+    ActionInput runfilesMiddleman = ActionsTestUtil.createArtifact(middlemanRoot, "runfiles");
+
     NestedSet<ActionInput> nodeRoot1 =
         new NestedSetBuilder<ActionInput>(Order.STABLE_ORDER)
             .add(dummyFile)
+            .add(runfilesMiddleman)
             .add(tree)
             .addTransitive(nodeBar)
             .addTransitive(nodeFoo1)
@@ -2059,6 +2111,7 @@ public class RemoteExecutionServiceTest {
     NestedSet<ActionInput> nodeRoot2 =
         new NestedSetBuilder<ActionInput>(Order.STABLE_ORDER)
             .add(dummyFile)
+            .add(runfilesMiddleman)
             .add(tree)
             .addTransitive(nodeBar)
             .addTransitive(nodeFoo2)
@@ -2067,8 +2120,10 @@ public class RemoteExecutionServiceTest {
     Artifact toolDat = ActionsTestUtil.createArtifact(artifactRoot, "tool.dat");
     fakeFileCache.createScratchInput(toolDat, "tool.dat");
 
-    RunfilesSupplier runfilesSupplier =
-        createRunfilesSupplier("tools/tool.runfiles", ImmutableList.of(toolDat));
+    RunfilesTree runfilesTree =
+        createRunfilesTree("tools/tool.runfiles", ImmutableList.of(toolDat));
+
+    fakeFileCache.addRunfilesTree(runfilesMiddleman, runfilesTree);
 
     Spawn spawn1 =
         new SimpleSpawn(
@@ -2076,7 +2131,6 @@ public class RemoteExecutionServiceTest {
             /* arguments= */ ImmutableList.of(),
             /* environment= */ ImmutableMap.of(),
             /* executionInfo= */ ImmutableMap.of(),
-            /* runfilesSupplier= */ runfilesSupplier,
             /* inputs= */ nodeRoot1,
             /* outputs= */ ImmutableSet.of(),
             ResourceSet.ZERO);
@@ -2087,7 +2141,6 @@ public class RemoteExecutionServiceTest {
             /* arguments= */ ImmutableList.of(),
             /* environment= */ ImmutableMap.of(),
             /* executionInfo= */ ImmutableMap.of(),
-            /* runfilesSupplier= */ runfilesSupplier,
             /* inputs= */ nodeRoot2,
             /* outputs= */ ImmutableSet.of(),
             ResourceSet.ZERO);
@@ -2470,46 +2523,40 @@ public class RemoteExecutionServiceTest {
         executor,
         tempPathGenerator,
         null,
-        remoteOutputChecker);
+        remoteOutputChecker,
+        outputService);
   }
 
-  private RunfilesSupplier createRunfilesSupplier(String root, Collection<Artifact> artifacts) {
-    RunfilesTree tree =
-        new RunfilesTree() {
-          @Override
-          public PathFragment getPossiblyIncorrectExecPath() {
-            return PathFragment.create(root);
-          }
-
-          @Override
-          public Map<PathFragment, Artifact> getMapping() {
-            return artifacts.stream().collect(toImmutableMap(Artifact::getExecPath, a -> a));
-          }
-
-          @Override
-          public NestedSet<Artifact> getArtifacts() {
-            return NestedSetBuilder.wrap(Order.STABLE_ORDER, artifacts);
-          }
-
-          @Override
-          public RunfileSymlinksMode getSymlinksMode() {
-            return RunfileSymlinksMode.SKIP;
-          }
-
-          @Override
-          public boolean isBuildRunfileLinks() {
-            return false;
-          }
-
-          @Override
-          public String getWorkspaceName() {
-            return "__main__";
-          }
-        };
-    return new RunfilesSupplier() {
+  private RunfilesTree createRunfilesTree(String root, Collection<Artifact> artifacts) {
+    return new RunfilesTree() {
       @Override
-      public ImmutableList<RunfilesTree> getRunfilesTrees() {
-        return ImmutableList.of(tree);
+      public PathFragment getExecPath() {
+        return PathFragment.create(root);
+      }
+
+      @Override
+      public Map<PathFragment, Artifact> getMapping() {
+        return artifacts.stream().collect(toImmutableMap(Artifact::getExecPath, a -> a));
+      }
+
+      @Override
+      public NestedSet<Artifact> getArtifacts() {
+        return NestedSetBuilder.wrap(Order.STABLE_ORDER, artifacts);
+      }
+
+      @Override
+      public RunfileSymlinksMode getSymlinksMode() {
+        return RunfileSymlinksMode.SKIP;
+      }
+
+      @Override
+      public boolean isBuildRunfileLinks() {
+        return false;
+      }
+
+      @Override
+      public String getWorkspaceName() {
+        return "__main__";
       }
     };
   }

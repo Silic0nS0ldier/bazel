@@ -12,14 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Auxiliary rule to create the deploy archives for java_binary
+"""Auxiliary rule to create the deploy archives for java_binary"""
 
-This needs to be a separate rule because we need to add the runfiles manifest as an input to
-the generating actions, so that the runfiles symlink tree is staged for the deploy jars.
-"""
-
-load(":common/cc/cc_helper.bzl", "cc_helper")
-load(":common/java/java_common.bzl", "java_common")
 load(":common/java/java_helper.bzl", "helper")
 load(":common/java/java_semantics.bzl", "semantics")
 
@@ -40,12 +34,9 @@ def create_deploy_archives(
         ctx,
         java_attrs,
         launcher_info,
-        runfiles,
         main_class,
         coverage_main_class,
         strip_as_default,
-        build_info_files,
-        build_target,
         hermetic = False,
         add_exports = depset(),
         add_opens = depset(),
@@ -53,19 +44,17 @@ def create_deploy_archives(
         one_version_level = "OFF",
         one_version_allowlist = None,
         extra_args = [],
-        manifest_lines = []):
+        extra_manifest_lines = []):
     """ Registers actions for _deploy.jar and _deploy.jar.unstripped
 
     Args:
         ctx: (RuleContext) The rule context
         java_attrs: (Struct) Struct of (classpath_resources, runtime_jars, runtime_classpath_for_archive, resources)
         launcher_info: (Struct) Struct of (runtime_jars, launcher, unstripped_launcher)
-        runfiles: (Depset) the runfiles for the deploy jar
         main_class: (String) FQN of the entry point for execution
         coverage_main_class: (String) FQN of the entry point for coverage collection
         build_target: (String) Name of the build target for stamping
         strip_as_default: (bool) Whether to create unstripped deploy jar
-        build_info_files: ([File]) the artifacts containing workspace status for the current build
         hermetic: (bool)
         add_exports: (depset)
         add_opens: (depset)
@@ -73,7 +62,7 @@ def create_deploy_archives(
         one_version_level: (String) Optional one version check level, default OFF
         one_version_allowlist: (File) Optional allowlist for one version check
         extra_args: (list[Args]) Optional arguments for the deploy jar action
-        manifest_lines: (list[String]) Optional lines added to the jar manifest
+        extra_manifest_lines: (list[String]) Optional lines added to the jar manifest
     """
     classpath_resources = java_attrs.classpath_resources
 
@@ -86,11 +75,12 @@ def create_deploy_archives(
         order = "preorder",
     )
     multi_release = ctx.fragments.java.multi_release_deploy_jars
-
+    build_info_files = get_build_info(ctx, ctx.attr.stamp)
+    build_target = str(ctx.label)
+    manifest_lines = ctx.attr.deploy_manifest_lines + extra_manifest_lines
     create_deploy_archive(
         ctx,
         launcher_info.launcher,
-        runfiles,
         main_class,
         coverage_main_class,
         java_attrs.resources,
@@ -114,7 +104,6 @@ def create_deploy_archives(
         create_deploy_archive(
             ctx,
             launcher_info.unstripped_launcher,
-            runfiles,
             main_class,
             coverage_main_class,
             java_attrs.resources,
@@ -126,6 +115,8 @@ def create_deploy_archives(
             output = ctx.outputs.unstrippeddeployjar,
             multi_release = multi_release,
             hermetic = hermetic,
+            add_exports = add_exports,
+            add_opens = add_opens,
             extra_args = extra_args,
         )
     else:
@@ -134,7 +125,6 @@ def create_deploy_archives(
 def create_deploy_archive(
         ctx,
         launcher,
-        runfiles,
         main_class,
         coverage_main_class,
         resources,
@@ -159,7 +149,6 @@ def create_deploy_archive(
     Args:
         ctx: (RuleContext) The rule context
         launcher: (File) the launcher artifact
-        runfiles: (Depset) the runfiles for the deploy jar
         main_class: (String) FQN of the entry point for execution
         coverage_main_class: (String) FQN of the entry point for coverage collection
         resources: (Depset) resource inputs
@@ -186,7 +175,6 @@ def create_deploy_archive(
         resources,
         classpath_resources,
         runtime_classpath,
-        runfiles,
     ]
 
     single_jar = semantics.find_java_toolchain(ctx).single_jar
@@ -227,9 +215,7 @@ def create_deploy_archive(
         args.add("--multi_release")
 
     if hermetic:
-        runtime = semantics.find_java_runtime_toolchain(ctx)
-        if not runtime.lib_modules:
-            runtime = ctx.toolchains["@//tools/jdk:fallback_hermetic_runtime_toolchain_type"].java_runtime
+        runtime = ctx.toolchains["@//tools/jdk/hermetic:hermetic_runtime_toolchain_type"].java_runtime
         if runtime.lib_modules != None:
             java_home = runtime.java_home
             lib_modules = runtime.lib_modules
@@ -262,50 +248,4 @@ def create_deploy_archive(
         arguments = [args] + extra_args,
         use_default_shell_env = True,
         toolchain = semantics.JAVA_TOOLCHAIN_TYPE,
-    )
-
-def _implicit_outputs(binary):
-    binary_name = binary.name
-    return {
-        "deployjar": "%s_deploy.jar" % binary_name,
-        "unstrippeddeployjar": "%s_deploy.jar.unstripped" % binary_name,
-    }
-
-def make_deploy_jars_rule(
-        implementation,
-        *,
-        create_executable = True,
-        extra_attrs = {},
-        extra_toolchains = []):
-    """Creates the deploy jar auxiliary rule for java_binary
-
-    Args:
-        implementation: (Function) The rule implementation function
-        create_executable: (bool) The value of the create_executable attribute of java_binary
-        extra_toolchains: (list[String]) Additional toolchains
-
-    Returns:
-        The deploy jar rule class
-    """
-    toolchains = [semantics.JAVA_TOOLCHAIN] + cc_helper.use_cpp_toolchain()
-    if create_executable:
-        toolchains.append(semantics.JAVA_RUNTIME_TOOLCHAIN)
-    toolchains.extend(extra_toolchains)
-    return rule(
-        implementation = implementation,
-        attrs = {
-            "binary": attr.label(mandatory = True),
-            # TODO(b/245144242): Used by IDE integration, remove when toolchains are used
-            "_java_toolchain": attr.label(
-                default = semantics.JAVA_TOOLCHAIN_LABEL,
-                providers = [java_common.JavaToolchainInfo],
-            ),
-            "_java_toolchain_type": attr.label(default = semantics.JAVA_TOOLCHAIN_TYPE),
-            "_build_info_translator": attr.label(
-                default = semantics.BUILD_INFO_TRANSLATOR_LABEL,
-            ),
-        } | extra_attrs,
-        outputs = _implicit_outputs,
-        fragments = ["java"],
-        toolchains = toolchains,
     )

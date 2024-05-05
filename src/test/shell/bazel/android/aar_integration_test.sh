@@ -83,6 +83,8 @@ EOF
 function test_android_binary_depends_on_aar() {
   create_new_workspace
   setup_android_sdk_support
+  setup_android_platforms
+
   cat > AndroidManifest.xml <<EOF
 <manifest package="com.example"/>
 EOF
@@ -91,9 +93,15 @@ EOF
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" />
 EOF
+
   mkdir assets
   echo "some asset" > assets/a
-  zip example.aar AndroidManifest.xml res/layout/mylayout.xml assets/a
+
+  mkdir -p jni/armeabi-v7a
+  echo "an armeabi-v7a so" > jni/armeabi-v7a/libjni.so
+
+  zip example.aar AndroidManifest.xml res/layout/mylayout.xml assets/a jni/armeabi-v7a/libjni.so
+
   cat > BUILD <<EOF
 aar_import(
   name = "example",
@@ -106,23 +114,18 @@ android_binary(
   deps = [":example"],
 )
 EOF
-  assert_build :app
+
+  assert_build :app --android_platforms=//test_android_platforms:simple
   apk_contents="$(zipinfo -1 bazel-bin/app.apk)"
   assert_one_of $apk_contents "assets/a"
   assert_one_of $apk_contents "res/layout/mylayout.xml"
+  assert_one_of $apk_contents "lib/armeabi-v7a/libjni.so"
 }
 
 function test_android_binary_fat_apk_contains_all_shared_libraries() {
   create_new_workspace
   setup_android_sdk_support
   setup_android_ndk_support
-
-  # TODO(b/161709111): enable platform-based toolchain resolution when
-  # --fat_apk_cpu fully supports it. Now it sets a split transition that clears
-  # out --platforms. The mapping in android_helper.sh re-enables a test Android
-  # platform for ARM but not x86. Enabling it for x86 requires an
-  # Android-compatible cc toolchain in tools/cpp/BUILD.tools.
-  add_to_bazelrc "build --noincompatible_enable_android_toolchain_resolution"
 
   # sample.aar contains native shared libraries for x86 and armeabi-v7a
   cp "$(rlocation io_bazel/src/test/shell/bazel/android/sample.aar)" .
@@ -141,7 +144,7 @@ android_binary(
   deps = [":sample"],
 )
 EOF
-  assert_build :app --fat_apk_cpu=x86,armeabi-v7a
+  assert_build :app --android_platforms=//test_android_platforms:x86,//test_android_platforms:armeabi-v7a
   apk_contents="$(zipinfo -1 bazel-bin/app.apk)"
   assert_one_of $apk_contents "lib/x86/libapp.so"
   assert_one_of $apk_contents "lib/armeabi-v7a/libapp.so"

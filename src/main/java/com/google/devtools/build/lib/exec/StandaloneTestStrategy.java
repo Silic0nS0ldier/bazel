@@ -47,6 +47,7 @@ import com.google.devtools.build.lib.buildeventstream.TestFileNameConstants;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.runtime.TestSummaryOptions;
 import com.google.devtools.build.lib.server.FailureDetails.Execution.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.TestAction;
@@ -89,8 +90,11 @@ public class StandaloneTestStrategy extends TestStrategy {
   protected final Path tmpDirRoot;
 
   public StandaloneTestStrategy(
-      ExecutionOptions executionOptions, BinTools binTools, Path tmpDirRoot) {
-    super(executionOptions, binTools);
+      ExecutionOptions executionOptions,
+      TestSummaryOptions testSummaryOptions,
+      BinTools binTools,
+      Path tmpDirRoot) {
+    super(executionOptions, testSummaryOptions, binTools);
     this.tmpDirRoot = tmpDirRoot;
   }
 
@@ -127,12 +131,11 @@ public class StandaloneTestStrategy extends TestStrategy {
             getArgs(action),
             ImmutableMap.copyOf(testEnvironment),
             ImmutableMap.copyOf(executionInfo),
-            action.getRunfilesSupplier(),
             ImmutableMap.of(),
-            /*inputs=*/ action.getInputs(),
+            /* inputs= */ action.getInputs(),
             NestedSetBuilder.emptySet(Order.STABLE_ORDER),
             ImmutableSet.copyOf(action.getSpawnOutputs()),
-            /*mandatoryOutputs=*/ ImmutableSet.of(),
+            /* mandatoryOutputs= */ ImmutableSet.of(),
             localResourcesSupplier);
     Path execRoot = actionExecutionContext.getExecRoot();
     ArtifactPathResolver pathResolver = actionExecutionContext.getPathResolver();
@@ -463,7 +466,6 @@ public class StandaloneTestStrategy extends TestStrategy {
         // Pass the execution info of the action which is identical to the supported tags set on the
         // test target. In particular, this does not set the test timeout on the spawn.
         ImmutableMap.copyOf(executionInfo),
-        null,
         ImmutableMap.of(),
         /*inputs=*/ NestedSetBuilder.create(
             Order.STABLE_ORDER, action.getTestXmlGeneratorScript(), action.getTestLog()),
@@ -490,24 +492,24 @@ public class StandaloneTestStrategy extends TestStrategy {
         "TEST_TOTAL_SHARDS", Integer.toString(action.getExecutionSettings().getTotalShards()));
     testEnvironment.put("TEST_NAME", action.getTestName());
     testEnvironment.put("IS_COVERAGE_SPAWN", "1");
+
     return new SimpleSpawn(
         action,
         args,
         ImmutableMap.copyOf(testEnvironment),
         action.getExecutionInfo(),
-        action.getLcovMergerRunfilesSupplier(),
-        /*filesetMappings=*/ ImmutableMap.of(),
-        /*inputs=*/ NestedSetBuilder.<ActionInput>compileOrder()
+        /* filesetMappings= */ ImmutableMap.of(),
+        /* inputs= */ NestedSetBuilder.<ActionInput>compileOrder()
             .addTransitive(action.getInputs())
             .addAll(expandedCoverageDir)
             .add(action.getCollectCoverageScript())
             .add(action.getCoverageManifest())
             .addTransitive(action.getLcovMergerFilesToRun().build())
             .build(),
-        /*tools=*/ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-        /*outputs=*/ ImmutableSet.of(
+        /* tools= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
+        /* outputs= */ ImmutableSet.of(
             ActionInputHelper.fromPath(action.getCoverageData().getExecPath())),
-        /*mandatoryOutputs=*/ null,
+        /* mandatoryOutputs= */ null,
         SpawnAction.DEFAULT_RESOURCE_SET);
   }
 
@@ -679,7 +681,10 @@ public class StandaloneTestStrategy extends TestStrategy {
     }
     long endTimeMillis = actionExecutionContext.getClock().currentTimeMillis();
 
-    if (testAction.isSharded()) {
+    // Do not override a more informative test failure with a generic failure due to the missing
+    // shard file, which may have been caused by the test failing before the runner had a chance to
+    // touch the file
+    if (testResultDataBuilder.getTestPassed() && testAction.isSharded()) {
       if (testAction.checkShardingSupport()
           && !actionExecutionContext
               .getPathResolver()

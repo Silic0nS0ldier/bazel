@@ -1,4 +1,5 @@
 load("@rules_java//java:defs.bzl", "java_library")
+load("//src:build_defs.bzl", "java_11_library")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -33,7 +34,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/actions:action_input_helper",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
-        "//src/main/java/com/google/devtools/build/lib/actions:runfiles_supplier",
+        "//src/main/java/com/google/devtools/build/lib/actions:runfiles_tree",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -63,6 +64,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
         "//src/main/java/com/google/devtools/build/lib/actions:localhost_capacity",
         "//src/main/java/com/google/devtools/build/lib/actions:resource_manager",
+        "//src/main/java/com/google/devtools/build/lib/actions:runfiles_tree",
         "//src/main/java/com/google/devtools/build/lib/clock",
         "//src/main/java/com/google/devtools/build/lib/events",
         "//src/main/java/com/google/devtools/build/lib/exec:bin_tools",
@@ -76,7 +78,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/protobuf:failure_details_java_proto",
         "//src/main/protobuf:worker_protocol_java_proto",
-        "//third_party:apache_commons_pool2",
         "//third_party:flogger",
         "//third_party:guava",
         "//third_party/protobuf:protobuf_java",
@@ -94,6 +95,8 @@ java_library(
         ":singleplex_worker",
         ":worker_factory",
         ":worker_options",
+        ":worker_pool",
+        ":worker_pool_config",
         ":worker_pool_impl",
         ":worker_process_metrics",
         ":worker_spawn_runner",
@@ -103,9 +106,9 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/exec:execution_options",
         "//src/main/java/com/google/devtools/build/lib/exec:runfiles_tree_updater",
         "//src/main/java/com/google/devtools/build/lib/exec:spawn_strategy_registry",
-        "//src/main/java/com/google/devtools/build/lib/exec:tree_deleter",
         "//src/main/java/com/google/devtools/build/lib/exec/local",
         "//src/main/java/com/google/devtools/build/lib/runtime/commands/events",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:cgroups_info",
         "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox_util",
         "//src/main/java/com/google/devtools/build/lib/sandbox:sandbox_helpers",
         "//src/main/java/com/google/devtools/build/lib/sandbox:sandbox_options",
@@ -117,7 +120,7 @@ java_library(
     ],
 )
 
-java_library(
+java_11_library(
     name = "work_request_handlers",
     srcs = [
         "JsonWorkerMessageProcessor.java",
@@ -158,9 +161,11 @@ java_library(
         ":worker_process_status",
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
         "//src/main/java/com/google/devtools/build/lib/clock",
-        "//src/main/java/com/google/devtools/build/lib/metrics:ps_info_collector",
+        "//src/main/java/com/google/devtools/build/lib/metrics:resource_collector",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:cgroups_info",
         "//src/main/java/com/google/devtools/build/lib/util:os",
         "//third_party:guava",
+        "//third_party:jsr305",
     ],
 )
 
@@ -186,9 +191,10 @@ java_library(
         ":singleplex_worker",
         ":worker",
         ":worker_key",
+        ":worker_options",
         ":worker_process_status",
         "//src/main/java/com/google/devtools/build/lib/events",
-        "//src/main/java/com/google/devtools/build/lib/exec:tree_deleter",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:tree_deleter",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/protobuf:failure_details_java_proto",
@@ -207,7 +213,18 @@ java_library(
     deps = [
         ":worker",
         ":worker_key",
-        "//third_party:apache_commons_pool2",
+        "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "worker_pool_config",
+    srcs = [
+        "WorkerPoolConfig.java",
+    ],
+    deps = [
+        ":worker_factory",
+        "//third_party:guava",
     ],
 )
 
@@ -216,12 +233,15 @@ java_library(
     srcs = [
         "SimpleWorkerPool.java",
         "WorkerPoolImpl.java",
+        "WorkerPoolImplLegacy.java",
     ],
     deps = [
         ":worker",
         ":worker_factory",
         ":worker_key",
         ":worker_pool",
+        ":worker_pool_config",
+        ":worker_process_status",
         "//third_party:apache_commons_pool2",
         "//third_party:flogger",
         "//third_party:guava",
@@ -234,15 +254,16 @@ java_library(
     srcs = ["Worker.java"],
     deps = [
         ":worker_key",
-        ":worker_process_metrics",
         ":worker_process_status",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/events",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:cgroups_info",
         "//src/main/java/com/google/devtools/build/lib/sandbox:sandbox_helpers",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/protobuf:worker_protocol_java_proto",
         "//third_party:guava",
+        "//third_party:jsr305",
     ],
 )
 
@@ -268,12 +289,13 @@ java_library(
         ":worker",
         ":worker_exec_root",
         ":worker_key",
+        ":worker_options",
         ":worker_process_status",
         ":worker_protocol",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/exec:tree_deleter",
         "//src/main/java/com/google/devtools/build/lib/profiler",
-        "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:cgroups_info",
         "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox_command_line_builder",
         "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox_util",
         "//src/main/java/com/google/devtools/build/lib/sandbox:sandbox_helpers",

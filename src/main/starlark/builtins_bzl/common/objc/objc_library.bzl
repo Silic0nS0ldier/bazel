@@ -26,7 +26,6 @@ load(":common/objc/providers.bzl", "J2ObjcEntryClassInfo", "J2ObjcMappingFileInf
 
 objc_internal = _builtins.internal.objc_internal
 coverage_common = _builtins.toplevel.coverage_common
-apple_common = _builtins.toplevel.apple_common
 
 def _attribute_error(attr_name, msg):
     fail("in attribute '" + attr_name + "': " + msg)
@@ -132,6 +131,7 @@ depend on it. Libraries specified with <code>implementation_deps</code> are stil
 in binary targets that depend on this library."""),
         },
         common_attrs.ALWAYSLINK_RULE,
+        # TODO(b/288421584): necessary because IDE aspect can't see toolchains
         common_attrs.CC_TOOLCHAIN_RULE,
         common_attrs.COMPILING_RULE,
         common_attrs.COMPILE_DEPENDENCY_RULE,

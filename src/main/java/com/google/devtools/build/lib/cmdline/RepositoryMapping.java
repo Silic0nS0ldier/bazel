@@ -31,6 +31,10 @@ import javax.annotation.Nullable;
  * <p>For repositories from the WORKSPACE file, if the requested repo doesn't exist in the mapping,
  * we fallback to the requested name. For repositories from Bzlmod, we return null to let the caller
  * decide what to do.
+ *
+ * <p>This class must not implement {@link net.starlark.java.eval.StarlarkValue} since instances of
+ * this class are used as markers by {@link
+ * com.google.devtools.build.lib.analysis.starlark.StarlarkCustomCommandLine}.
  */
 public class RepositoryMapping {
   /* A repo mapping that always falls back to using the apparent name as the canonical name. */
@@ -75,6 +79,11 @@ public class RepositoryMapping {
   @Override
   public int hashCode() {
     return Objects.hashCode(entries, ownerRepo);
+  }
+
+  @Override
+  public String toString() {
+    return String.format("RepositoryMapping{entries=%s, ownerRepo=%s}", entries, ownerRepo);
   }
 
   public static RepositoryMapping create(

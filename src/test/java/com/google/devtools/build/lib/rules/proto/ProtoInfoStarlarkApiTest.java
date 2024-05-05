@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.proto;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.devtools.build.lib.skyframe.BzlLoadValue.keyForBuild;
 
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
@@ -38,7 +39,13 @@ public class ProtoInfoStarlarkApiTest extends BuildViewTestCase {
   @Before
   public void setUp() throws Exception {
     useConfiguration("--proto_compiler=//proto:compiler"); // TODO check do we need that.
-    scratch.file("proto/BUILD", "licenses(['notice'])", "exports_files(['compiler'])");
+    scratch.file(
+        "proto/BUILD",
+        """
+        licenses(["notice"])
+
+        exports_files(["compiler"])
+        """);
     scratch.file("myinfo/myinfo.bzl", "MyInfo = provider()");
     scratch.file("myinfo/BUILD");
     MockProtoSupport.setup(mockToolsConfig);
@@ -47,7 +54,8 @@ public class ProtoInfoStarlarkApiTest extends BuildViewTestCase {
 
   private StructImpl getMyInfoFromTarget(ConfiguredTarget configuredTarget) throws Exception {
     Provider.Key key =
-        new StarlarkProvider.Key(Label.parseCanonical("//myinfo:myinfo.bzl"), "MyInfo");
+        new StarlarkProvider.Key(
+            keyForBuild(Label.parseCanonical("//myinfo:myinfo.bzl")), "MyInfo");
     return (StructImpl) configuredTarget.get(key);
   }
 
@@ -55,11 +63,16 @@ public class ProtoInfoStarlarkApiTest extends BuildViewTestCase {
   public void testProvider() throws Exception {
     scratch.file(
         "foo/test.bzl",
-        "load('//myinfo:myinfo.bzl', 'MyInfo')",
-        "def _impl(ctx):",
-        "  provider = ctx.attr.dep[ProtoInfo]", // NB: This is the modern provider
-        "  return MyInfo(direct_sources=provider.direct_sources)",
-        "test = rule(implementation = _impl, attrs = {'dep': attr.label()})");
+        """
+        load("//myinfo:myinfo.bzl", "MyInfo")
+
+        def _impl(ctx):
+            # NB: This is the modern provider
+            provider = ctx.attr.dep[ProtoInfo]
+            return MyInfo(direct_sources = provider.direct_sources)
+
+        test = rule(implementation = _impl, attrs = {"dep": attr.label()})
+        """);
 
     scratch.file(
         "foo/BUILD",
@@ -79,17 +92,19 @@ public class ProtoInfoStarlarkApiTest extends BuildViewTestCase {
   public void testProtoSourceRootExportedInStarlark() throws Exception {
     scratch.file(
         "third_party/foo/myTestRule.bzl",
-        "load('//myinfo:myinfo.bzl', 'MyInfo')",
-        "",
-        "def _my_test_rule_impl(ctx):",
-        "    return MyInfo(",
-        "        fetched_proto_source_root = ctx.attr.protodep[ProtoInfo].proto_source_root",
-        "    )",
-        "",
-        "my_test_rule = rule(",
-        "    implementation = _my_test_rule_impl,",
-        "    attrs = {'protodep': attr.label()},",
-        ")");
+        """
+        load("//myinfo:myinfo.bzl", "MyInfo")
+
+        def _my_test_rule_impl(ctx):
+            return MyInfo(
+                fetched_proto_source_root = ctx.attr.protodep[ProtoInfo].proto_source_root,
+            )
+
+        my_test_rule = rule(
+            implementation = _my_test_rule_impl,
+            attrs = {"protodep": attr.label()},
+        )
+        """);
 
     scratch.file(
         "third_party/foo/BUILD",

@@ -134,10 +134,13 @@ java_test(
     name = "CgroupsInfoTest",
     size = "small",
     srcs = ["CgroupsInfoTest.java"],
-    tags = ["no_windows"],
+    tags = [
+        # MacOS does not have cgroups so it can't support hardened sandbox
+        "no_macos",
+        "no_windows",
+    ],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox",
-        "//src/main/java/com/google/devtools/build/lib/util:pair",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:cgroups_info",
         "//src/test/java/com/google/devtools/build/lib/vfs/util",
         "//third_party:guava",
         "//third_party:junit4",

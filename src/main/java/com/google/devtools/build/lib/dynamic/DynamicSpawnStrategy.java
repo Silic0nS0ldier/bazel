@@ -362,11 +362,14 @@ public class DynamicSpawnStrategy implements SpawnStrategy {
         canExecRemote(spawn, executionPolicy, actionExecutionContext, dynamicStrategyRegistry);
 
     if (!localCanExec && !remoteCanExec) {
+      @SuppressWarnings("RedundantSetterCall")
       FailureDetail failure =
           FailureDetail.newBuilder()
               .setMessage(
                   getNoCanExecFailureMessage(
                       spawn, executionPolicy.canRunLocally(), executionPolicy.canRunRemotely()))
+              // This use of `setDynamicExecution` was overwritten by a call to `setSpawn` below, as
+              // they're in a oneof. This may be a bug! Please fix, or delete this redundant call.
               .setDynamicExecution(
                   DynamicExecution.newBuilder().setCode(Code.NO_USABLE_STRATEGY_FOUND).build())
               .setSpawn(
@@ -544,8 +547,8 @@ public class DynamicSpawnStrategy implements SpawnStrategy {
       return null;
     } catch (ExecutionException e) {
       Throwable cause = e.getCause();
-      if (cause instanceof ExecException) {
-        throw (ExecException) cause;
+      if (cause instanceof ExecException execException) {
+        throw execException;
       } else if (cause instanceof InterruptedException) {
         // If the branch was interrupted, it might be due to a user interrupt or due to our request
         // for cancellation. Assume the latter here because if this was actually a user interrupt,

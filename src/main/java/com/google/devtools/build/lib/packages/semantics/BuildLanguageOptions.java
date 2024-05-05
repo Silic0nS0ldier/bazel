@@ -246,6 +246,17 @@ public final class BuildLanguageOptions extends OptionsBase {
   public boolean incompatibleExistingRulesImmutableView;
 
   @Option(
+      name = "incompatible_stop_exporting_build_file_path",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+      help =
+          "If set to true, deprecated ctx.build_file_path will not be available. ctx.label.package"
+              + " + '/BUILD' can be used instead.")
+  public boolean incompatibleStopExportingBuildFilePath;
+
+  @Option(
       name = "experimental_google_legacy_api",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -366,18 +377,6 @@ public final class BuildLanguageOptions extends OptionsBase {
               + " parameter for local execution. Otherwise it will default to 250 MB for memory"
               + " and 1 cpu.")
   public boolean experimentalActionResourceSet;
-
-  @Option(
-      name = "incompatible_struct_has_no_methods",
-      defaultValue = "false",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
-      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
-      help =
-          "Disables the to_json and to_proto methods of struct, which pollute the struct field"
-              + " namespace. Instead, use json.encode or json.encode_indent for JSON, or"
-              + " proto.encode_text for textproto.")
-  public boolean incompatibleStructHasNoMethods;
 
   @Option(
       name = "incompatible_always_check_depset_elements",
@@ -703,20 +702,6 @@ public final class BuildLanguageOptions extends OptionsBase {
   public boolean experimentalRuleExtensionApi;
 
   @Option(
-      name = "separate_aspect_deps",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
-      help =
-          "If enabled, the dependencies of the main aspect in an aspect path will be"
-              + " separated from those of the target and the base aspects. ctx.attr.{attr_name}"
-              + " will always get the attribute value from the main aspect and"
-              + " ctx.rule.attr.{attr_name} will get the value from the rule if it has an attribute"
-              + " with that name or from the base aspects attributes (first one in"
-              + " the aspects path wins).")
-  public boolean separateAspectDeps;
-
-  @Option(
       name = "incompatible_enable_deprecated_label_apis",
       defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -725,6 +710,18 @@ public final class BuildLanguageOptions extends OptionsBase {
           "If enabled, certain deprecated APIs (native.repository_name, Label.workspace_name,"
               + " Label.relative) can be used.")
   public boolean enableDeprecatedLabelApis;
+
+  @Option(
+      name = "incompatible_disallow_ctx_resolve_tools",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+      help =
+          "If set to true, calling the deprecated ctx.resolve_tools API always fails. Uses of this"
+              + " API should be replaced by an executable or tools argument to ctx.actions.run or"
+              + " ctx.actions.run_shell.")
+  public boolean incompatibleDisallowCtxResolveTools;
 
   /**
    * An interner to reduce the number of StarlarkSemantics instances. A single Blaze instance should
@@ -789,7 +786,6 @@ public final class BuildLanguageOptions extends OptionsBase {
             .setBool(INCOMPATIBLE_NO_PACKAGE_DISTRIBS, incompatibleNoPackageDistribs)
             .setBool(INCOMPATIBLE_NO_RULE_OUTPUTS_PARAM, incompatibleNoRuleOutputsParam)
             .setBool(INCOMPATIBLE_RUN_SHELL_COMMAND_STRING, incompatibleRunShellCommandString)
-            .setBool(INCOMPATIBLE_STRUCT_HAS_NO_METHODS, incompatibleStructHasNoMethods)
             .setBool(StarlarkSemantics.PRINT_TEST_MARKER, internalStarlarkFlagTestCanary)
             .setBool(
                 INCOMPATIBLE_DO_NOT_SPLIT_LINKING_CMDLINE, incompatibleDoNotSplitLinkingCmdline)
@@ -827,8 +823,10 @@ public final class BuildLanguageOptions extends OptionsBase {
                 INCOMPATIBLE_DISABLE_TARGET_DEFAULT_PROVIDER_FIELDS,
                 incompatibleDisableTargetDefaultProviderFields)
             .setBool(EXPERIMENTAL_RULE_EXTENSION_API, experimentalRuleExtensionApi)
-            .setBool(SEPARATE_ASPECT_DEPS, separateAspectDeps)
             .setBool(INCOMPATIBLE_ENABLE_DEPRECATED_LABEL_APIS, enableDeprecatedLabelApis)
+            .setBool(
+                INCOMPATIBLE_STOP_EXPORTING_BUILD_FILE_PATH, incompatibleStopExportingBuildFilePath)
+            .setBool(INCOMPATIBLE_DISALLOW_CTX_RESOLVE_TOOLS, incompatibleDisallowCtxResolveTools)
             .build();
     return INTERNER.intern(semantics);
   }
@@ -900,7 +898,7 @@ public final class BuildLanguageOptions extends OptionsBase {
   public static final String INCOMPATIBLE_RUN_SHELL_COMMAND_STRING =
       "+incompatible_run_shell_command_string";
   public static final String INCOMPATIBLE_STRUCT_HAS_NO_METHODS =
-      "-incompatible_struct_has_no_methods";
+      "+incompatible_struct_has_no_methods";
   public static final String INCOMPATIBLE_USE_CC_CONFIGURE_FROM_RULES_CC =
       "-incompatible_use_cc_configure_from_rules";
   public static final String INCOMPATIBLE_UNAMBIGUOUS_LABEL_STRINGIFICATION =
@@ -922,10 +920,12 @@ public final class BuildLanguageOptions extends OptionsBase {
   public static final String INCOMPATIBLE_DISABLE_TARGET_DEFAULT_PROVIDER_FIELDS =
       "-incompatible_disable_target_default_provider_fields";
   public static final String EXPERIMENTAL_RULE_EXTENSION_API = "-experimental_rule_extension_api";
-  public static final String SEPARATE_ASPECT_DEPS = "+separate_aspect_deps";
   public static final String INCOMPATIBLE_ENABLE_DEPRECATED_LABEL_APIS =
       "+incompatible_enable_deprecated_label_apis";
-
+  public static final String INCOMPATIBLE_STOP_EXPORTING_BUILD_FILE_PATH =
+      "-incompatible_stop_exporting_build_file_path";
+  public static final String INCOMPATIBLE_DISALLOW_CTX_RESOLVE_TOOLS =
+      "-incompatible_disallow_ctx_resolve_tools";
   // non-booleans
   public static final StarlarkSemantics.Key<String> EXPERIMENTAL_BUILTINS_BZL_PATH =
       new StarlarkSemantics.Key<>("experimental_builtins_bzl_path", "%bundled%");

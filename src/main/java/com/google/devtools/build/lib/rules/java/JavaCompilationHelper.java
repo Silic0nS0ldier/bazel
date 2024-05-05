@@ -208,7 +208,8 @@ public final class JavaCompilationHelper {
     return builder.build();
   }
 
-  public void createCompileAction(JavaCompileOutputs<Artifact> outputs) throws RuleErrorException {
+  public void createCompileAction(JavaCompileOutputs<Artifact> outputs)
+      throws RuleErrorException, InterruptedException {
     if (outputs.genClass() != null) {
       createGenJarAction(
           outputs.output(),
@@ -416,24 +417,29 @@ public final class JavaCompilationHelper {
   }
 
   private ImmutableMap<String, String> getExecutionInfo() throws RuleErrorException {
-    ImmutableMap.Builder<String, String> executionInfo = ImmutableMap.builder();
-    ImmutableMap.Builder<String, String> workerInfo = ImmutableMap.builder();
+    ImmutableMap.Builder<String, String> modifiableExecutionInfo = ImmutableMap.builder();
+    modifiableExecutionInfo.put(ExecutionRequirements.SUPPORTS_PATH_MAPPING, "1");
     if (javaToolchain.getJavacSupportsWorkers()) {
-      workerInfo.put(ExecutionRequirements.SUPPORTS_WORKERS, "1");
+      modifiableExecutionInfo.put(ExecutionRequirements.SUPPORTS_WORKERS, "1");
     }
     if (javaToolchain.getJavacSupportsMultiplexWorkers()) {
-      workerInfo.put(ExecutionRequirements.SUPPORTS_MULTIPLEX_WORKERS, "1");
+      modifiableExecutionInfo.put(ExecutionRequirements.SUPPORTS_MULTIPLEX_WORKERS, "1");
     }
     if (javaToolchain.getJavacSupportsWorkerCancellation()) {
-      workerInfo.put(ExecutionRequirements.SUPPORTS_WORKER_CANCELLATION, "1");
+      modifiableExecutionInfo.put(ExecutionRequirements.SUPPORTS_WORKER_CANCELLATION, "1");
     }
+    if (javaToolchain.getJavacSupportsWorkerMultiplexSandboxing()) {
+      modifiableExecutionInfo.put(ExecutionRequirements.SUPPORTS_MULTIPLEX_SANDBOXING, "1");
+    }
+    ImmutableMap.Builder<String, String> executionInfo = ImmutableMap.builder();
     executionInfo.putAll(
         getConfiguration()
-            .modifiedExecutionInfo(workerInfo.buildOrThrow(), JavaCompileActionBuilder.MNEMONIC));
+            .modifiedExecutionInfo(
+                modifiableExecutionInfo.buildOrThrow(), JavaCompileActionBuilder.MNEMONIC));
     executionInfo.putAll(
         TargetUtils.getExecutionInfo(ruleContext.getRule(), ruleContext.isAllowTagsPropagation()));
 
-    return executionInfo.buildOrThrow();
+    return executionInfo.buildKeepingLast();
   }
 
   /** Returns the bootclasspath explicit set in attributes if present, or else the default. */
@@ -537,7 +543,7 @@ public final class JavaCompilationHelper {
    * @param headerDeps the .jdeps output of this java compilation
    */
   public void createHeaderCompilationAction(Artifact headerJar, Artifact headerDeps)
-      throws RuleErrorException {
+      throws RuleErrorException, InterruptedException {
 
     JavaTargetAttributes attributes = getAttributes();
 
@@ -682,7 +688,8 @@ public final class JavaCompilationHelper {
    * @return the header jar (if requested), or ijar (if requested), or else the class jar
    */
   public Artifact createCompileTimeJarAction(
-      Artifact runtimeJar, JavaCompilationArtifacts.Builder builder) throws RuleErrorException {
+      Artifact runtimeJar, JavaCompilationArtifacts.Builder builder)
+      throws RuleErrorException, InterruptedException {
     Artifact jar;
     boolean isFullJar = false;
     if (shouldUseHeaderCompilation()) {

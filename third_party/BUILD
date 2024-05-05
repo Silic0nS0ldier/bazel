@@ -12,6 +12,7 @@ filegroup(
         "//third_party/android_dex:srcs",
         "//third_party/cncf_udpa:srcs",
         "//third_party/def_parser:srcs",
+        "//third_party/googleapis:srcs",
         "//third_party/grpc:srcs",
         "//third_party/grpc-java:srcs",
         "//third_party/ijar:srcs",
@@ -33,9 +34,9 @@ filegroup(
         "//third_party/py/frozendict:srcs",
         "//third_party/py/mock:srcs",
         "//third_party/py/six:srcs",
+        "//third_party/remoteapis:srcs",
+        "//third_party/upb:srcs",
         "//third_party/zlib:srcs",
-        "@googleapis//:srcs",
-        "@remoteapis//:srcs",
     ],
 )
 
@@ -349,19 +350,14 @@ filegroup(
     ],
 )
 
-# TODO(https://github.com/bazelbuild/bazel/issues/18214): After fixing Guava leak
-# in test-runner, the guava target can be reverted back to java_library
-java_import(
+java_library(
     name = "guava",
     applicable_licenses = [":guava_license"],
-    jars = [
-        "@maven//:com_google_guava_guava_file",
-        "@maven//:com_google_guava_failureaccess_file",
-    ],
     exports = [
         ":error_prone_annotations",
         ":jcip_annotations",
         ":jsr305",
+        "@maven//:com_google_guava_guava",
     ],
 )
 

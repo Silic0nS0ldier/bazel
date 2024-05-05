@@ -60,28 +60,10 @@ JAVA_TOOLCHAIN="@bazel_tools//tools/jdk:toolchain"
 JAVA_TOOLCHAIN_TYPE="@bazel_tools//tools/jdk:toolchain_type"
 
 RULES_JAVA_REPO_NAME=$(cat "$(rlocation io_bazel/src/test/shell/bazel/RULES_JAVA_REPO_NAME)")
-JAVA_TOOLS_REPO_PREFIX="${RULES_JAVA_REPO_NAME}~toolchains~"
-
 JAVA_TOOLS_ZIP="$1"; shift
-if [[ "${JAVA_TOOLS_ZIP}" != "released" ]]; then
-  JAVA_TOOLS_ZIP_FILE="$(rlocation "${JAVA_TOOLS_ZIP}")"
-  JAVA_TOOLS_DIR="$TEST_TMPDIR/_java_tools"
-  unzip -q "${JAVA_TOOLS_ZIP_FILE}" -d "$JAVA_TOOLS_DIR"
-  touch "$JAVA_TOOLS_DIR/WORKSPACE"
-  add_to_bazelrc "build --override_repository=${JAVA_TOOLS_REPO_PREFIX}remote_java_tools=${JAVA_TOOLS_DIR}"
-fi
-
 JAVA_TOOLS_PREBUILT_ZIP="$1"; shift
-if [[ "${JAVA_TOOLS_PREBUILT_ZIP}" != "released" ]]; then
-  JAVA_TOOLS_PREBUILT_ZIP_FILE="$(rlocation "${JAVA_TOOLS_PREBUILT_ZIP}")"
-  JAVA_TOOLS_PREBUILT_DIR="$TEST_TMPDIR/_java_tools_prebuilt"
-  unzip -q "${JAVA_TOOLS_PREBUILT_ZIP_FILE}" -d "$JAVA_TOOLS_PREBUILT_DIR"
-  touch "$JAVA_TOOLS_PREBUILT_DIR/WORKSPACE"
-  add_to_bazelrc "build --override_repository=${JAVA_TOOLS_REPO_PREFIX}remote_java_tools_linux=${JAVA_TOOLS_PREBUILT_DIR}"
-  add_to_bazelrc "build --override_repository=${JAVA_TOOLS_REPO_PREFIX}remote_java_tools_windows=${JAVA_TOOLS_PREBUILT_DIR}"
-  add_to_bazelrc "build --override_repository=${JAVA_TOOLS_REPO_PREFIX}remote_java_tools_darwin_x86_64=${JAVA_TOOLS_PREBUILT_DIR}"
-  add_to_bazelrc "build --override_repository=${JAVA_TOOLS_REPO_PREFIX}remote_java_tools_darwin_arm64=${JAVA_TOOLS_PREBUILT_DIR}"
-fi
+
+override_java_tools "${RULES_JAVA_REPO_NAME}" "${JAVA_TOOLS_ZIP}" "${JAVA_TOOLS_PREBUILT_ZIP}"
 
 if [[ $# -gt 0 ]]; then
   JAVA_LANGUAGE_VERSION="$1"; shift
@@ -1576,6 +1558,7 @@ EOF
   chmod +x "${pkg}"/run.sh
 
   bazel test //"${pkg}":bar --test_output=all --verbose_failures >& "$TEST_log" \
+      --legacy_external_runfiles \
       || fail "Expected success"
 }
 
@@ -1941,6 +1924,164 @@ public class B {}
 EOF
 
   bazel build //pkg:a >& $TEST_log || fail "build failed"
+}
+
+function test_sandboxed_multiplexing() {
+  if [[ "${JAVA_TOOLS_ZIP}" == released ]]; then
+    # TODO: Enable test after the next java_tools release.
+    return 0
+  fi
+
+  mkdir -p pkg
+  cat << 'EOF' > pkg/BUILD
+load("@bazel_tools//tools/jdk:default_java_toolchain.bzl", "default_java_toolchain")
+default_java_toolchain(
+    name = "java_toolchain",
+    source_version = "17",
+    target_version = "17",
+    javac_supports_worker_multiplex_sandboxing = True,
+)
+java_library(name = "a", srcs = ["A.java"], deps = [":b"])
+java_library(name = "b", srcs = ["B.java"])
+EOF
+  cat << 'EOF' > pkg/A.java
+public class A extends B {}
+EOF
+  cat << 'EOF' > pkg/B.java
+public class B {}
+EOF
+
+  bazel build //pkg:a \
+    --experimental_worker_multiplex_sandboxing \
+    --java_language_version=17 \
+    --extra_toolchains=//pkg:java_toolchain_definition \
+    >& $TEST_log || fail "build failed"
+}
+
+function test_strict_deps_error_external_repo_starlark_action() {
+  cat << 'EOF' > MODULE.bazel
+bazel_dep(
+    name = "lib_c",
+    repo_name = "c",
+)
+local_path_override(
+    module_name = "lib_c",
+    path = "lib_c",
+)
+EOF
+
+  mkdir -p pkg
+  cat << 'EOF' > pkg/BUILD
+java_library(name = "a", srcs = ["A.java"], deps = [":b"])
+java_library(name = "b", srcs = ["B.java"], deps = ["@c"])
+EOF
+  cat << 'EOF' > pkg/A.java
+public class A extends B implements C {}
+EOF
+  cat << 'EOF' > pkg/B.java
+public class B implements C {}
+EOF
+
+  mkdir -p lib_c
+  cat << 'EOF' > lib_c/MODULE.bazel
+module(name = "lib_c")
+EOF
+  cat << 'EOF' > lib_c/BUILD
+java_library(name = "c_pregen", srcs = ["C.java"])
+java_import(name = "c", jars = ["libc_pregen.jar"], visibility = ["//visibility:public"])
+EOF
+  cat << 'EOF' > lib_c/C.java
+public interface C {}
+EOF
+
+  bazel build //pkg:a >& $TEST_log && fail "build should fail"
+  expect_log "buildozer 'add deps @c//:c' //pkg:a"
+}
+
+function test_strict_deps_error_external_repo_header_compile_action() {
+  cat << 'EOF' > MODULE.bazel
+bazel_dep(
+    name = "lib_c",
+    repo_name = "c",
+)
+local_path_override(
+    module_name = "lib_c",
+    path = "lib_c",
+)
+EOF
+
+  mkdir -p pkg
+  cat << 'EOF' > pkg/BUILD
+java_binary(name = "Main", srcs = ["Main.java"], deps = [":a"])
+java_library(name = "a", srcs = ["A.java"], deps = [":b"])
+java_library(name = "b", srcs = ["B.java"], deps = ["@c"])
+EOF
+  cat << 'EOF' > pkg/Main.java
+public class Main extends A {}
+EOF
+  cat << 'EOF' > pkg/A.java
+public class A extends B implements C {}
+EOF
+  cat << 'EOF' > pkg/B.java
+public class B implements C {}
+EOF
+
+  mkdir -p lib_c
+  cat << 'EOF' > lib_c/MODULE.bazel
+module(name = "lib_c")
+EOF
+  cat << 'EOF' > lib_c/BUILD
+java_library(name = "c", srcs = ["C.java"], visibility = ["//visibility:public"])
+EOF
+  cat << 'EOF' > lib_c/C.java
+public interface C {}
+EOF
+
+  bazel build //pkg:a >& $TEST_log && fail "build should fail"
+  expect_log "buildozer 'add deps @c//:c' //pkg:a"
+}
+
+function test_strict_deps_error_external_repo_compile_action() {
+  cat << 'EOF' > MODULE.bazel
+bazel_dep(
+    name = "lib_c",
+    repo_name = "c",
+)
+local_path_override(
+    module_name = "lib_c",
+    path = "lib_c",
+)
+EOF
+
+  mkdir -p pkg
+  cat << 'EOF' > pkg/BUILD
+java_library(name = "a", srcs = ["A.java"], deps = [":b"])
+java_library(name = "b", srcs = ["B.java"], deps = ["@c"])
+EOF
+  cat << 'EOF' > pkg/A.java
+public class A extends B {
+  boolean foo() {
+    return this instanceof C;
+  }
+}
+EOF
+  cat << 'EOF' > pkg/B.java
+public class B implements C {}
+EOF
+
+  mkdir -p lib_c
+  cat << 'EOF' > lib_c/MODULE.bazel
+module(name = "lib_c")
+EOF
+  cat << 'EOF' > lib_c/BUILD
+java_library(name = "c", srcs = ["C.java"], visibility = ["//visibility:public"])
+EOF
+  cat << 'EOF' > lib_c/C.java
+public interface C {}
+EOF
+
+  bazel build //pkg:a >& $TEST_log && fail "build should fail"
+  expect_log "buildozer 'add deps @c//:c' //pkg:a"
 }
 
 run_suite "Java integration tests"

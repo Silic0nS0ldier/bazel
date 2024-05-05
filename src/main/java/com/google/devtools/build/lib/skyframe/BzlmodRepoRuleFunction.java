@@ -33,7 +33,7 @@ import com.google.devtools.build.lib.bazel.bzlmod.ModuleFileValue.RootModuleFile
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleKey;
 import com.google.devtools.build.lib.bazel.bzlmod.NonRegistryOverride;
 import com.google.devtools.build.lib.bazel.bzlmod.RepoSpec;
-import com.google.devtools.build.lib.bazel.bzlmod.SingleExtensionEvalValue;
+import com.google.devtools.build.lib.bazel.bzlmod.SingleExtensionValue;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.cmdline.RepositoryMapping;
@@ -70,14 +70,11 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
   private final BlazeDirectories directories;
 
   /**
-   * An empty repo mapping anchored to the main repo.
-   *
-   * <p>None of the labels present in RepoSpecs can point to any repo other than the main repo
-   * or @bazel_tools, because at this point we don't know how any other repo is defined yet. The
-   * RepoSpecs processed by this class can only contain labels from the MODULE.bazel file (from
-   * overrides). In the future, they might contain labels from the lockfile, but those will need to
-   * be canonical label literals, which bypass repo mapping anyway.
+   * An empty repo mapping anchored to the main repo. Label strings in {@link RepoSpec}s are always
+   * in unambiguous canonical form and thus require no mapping, except instances read from old
+   * lockfiles.
    */
+  // TODO(fmeum): Make this mapping truly empty after bumping LOCK_FILE_VERSION.
   private static final RepositoryMapping EMPTY_MAIN_REPO_MAPPING =
       RepositoryMapping.create(
           ImmutableMap.of("", RepositoryName.MAIN, "bazel_tools", RepositoryName.BAZEL_TOOLS),
@@ -108,7 +105,7 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
     // Step 1: Look for repositories defined by non-registry overrides.
     Optional<RepoSpec> repoSpec = checkRepoFromNonRegistryOverrides(root, repositoryName);
     if (repoSpec.isPresent()) {
-      return createRuleFromSpec(repoSpec.get(), starlarkSemantics, env);
+      return createRuleFromSpec(repoSpec.get(), repositoryName, starlarkSemantics, env);
     }
 
     // BazelDepGraphValue is affected by repos found in Step 1, therefore it should NOT
@@ -122,7 +119,7 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
     // Step 2: Look for repositories derived from Bazel Modules.
     repoSpec = checkRepoFromBazelModules(bazelDepGraphValue, repositoryName);
     if (repoSpec.isPresent()) {
-      return createRuleFromSpec(repoSpec.get(), starlarkSemantics, env);
+      return createRuleFromSpec(repoSpec.get(), repositoryName, starlarkSemantics, env);
     }
 
     // Step 3: look for the repo from module extension evaluation results.
@@ -136,18 +133,18 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
       return BzlmodRepoRuleValue.REPO_RULE_NOT_FOUND_VALUE;
     }
 
-    SingleExtensionEvalValue extensionEval =
-        (SingleExtensionEvalValue) env.getValue(SingleExtensionEvalValue.key(extensionId.get()));
-    if (extensionEval == null) {
+    SingleExtensionValue extensionValue =
+        (SingleExtensionValue) env.getValue(SingleExtensionValue.key(extensionId.get()));
+    if (extensionValue == null) {
       return null;
     }
 
-    String internalRepo = extensionEval.getCanonicalRepoNameToInternalNames().get(repositoryName);
+    String internalRepo = extensionValue.getCanonicalRepoNameToInternalNames().get(repositoryName);
     if (internalRepo == null) {
       return BzlmodRepoRuleValue.REPO_RULE_NOT_FOUND_VALUE;
     }
-    RepoSpec extRepoSpec = extensionEval.getGeneratedRepoSpecs().get(internalRepo);
-    return createRuleFromSpec(extRepoSpec, starlarkSemantics, env);
+    RepoSpec extRepoSpec = extensionValue.getGeneratedRepoSpecs().get(internalRepo);
+    return createRuleFromSpec(extRepoSpec, repositoryName, starlarkSemantics, env);
   }
 
   private static Optional<RepoSpec> checkRepoFromNonRegistryOverrides(
@@ -157,7 +154,7 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
       return Optional.empty();
     }
     NonRegistryOverride override = (NonRegistryOverride) root.getOverrides().get(moduleName);
-    return Optional.of(override.getRepoSpec(repositoryName));
+    return Optional.of(override.getRepoSpec());
   }
 
   private Optional<RepoSpec> checkRepoFromBazelModules(
@@ -171,7 +168,10 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
 
   @Nullable
   private BzlmodRepoRuleValue createRuleFromSpec(
-      RepoSpec repoSpec, StarlarkSemantics starlarkSemantics, Environment env)
+      RepoSpec repoSpec,
+      RepositoryName repositoryName,
+      StarlarkSemantics starlarkSemantics,
+      Environment env)
       throws BzlmodRepoRuleFunctionException, InterruptedException {
     RuleClass ruleClass;
     if (repoSpec.isNativeRepoRule()) {
@@ -191,6 +191,11 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
       ruleClass = getStarlarkRuleClass(repoSpec, loadedModules);
     }
 
+    var attributes =
+        ImmutableMap.<String, Object>builder()
+            .putAll(resolveRemotePatchesUrl(repoSpec).attributes())
+            .put("name", repositoryName.getName())
+            .buildOrThrow();
     try {
       Rule rule =
           BzlmodRepoRuleCreator.createRule(
@@ -201,7 +206,7 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
               env.getListener(),
               "BzlmodRepoRuleFunction.createRule",
               ruleClass,
-              resolveRemotePatchesUrl(repoSpec).attributes());
+              attributes);
       return new BzlmodRepoRuleValue(rule.getPackage(), rule.getName());
     } catch (InvalidRuleException e) {
       throw new BzlmodRepoRuleFunctionException(e, Transience.PERSISTENT);
@@ -302,8 +307,8 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
       RepoSpec repoSpec, ImmutableMap<String, Module> loadedModules)
       throws BzlmodRepoRuleFunctionException {
     Object object = loadedModules.get(repoSpec.bzlFile()).getGlobal(repoSpec.ruleClassName());
-    if (object instanceof RuleFunction) {
-      return ((RuleFunction) object).getRuleClass();
+    if (object instanceof RuleFunction ruleFunction) {
+      return ruleFunction.getRuleClass();
     } else {
       InvalidRuleException e =
           new InvalidRuleException("Invalid repository rule: " + repoSpec.getRuleClass());

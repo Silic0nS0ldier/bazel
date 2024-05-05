@@ -110,9 +110,7 @@ def _exec_transition_impl(fragments):
 
 bazel_fragments["AndroidConfiguration.Options"] = fragment(
     propagate = [
-        "//command_line_option:android_crosstool_top",
         "//command_line_option:android_sdk",
-        "//command_line_option:incompatible_enable_android_toolchain_resolution",
         "//command_line_option:incompatible_android_platforms_transition_updated_affected",
         "//command_line_option:desugar_for_android",
         "//command_line_option:desugar_java8_libs",
@@ -209,18 +207,14 @@ bazel_fragments["ConfigFeatureFlagOptions"] = fragment(
 )
 
 def _core_options(settings):
-    ans = {
+    return {
         "//command_line_option:compilation_mode": settings["//command_line_option:host_compilation_mode"],
         "//command_line_option:is exec configuration": True,
         "//command_line_option:cpu": settings["//command_line_option:host_cpu"],
         "//command_line_option:stamp": False,
         "//command_line_option:action_env": settings["//command_line_option:host_action_env"],
+        "//command_line_option:features": settings["//command_line_option:host_features"],
     }
-    if settings["//command_line_option:incompatible_use_host_features"]:
-        ans["//command_line_option:features"] = settings["//command_line_option:host_features"]
-    else:
-        ans["//command_line_option:features"] = settings["//command_line_option:features"]
-    return ans
 
 bazel_fragments["CoreOptions"] = fragment(
     propagate = [
@@ -247,7 +241,6 @@ bazel_fragments["CoreOptions"] = fragment(
         "//command_line_option:strict_filesets",
         "//command_line_option:check_visibility",
         "//command_line_option:check_licenses",
-        "//command_line_option:incompatible_use_host_features",
         "//command_line_option:host_features",
         "//command_line_option:host_action_env",
         "//command_line_option:archived_tree_artifact_mnemonics_filter",

@@ -58,7 +58,6 @@ import com.google.devtools.build.lib.packages.util.BazelMockAndroidSupport;
 import com.google.devtools.build.lib.rules.android.AndroidRuleClasses.MultidexMode;
 import com.google.devtools.build.lib.rules.android.deployinfo.AndroidDeployInfoOuterClass.AndroidDeployInfo;
 import com.google.devtools.build.lib.rules.cpp.CppFileTypes;
-import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaCompileAction;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
@@ -108,11 +107,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void setup() throws Exception {
     scratch.file(
         "java/android/BUILD",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "              )");
+        """
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     scratch.file(
         "java/android/res/values/strings.xml",
         "<resources><string name = 'hello'>Hello Android!</string></resources>");
@@ -134,17 +136,11 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "platforms:",
         "  //java/android/platforms:armeabi-v7a",
         "    --cpu=armeabi-v7a",
-        "    --android_cpu=armeabi-v7a",
-        "    --crosstool_top=//android/crosstool:everything",
         "  //java/android/platforms:x86",
         "    --cpu=x86",
-        "    --android_cpu=x86",
-        "    --crosstool_top=//android/crosstool:everything",
         "flags:",
-        "  --crosstool_top=//android/crosstool:everything",
         "  --cpu=armeabi-v7a",
         "    //java/android/platforms:armv7",
-        "  --crosstool_top=//android/crosstool:everything",
         "  --cpu=x86",
         "    //java/android/platforms:x86");
     setBuildLanguageOptions("--experimental_google_legacy_api");
@@ -273,16 +269,22 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testLegacyMainDexListGenerator() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'legacy')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+        )
+        """);
     scratch.file(
         "tools/fake/BUILD",
-        "cc_binary(",
-        "    name = 'generate_main_dex_list',",
-        "    srcs = ['main.cc'])");
+        """
+        cc_binary(
+            name = "generate_main_dex_list",
+            srcs = ["main.cc"],
+        )
+        """);
     useConfiguration("--legacy_main_dex_list_generator=//tools/fake:generate_main_dex_list");
 
     ConfiguredTarget binary = getConfiguredTarget("//java/a:a");
@@ -309,26 +311,34 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testOptimizedDexingWithLegacyMultidex() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    proguard_specs = ['specs.pgcfg'],",
-        "    proguard_generate_mapping = True,",
-        "    multidex = 'legacy')",
-        "android_binary(",
-        "    name = 'b',",
-        "    srcs = ['B.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    proguard_specs = ['specs.pgcfg'],",
-        "    proguard_generate_mapping = False,",
-        "    shrink_resources = 0,",
-        "    multidex = 'legacy')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_generate_mapping = True,
+            proguard_specs = ["specs.pgcfg"],
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_generate_mapping = False,
+            proguard_specs = ["specs.pgcfg"],
+            shrink_resources = 0,
+        )
+        """);
     scratch.file(
         "tools/fake/BUILD",
-        "cc_binary(",
-        "    name = 'optimizing_dexer',",
-        "    srcs = ['main.cc'])");
+        """
+        cc_binary(
+            name = "optimizing_dexer",
+            srcs = ["main.cc"],
+        )
+        """);
     useConfiguration("--optimizing_dexer=//tools/fake:optimizing_dexer");
 
     ConfiguredTarget binary = getConfiguredTarget("//java/a:a");
@@ -384,18 +394,24 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testOptimizedDexingWithNativeMultidex() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    proguard_specs = ['specs.pgcfg'],",
-        "    proguard_generate_mapping = True,",
-        "    multidex = 'native')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_generate_mapping = True,
+            proguard_specs = ["specs.pgcfg"],
+        )
+        """);
     scratch.file(
         "tools/fake/BUILD",
-        "cc_binary(",
-        "    name = 'optimizing_dexer',",
-        "    srcs = ['main.cc'])");
+        """
+        cc_binary(
+            name = "optimizing_dexer",
+            srcs = ["main.cc"],
+        )
+        """);
     useConfiguration("--optimizing_dexer=//tools/fake:optimizing_dexer");
 
     // The behavior should match legacy multidex except for the main dex list and min sdk, so we
@@ -461,13 +477,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNonLegacyNativeDepsDoesNotPolluteDexSharding() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(name = 'a',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               multidex = 'native',",
-        "               deps = [':cc'],",
-        "               dex_shards = 2)",
-        "cc_library(name = 'cc',",
-        "           srcs = ['cc.cc'])");
+        """
+        android_binary(
+            name = "a",
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            deps = [":cc"],
+        )
+
+        cc_library(
+            name = "cc",
+            srcs = ["cc.cc"],
+        )
+        """);
 
     Artifact jarShard =
         artifactByPath(
@@ -484,58 +507,72 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testCcInfoDeps() throws Exception {
     scratch.file(
         "java/a/cc_info.bzl",
-        "def _impl(ctx):",
-        "  cc_toolchain = ctx.attr._cc_toolchain[cc_common.CcToolchainInfo]",
-        "  feature_configuration = cc_common.configure_features(",
-        "    ctx = ctx,",
-        "    cc_toolchain = cc_toolchain,",
-        "    requested_features = ctx.features,",
-        "    unsupported_features = ctx.disabled_features,",
-        "  )",
-        "  library_to_link = cc_common.create_library_to_link(",
-        "    actions=ctx.actions, feature_configuration=feature_configuration, ",
-        "    cc_toolchain = cc_toolchain, ",
-        "    static_library=ctx.file.static_library)",
-        "  linker_input = cc_common.create_linker_input(",
-        "    libraries = depset([library_to_link]),",
-        "    user_link_flags=depset(ctx.attr.user_link_flags),",
-        "    owner = ctx.label,",
-        "  )",
-        "  linking_context = cc_common.create_linking_context(",
-        "    linker_inputs=depset([linker_input]))",
-        "  return [CcInfo(linking_context=linking_context)]",
-        "cc_info = rule(",
-        "  implementation=_impl,",
-        "  fragments = [\"cpp\"],",
-        "  attrs = {",
-        "    'srcs': attr.label_list(allow_files=True),",
-        "    'user_link_flags' : attr.string_list(),",
-        "    'static_library': attr.label(allow_single_file=True),",
-        "    '_cc_toolchain': attr.label(default=Label('//java/a:alias'))",
-        "  },",
-        ");");
+        """
+        def _impl(ctx):
+            cc_toolchain = ctx.attr._cc_toolchain[cc_common.CcToolchainInfo]
+            feature_configuration = cc_common.configure_features(
+                ctx = ctx,
+                cc_toolchain = cc_toolchain,
+                requested_features = ctx.features,
+                unsupported_features = ctx.disabled_features,
+            )
+            library_to_link = cc_common.create_library_to_link(
+                actions = ctx.actions,
+                feature_configuration = feature_configuration,
+                cc_toolchain = cc_toolchain,
+                static_library = ctx.file.static_library,
+            )
+            linker_input = cc_common.create_linker_input(
+                libraries = depset([library_to_link]),
+                user_link_flags = depset(ctx.attr.user_link_flags),
+                owner = ctx.label,
+            )
+            linking_context = cc_common.create_linking_context(
+                linker_inputs = depset([linker_input]),
+            )
+            return [CcInfo(linking_context = linking_context)]
+
+        cc_info = rule(
+            implementation = _impl,
+            fragments = ["cpp"],
+            attrs = {
+                "srcs": attr.label_list(allow_files = True),
+                "user_link_flags": attr.string_list(),
+                "static_library": attr.label(allow_single_file = True),
+                "_cc_toolchain": attr.label(default = Label("//java/a:alias")),
+            },
+        )
+        """);
     scratch.file(
         "java/a/BUILD",
-        "load('//java/a:cc_info.bzl', 'cc_info')",
-        "cc_toolchain_alias(name='alias')",
-        "android_binary(",
-        "    name = 'a',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'native',",
-        "    deps = [':cc_info'],",
-        ")",
-        "cc_info(",
-        "    name = 'cc_info',",
-        "    user_link_flags = ['-first_flag', '-second_flag'],",
-        "    static_library = 'cc_info.a',",
-        ")");
+        """
+        load("//java/a:cc_info.bzl", "cc_info")
+
+        cc_toolchain_alias(name = "alias")
+
+        android_binary(
+            name = "a",
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            deps = [":cc_info"],
+        )
+
+        cc_info(
+            name = "cc_info",
+            static_library = "cc_info.a",
+            user_link_flags = [
+                "-first_flag",
+                "-second_flag",
+            ],
+        )
+        """);
 
     ConfiguredTarget app = getConfiguredTarget("//java/a:a");
     assertNoEvents();
 
     Artifact copiedLib = getOnlyElement(getNativeLibrariesInApk(app));
     Artifact linkedLib = getGeneratingAction(copiedLib).getInputs().getSingleton();
-    CppLinkAction action = (CppLinkAction) getGeneratingAction(linkedLib);
+    SpawnAction action = (SpawnAction) getGeneratingAction(linkedLib);
 
     assertThat(action.getArguments()).containsAtLeast("-first_flag", "-second_flag");
 
@@ -547,62 +584,77 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testCcInfoDepsViaAndroidLibrary() throws Exception {
     scratch.file(
         "java/a/cc_info.bzl",
-        "def _impl(ctx):",
-        "  cc_toolchain = ctx.attr._cc_toolchain[cc_common.CcToolchainInfo]",
-        "  feature_configuration = cc_common.configure_features(",
-        "    ctx = ctx,",
-        "    cc_toolchain = cc_toolchain,",
-        "    requested_features = ctx.features,",
-        "    unsupported_features = ctx.disabled_features,",
-        "  )",
-        "  library_to_link = cc_common.create_library_to_link(",
-        "    actions=ctx.actions, feature_configuration=feature_configuration, ",
-        "    cc_toolchain = cc_toolchain, ",
-        "    static_library=ctx.file.static_library)",
-        "  linker_input = cc_common.create_linker_input(",
-        "    libraries = depset([library_to_link]),",
-        "    user_link_flags=depset(ctx.attr.user_link_flags),",
-        "    owner = ctx.label,",
-        "  )",
-        "  linking_context = cc_common.create_linking_context(",
-        "    linker_inputs=depset([linker_input]))",
-        "  return [CcInfo(linking_context=linking_context)]",
-        "cc_info = rule(",
-        "  implementation=_impl,",
-        "  fragments = [\"cpp\"],",
-        "  attrs = {",
-        "    'srcs': attr.label_list(allow_files=True),",
-        "    'user_link_flags' : attr.string_list(),",
-        "    'static_library': attr.label(allow_single_file=True),",
-        "    '_cc_toolchain': attr.label(default=Label('//java/a:alias'))",
-        "  },",
-        ");");
+        """
+        def _impl(ctx):
+            cc_toolchain = ctx.attr._cc_toolchain[cc_common.CcToolchainInfo]
+            feature_configuration = cc_common.configure_features(
+                ctx = ctx,
+                cc_toolchain = cc_toolchain,
+                requested_features = ctx.features,
+                unsupported_features = ctx.disabled_features,
+            )
+            library_to_link = cc_common.create_library_to_link(
+                actions = ctx.actions,
+                feature_configuration = feature_configuration,
+                cc_toolchain = cc_toolchain,
+                static_library = ctx.file.static_library,
+            )
+            linker_input = cc_common.create_linker_input(
+                libraries = depset([library_to_link]),
+                user_link_flags = depset(ctx.attr.user_link_flags),
+                owner = ctx.label,
+            )
+            linking_context = cc_common.create_linking_context(
+                linker_inputs = depset([linker_input]),
+            )
+            return [CcInfo(linking_context = linking_context)]
+
+        cc_info = rule(
+            implementation = _impl,
+            fragments = ["cpp"],
+            attrs = {
+                "srcs": attr.label_list(allow_files = True),
+                "user_link_flags": attr.string_list(),
+                "static_library": attr.label(allow_single_file = True),
+                "_cc_toolchain": attr.label(default = Label("//java/a:alias")),
+            },
+        )
+        """);
     scratch.file(
         "java/a/BUILD",
-        "load('//java/a:cc_info.bzl', 'cc_info')",
-        "cc_toolchain_alias(name='alias')",
-        "android_binary(",
-        "    name = 'a',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'native',",
-        "    deps = [':liba'],",
-        ")",
-        "android_library(",
-        "    name = 'liba',",
-        "    srcs = ['a.java'],",
-        "    deps = [':cc_info'],",
-        ")",
-        "cc_info(",
-        "    name = 'cc_info',",
-        "    user_link_flags = ['-first_flag', '-second_flag'],",
-        "    static_library = 'cc_info.a',",
-        ")");
+        """
+        load("//java/a:cc_info.bzl", "cc_info")
+
+        cc_toolchain_alias(name = "alias")
+
+        android_binary(
+            name = "a",
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            deps = [":liba"],
+        )
+
+        android_library(
+            name = "liba",
+            srcs = ["a.java"],
+            deps = [":cc_info"],
+        )
+
+        cc_info(
+            name = "cc_info",
+            static_library = "cc_info.a",
+            user_link_flags = [
+                "-first_flag",
+                "-second_flag",
+            ],
+        )
+        """);
 
     ConfiguredTarget app = getConfiguredTarget("//java/a:a");
 
     Artifact copiedLib = getOnlyElement(getNativeLibrariesInApk(app));
     Artifact linkedLib = getGeneratingAction(copiedLib).getInputs().getSingleton();
-    CppLinkAction action = (CppLinkAction) getGeneratingAction(linkedLib);
+    SpawnAction action = (SpawnAction) getGeneratingAction(linkedLib);
 
     assertThat(action.getArguments()).containsAtLeast("-first_flag", "-second_flag");
 
@@ -614,16 +666,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testJavaPluginProcessorPath() throws Exception {
     scratch.file(
         "java/test/BUILD",
-        "java_library(name = 'plugin_dep',",
-        "    srcs = [ 'ProcessorDep.java'])",
-        "java_plugin(name = 'plugin',",
-        "    srcs = ['AnnotationProcessor.java'],",
-        "    processor_class = 'com.google.process.stuff',",
-        "    deps = [ ':plugin_dep' ])",
-        "android_binary(name = 'to_be_processed',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    plugins = [':plugin'],",
-        "    srcs = ['ToBeProcessed.java'])");
+        """
+        java_library(
+            name = "plugin_dep",
+            srcs = ["ProcessorDep.java"],
+        )
+
+        java_plugin(
+            name = "plugin",
+            srcs = ["AnnotationProcessor.java"],
+            processor_class = "com.google.process.stuff",
+            deps = [":plugin_dep"],
+        )
+
+        android_binary(
+            name = "to_be_processed",
+            srcs = ["ToBeProcessed.java"],
+            manifest = "AndroidManifest.xml",
+            plugins = [":plugin"],
+        )
+        """);
     ConfiguredTarget target = getConfiguredTarget("//java/test:to_be_processed");
     JavaCompileAction javacAction =
         (JavaCompileAction) getGeneratingAction(getBinArtifact("libto_be_processed.jar", target));
@@ -646,15 +708,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testPluginCommandLine() throws Exception {
     scratch.file(
         "java/test/BUILD",
-        "java_library(name = 'plugin_dep',",
-        "    srcs = [ 'ProcessorDep.java'])",
-        "java_plugin(name = 'plugin',",
-        "    srcs = ['AnnotationProcessor.java'],",
-        "    processor_class = 'com.google.process.stuff',",
-        "    deps = [ ':plugin_dep' ])",
-        "android_binary(name = 'to_be_processed',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    srcs = ['ToBeProcessed.java'])");
+        """
+        java_library(
+            name = "plugin_dep",
+            srcs = ["ProcessorDep.java"],
+        )
+
+        java_plugin(
+            name = "plugin",
+            srcs = ["AnnotationProcessor.java"],
+            processor_class = "com.google.process.stuff",
+            deps = [":plugin_dep"],
+        )
+
+        android_binary(
+            name = "to_be_processed",
+            srcs = ["ToBeProcessed.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
 
     useConfiguration("--plugin=//java/test:plugin");
     ConfiguredTarget target = getConfiguredTarget("//java/test:to_be_processed");
@@ -705,10 +777,33 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSameSoFromMultipleDeps() throws Exception {
     scratch.file(
         "java/d/BUILD",
-        "genrule(name='genrule', srcs=[], outs=['genrule.so'], cmd='')",
-        "cc_library(name='cc1', srcs=[':genrule.so'])",
-        "cc_library(name='cc2', srcs=[':genrule.so'])",
-        "android_binary(name='ab', deps=[':cc1', ':cc2'], manifest='AndroidManifest.xml')");
+        """
+        genrule(
+            name = "genrule",
+            srcs = [],
+            outs = ["genrule.so"],
+            cmd = "",
+        )
+
+        cc_library(
+            name = "cc1",
+            srcs = [":genrule.so"],
+        )
+
+        cc_library(
+            name = "cc2",
+            srcs = [":genrule.so"],
+        )
+
+        android_binary(
+            name = "ab",
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":cc1",
+                ":cc2",
+            ],
+        )
+        """);
     getConfiguredTarget("//java/d:ab");
   }
 
@@ -774,12 +869,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSimpleBinary_dexNoMinSdkVersion() throws Exception {
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               multidex = 'legacy',",
-        "              )");
+        """
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     useConfiguration("--experimental_desugar_java8_libs");
     ConfiguredTarget binary = getConfiguredTarget("//java/android:app");
 
@@ -795,13 +893,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSimpleBinary_dexMinSdkVersion() throws Exception {
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               min_sdk_version = 28,",
-        "               multidex = 'legacy',",
-        "              )");
+        """
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            min_sdk_version = 28,
+            multidex = "legacy",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     useConfiguration("--experimental_desugar_java8_libs");
     ConfiguredTarget binary = getConfiguredTarget("//java/android:app");
 
@@ -818,12 +919,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSimpleBinary_desugarNoMinSdkVersion() throws Exception {
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               multidex = 'legacy',",
-        "              )");
+        """
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     useConfiguration("--experimental_desugar_java8_libs");
     ConfiguredTarget binary = getConfiguredTarget("//java/android:app");
 
@@ -839,13 +943,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSimpleBinary_desugarMinSdkVersion() throws Exception {
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               min_sdk_version = 28,",
-        "               multidex = 'legacy',",
-        "              )");
+        """
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            min_sdk_version = 28,
+            multidex = "legacy",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     useConfiguration("--experimental_desugar_java8_libs");
     ConfiguredTarget binary = getConfiguredTarget("//java/android:app");
 
@@ -862,21 +969,29 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testSimpleAndroidBinary_multipleMinSdkVersionOnSameLibrary() throws Exception {
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_binary(name = 'app1',",
-        "               srcs = ['A.java'],",
-        "               deps = ['lib'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "              )",
-        "android_binary(name = 'app2',",
-        "               srcs = ['B.java'],",
-        "               deps = ['lib'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               min_sdk_version = 28,",
-        "              )",
-        "android_library(name = 'lib',",
-        "                srcs = ['C.java'])");
+        """
+        android_binary(
+            name = "app1",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+            deps = ["lib"],
+        )
+
+        android_binary(
+            name = "app2",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            min_sdk_version = 28,
+            resource_files = glob(["res/**"]),
+            deps = ["lib"],
+        )
+
+        android_library(
+            name = "lib",
+            srcs = ["C.java"],
+        )
+        """);
     AnalysisResult result =
         update(
             ImmutableList.of("//java/android:app1", "//java/android:app2"),
@@ -961,17 +1076,30 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     reporter.removeHandler(failFastHandler); // expect errors
     scratch.file(
         "java/android/common/BUILD",
-        "cc_library(name = 'libcommon_armeabi',",
-        "           srcs = ['armeabi/native.so'],)");
+        """
+        cc_library(
+            name = "libcommon_armeabi",
+            srcs = ["armeabi/native.so"],
+        )
+        """);
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'libnative',",
-        "           srcs = ['native.so'],)",
-        "android_binary(name = 'b',",
-        "               srcs = ['A.java'],",
-        "               deps = [':libnative', '//java/android/common:libcommon_armeabi'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "libnative",
+            srcs = ["native.so"],
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":libnative",
+                "//java/android/common:libcommon_armeabi",
+            ],
+        )
+        """);
     getConfiguredTarget("//java/android/app:b");
     assertContainsEvent(
         "Each library in the transitive closure must have a unique basename to avoid name"
@@ -983,24 +1111,45 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   private void setupNativeLibrariesForLinking() throws Exception {
     scratch.file(
         "java/android/common/BUILD",
-        "cc_library(name = 'common_native',",
-        "           srcs = ['common.cc'],)",
-        "android_library(name = 'common',",
-        "                exports = [':common_native'],)");
+        """
+        cc_library(
+            name = "common_native",
+            srcs = ["common.cc"],
+        )
+
+        android_library(
+            name = "common",
+            exports = [":common_native"],
+        )
+        """);
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native',",
-        "           srcs = ['native.cc'],)",
-        "android_binary(name = 'auto',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native', '//java/android/common:common'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )",
-        "android_binary(name = 'off',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native', '//java/android/common:common'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native",
+            srcs = ["native.cc"],
+        )
+
+        android_binary(
+            name = "auto",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":native",
+                "//java/android/common",
+            ],
+        )
+
+        android_binary(
+            name = "off",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":native",
+                "//java/android/common",
+            ],
+        )
+        """);
   }
 
   private void assertNativeLibraryLinked(ConfiguredTarget target, String... srcNames) {
@@ -1035,18 +1184,30 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_google_legacy_api");
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native_dep',",
-        "           srcs = ['dep.so'])",
-        "cc_library(name = 'native',",
-        "           srcs = ['native_prebuilt.so'],",
-        "           deps = [':native_dep'])",
-        "cc_library(name = 'native_wrapper',",
-        "           deps = [':native'])",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native_wrapper'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native_dep",
+            srcs = ["dep.so"],
+        )
+
+        cc_library(
+            name = "native",
+            srcs = ["native_prebuilt.so"],
+            deps = [":native_dep"],
+        )
+
+        cc_library(
+            name = "native_wrapper",
+            deps = [":native"],
+        )
+
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":native_wrapper"],
+        )
+        """);
     ConfiguredTarget app = getConfiguredTarget("//java/android/app:app");
     assertNativeLibrariesCopiedNotLinked(
         app,
@@ -1059,13 +1220,19 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNativeLibrary_copiesLibrariesWrappedInCcLibraryWithSameName() throws Exception {
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native',",
-        "           srcs = ['libnative.so'])",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native",
+            srcs = ["libnative.so"],
+        )
+
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":native"],
+        )
+        """);
     ConfiguredTarget app = getConfiguredTarget("//java/android/app:app");
     assertNativeLibrariesCopiedNotLinked(
         app,
@@ -1077,18 +1244,30 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNativeLibrary_linksWhenPrebuiltArchiveIsSupplied() throws Exception {
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native_dep',",
-        "           srcs = ['dep.lo'])",
-        "cc_library(name = 'native',",
-        "           srcs = ['native_prebuilt.a'],",
-        "           deps = [':native_dep'])",
-        "cc_library(name = 'native_wrapper',",
-        "           deps = [':native'])",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native_wrapper'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native_dep",
+            srcs = ["dep.lo"],
+        )
+
+        cc_library(
+            name = "native",
+            srcs = ["native_prebuilt.a"],
+            deps = [":native_dep"],
+        )
+
+        cc_library(
+            name = "native_wrapper",
+            deps = [":native"],
+        )
+
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":native_wrapper"],
+        )
+        """);
     assertNativeLibraryLinked(
         getConfiguredTarget("//java/android/app:app"), "src java/android/app/native_prebuilt.a");
   }
@@ -1098,16 +1277,28 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--interface_shared_objects");
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native_dep',",
-        "           srcs = ['dep.so'])",
-        "cc_library(name = 'native',",
-        "           srcs = ['native.cc', 'native_prebuilt.so'],",
-        "           deps = [':native_dep'])",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native_dep",
+            srcs = ["dep.so"],
+        )
+
+        cc_library(
+            name = "native",
+            srcs = [
+                "native.cc",
+                "native_prebuilt.so",
+            ],
+            deps = [":native_dep"],
+        )
+
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":native"],
+        )
+        """);
     ConfiguredTarget app = getConfiguredTarget("//java/android/app:app");
     Iterable<Artifact> nativeLibraries = getNativeLibrariesInApk(app);
     assertThat(artifactsToStrings(nativeLibraries))
@@ -1119,15 +1310,24 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNativeLibrary_providesLinkerScriptToLinkAction() throws Exception {
     scratch.file(
         "java/android/app/BUILD",
-        "cc_library(name = 'native',",
-        "           srcs = ['native.cc'],",
-        "           linkopts = ['-Wl,-version-script', '$(location jni.lds)'],",
-        "           deps = ['jni.lds'],)",
-        "android_binary(name = 'app',",
-        "               srcs = ['A.java'],",
-        "               deps = [':native'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "              )");
+        """
+        cc_library(
+            name = "native",
+            srcs = ["native.cc"],
+            linkopts = [
+                "-Wl,-version-script",
+                "$(location jni.lds)",
+            ],
+            deps = ["jni.lds"],
+        )
+
+        android_binary(
+            name = "app",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":native"],
+        )
+        """);
 
     ConfiguredTarget app = getConfiguredTarget("//java/android/app:app");
     Artifact copiedLib = getOnlyElement(getNativeLibrariesInApk(app));
@@ -1145,22 +1345,29 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_library(",
-        "  name = 'dep',",
-        "  srcs = ['dep.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        ")",
-        "alias(",
-        "  name = 'alt',",
-        "  actual = ':dep',",
-        ")",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  multidex = 'native',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  deps = [':alt',],",
-        ")");
+        """
+        android_library(
+            name = "dep",
+            srcs = ["dep.java"],
+            manifest = "AndroidManifest.xml",
+        )
+
+        alias(
+            name = "alt",
+            actual = ":dep",
+        )
+
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            deps = [":alt"],
+        )
+        """);
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1205,14 +1412,19 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--dexopts_supported_in_incremental_dexing=--no-locals");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  dexopts = ['--no-locals'],",
-        "  dex_shards = 2,",
-        "  multidex = 'native',",
-        ")");
+        """
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            dex_shards = 2,
+            dexopts = ["--no-locals"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+        )
+        """);
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1232,12 +1444,17 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  proguard_specs = ['proguard.cfg'],",
-        ")");
+        """
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard.cfg"],
+        )
+        """);
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1277,15 +1494,23 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     // the main dex list goes to the merging action.
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  incremental_dexing = 1,",
-        "  multidex = 'legacy',",
-        "  dexopts = ['--minimal-main-dex', '--positions=none'],",
-        "  proguard_specs = ['b.pro'],",
-        ")");
+        """
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            dexopts = [
+                "--minimal-main-dex",
+                "--positions=none",
+            ],
+            incremental_dexing = 1,
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_specs = ["b.pro"],
+        )
+        """);
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1314,14 +1539,22 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     // the main dex list goes to the merging action.
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  multidex = 'legacy',",
-        "  dexopts = ['--minimal-main-dex', '--positions=none'],",
-        "  proguard_specs = ['b.pro'],",
-        ")"); // incremental_dexing = 1 attribute not needed
+        """
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            dexopts = [
+                "--minimal-main-dex",
+                "--positions=none",
+            ],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_specs = ["b.pro"],
+        )
+        """); // incremental_dexing = 1 attribute not needed
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1354,15 +1587,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     // file goes to the dexMerger instead (see _multidex test).
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'top',",
-        "  srcs = ['foo.java', 'bar.srcjar'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  dex_shards = 25,",
-        "  incremental_dexing = 1,",
-        "  multidex = 'legacy',",
-        "  proguard_specs = ['b.pro'],",
-        ")");
+        """
+        android_binary(
+            name = "top",
+            srcs = [
+                "bar.srcjar",
+                "foo.java",
+            ],
+            dex_shards = 25,
+            incremental_dexing = 1,
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_specs = ["b.pro"],
+        )
+        """);
 
     ConfiguredTarget topTarget = getConfiguredTarget("//java/com/google/android:top");
     assertNoEvents();
@@ -1402,9 +1640,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
       String apkSigningMethod, String signV1, String signV2, String signV4) throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     useConfiguration("--apk_signing_method=" + apkSigningMethod);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1526,11 +1768,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_name_obfuscation");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               shrink_resources = 1,",
-        "               proguard_specs = ['proguard-spec.pro'],)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1562,11 +1808,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--features=resource_name_obfuscation");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               shrink_resources = 1,",
-        "               proguard_specs = ['proguard-spec.pro'],)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1598,10 +1848,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_name_obfuscation");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               shrink_resources = 1,)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1622,11 +1876,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
       throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               shrink_resources = 1,",
-        "               proguard_specs = ['proguard-spec.pro'],)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1646,11 +1904,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourceShrinking_requiresProguard() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               shrink_resources = 1,)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:hello");
 
@@ -1666,10 +1928,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testProguardExtraOutputs() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
     ConfiguredTarget output = getConfiguredTarget("//java/com/google/android/hello:b");
 
     // Checks that ProGuard is called with the appropriate options.
@@ -1700,18 +1966,27 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testProGuardExecutableMatchesConfiguration() throws Exception {
     scratch.file(
         "java/com/google/devtools/build/jkrunchy/BUILD",
-        "package(default_visibility=['//visibility:public'])",
-        "java_binary(name = 'jkrunchy',",
-        "            main_class = 'com.google.devtools.build.jkrunchy.JKrunchyMain')");
+        """
+        package(default_visibility = ["//visibility:public"])
+
+        java_binary(
+            name = "jkrunchy",
+            main_class = "com.google.devtools.build.jkrunchy.JKrunchyMain",
+        )
+        """);
 
     useConfiguration("--proguard_top=//java/com/google/devtools/build/jkrunchy:jkrunchy");
 
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
 
     ConfiguredTarget output = getConfiguredTarget("//java/com/google/android/hello:b_proguard.jar");
     assertProguardUsed(output);
@@ -1734,10 +2009,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--noenforce_proguard_file_extension");
     scratch.file(
         "java/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
 
     ConfiguredTarget unused = getConfiguredTarget("//java/android/hello:b");
   }
@@ -1747,10 +2026,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_proguard_file_extension");
     scratch.file(
         "java/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
 
     AssertionError assertionError =
         assertThrows(AssertionError.class, () -> getConfiguredTarget("//java/android/hello:b"));
@@ -1763,10 +2046,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_proguard_file_extension");
     scratch.file(
         "java/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = [':proguard.pgcfg'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [":proguard.pgcfg"],
+        )
+        """);
 
     ConfiguredTarget unused = getConfiguredTarget("//java/android/hello:b");
   }
@@ -1775,13 +2062,22 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void enforceProguardFileExtension_enabled_ignoresThirdParty() throws Exception {
     useConfiguration("--enforce_proguard_file_extension");
     scratch.file(
-        "third_party/bar/BUILD", "licenses(['unencumbered'])", "exports_files(['proguard.pro'])");
+        "third_party/bar/BUILD",
+        """
+        licenses(["unencumbered"])
+
+        exports_files(["proguard.pro"])
+        """);
     scratch.file(
         "java/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['//third_party/bar:proguard.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["//third_party/bar:proguard.pro"],
+        )
+        """);
 
     ConfiguredTarget unused = getConfiguredTarget("//java/android/hello:b");
   }
@@ -1792,32 +2088,57 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
 
     scratch.file(
         "java/com/google/android/neversayneveragain/BUILD",
-        "android_library(name = 'l1',",
-        "                srcs = ['l1.java'],",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['res/values/resource.xml'])",
-        "android_library(name = 'l2',",
-        "                srcs = ['l2.java'],",
-        "                deps = [':l1'],",
-        "                neverlink = 1)",
-        "android_library(name = 'l3',",
-        "                srcs = ['l3.java'],",
-        "                deps = [':l2'])",
-        "android_library(name = 'l4',",
-        "                srcs = ['l4.java'],",
-        "                deps = [':l1'])",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               deps = [':l2'],",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b2',",
-        "               srcs = ['b2.java'],",
-        "               deps = [':l3'],",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b3',",
-        "               srcs = ['b3.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               manifest = 'AndroidManifest.xml')");
+        """
+        android_library(
+            name = "l1",
+            srcs = ["l1.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/resource.xml"],
+        )
+
+        android_library(
+            name = "l2",
+            srcs = ["l2.java"],
+            neverlink = 1,
+            deps = [":l1"],
+        )
+
+        android_library(
+            name = "l3",
+            srcs = ["l3.java"],
+            deps = [":l2"],
+        )
+
+        android_library(
+            name = "l4",
+            srcs = ["l4.java"],
+            deps = [":l1"],
+        )
+
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":l2"],
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":l3"],
+        )
+
+        android_binary(
+            name = "b3",
+            srcs = ["b3.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+        """);
     ConfiguredTarget b1 = getConfiguredTarget("//java/com/google/android/neversayneveragain:b1");
     Action b1DeployAction =
         actionsTestUtil()
@@ -1996,10 +2317,17 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourceConfigurationFilters() throws Exception {
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(name = 'b',",
-        "    srcs = ['dummy1.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_configuration_filters = [ 'en', 'fr'],)");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["dummy1.java"],
+            manifest = "AndroidManifest.xml",
+            resource_configuration_filters = [
+                "en",
+                "fr",
+            ],
+        )
+        """);
 
     // Ensure that the args are present
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android:b");
@@ -2143,15 +2471,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testLocalResourcesUseRClassGenerator() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_library(name = 'lib',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = glob(['res2/**']),",
-        "                )",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               deps = [':lib'],",
-        "               )");
+        """
+        android_library(
+            name = "lib",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res2/**"]),
+        )
+
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+            deps = [":lib"],
+        )
+        """);
     scratch.file(
         "java/r/android/res2/values/strings.xml",
         "<resources><string name = 'lib_string'>Libs!</string></resources>");
@@ -2168,10 +2501,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testLocalResourcesUseRClassGeneratorNoLibraries() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     scratch.file(
         "java/r/android/res/values/strings.xml",
         "<resources><string name = 'hello'>Hello Android!</string></resources>");
@@ -2186,17 +2522,22 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testUseRClassGeneratorCustomPackage() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_library(name = 'lib',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = glob(['res2/**']),",
-        "                custom_package = 'com.lib.custom',",
-        "                )",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = glob(['res/**']),",
-        "               custom_package = 'com.binary.custom',",
-        "               deps = [':lib'],",
-        "               )");
+        """
+        android_library(
+            name = "lib",
+            custom_package = "com.lib.custom",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res2/**"]),
+        )
+
+        android_binary(
+            name = "r",
+            custom_package = "com.binary.custom",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+            deps = [":lib"],
+        )
+        """);
     scratch.file(
         "java/r/android/res2/values/strings.xml",
         "<resources><string name = 'lib_string'>Libs!</string></resources>");
@@ -2221,16 +2562,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testUseRClassGeneratorMultipleDeps() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_library(name = 'lib1',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                )",
-        "android_library(name = 'lib2',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                )",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               deps = [':lib1', ':lib2'],",
-        "               )");
+        """
+        android_library(
+            name = "lib1",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_library(
+            name = "lib2",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            deps = [
+                ":lib1",
+                ":lib2",
+            ],
+        )
+        """);
     ConfiguredTargetAndData binary = getConfiguredTargetAndData("//java/r/android:r");
     Artifact jar = getResourceClassJar(binary);
     assertThat(getGeneratingAction(jar).getMnemonic()).isEqualTo("RClassGenerator");
@@ -2265,17 +2616,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_use_rtxt_from_merged_resources");
     scratch.file(
         "java/pkg/BUILD",
-        "android_library(",
-        "    name = 'lib',",
-        "    srcs = ['B.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")",
-        "android_binary(",
-        "    name = 'bin',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    deps = [ ':lib' ],",
-        ")");
+        """
+        android_library(
+            name = "lib",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+        )
+
+        android_binary(
+            name = "bin",
+            manifest = "AndroidManifest.xml",
+            deps = [":lib"],
+        )
+        """);
 
     ConfiguredTargetAndData bin = getConfiguredTargetAndData("//java/pkg:bin");
     ConfiguredTarget lib = getDirectPrerequisite(bin.getConfiguredTarget(), "//java/pkg:lib");
@@ -2311,17 +2665,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void doNotUseRTxtFromMergedResourcesForFinalRClasses() throws Exception {
     scratch.file(
         "java/pkg/BUILD",
-        "android_library(",
-        "    name = 'lib',",
-        "    srcs = ['B.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")",
-        "android_binary(",
-        "    name = 'bin',",
-        "    manifest = 'AndroidManifest.xml',",
-        "    deps = [ ':lib' ],",
-        ")");
+        """
+        android_library(
+            name = "lib",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+        )
+
+        android_binary(
+            name = "bin",
+            manifest = "AndroidManifest.xml",
+            deps = [":lib"],
+        )
+        """);
 
     ConfiguredTargetAndData bin = getConfiguredTargetAndData("//java/pkg:bin");
     ConfiguredTarget lib = getDirectPrerequisite(bin.getConfiguredTarget(), "//java/pkg:lib");
@@ -2341,13 +2698,18 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoCrunchBinaryOnly() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/drawable-hdpi-v4/foo.png',",
-        "                                 'res/drawable-hdpi-v4/bar.9.png'],",
-        "               crunch_png = 0,",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            crunch_png = 0,
+            manifest = "AndroidManifest.xml",
+            resource_files = [
+                "res/drawable-hdpi-v4/foo.png",
+                "res/drawable-hdpi-v4/bar.9.png",
+            ],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(binary));
     assertThat(args).contains("--useAaptCruncher=no");
@@ -2357,13 +2719,18 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testDoCrunch() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/drawable-hdpi-v4/foo.png',",
-        "                                 'res/drawable-hdpi-v4/bar.9.png'],",
-        "               crunch_png = 1,",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            crunch_png = 1,
+            manifest = "AndroidManifest.xml",
+            resource_files = [
+                "res/drawable-hdpi-v4/foo.png",
+                "res/drawable-hdpi-v4/bar.9.png",
+            ],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(binary));
     assertThat(args).doesNotContain("--useAaptCruncher=no");
@@ -2373,12 +2740,17 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testDoCrunchDefault() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/drawable-hdpi-v4/foo.png',",
-        "                                 'res/drawable-hdpi-v4/bar.9.png'],",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = [
+                "res/drawable-hdpi-v4/foo.png",
+                "res/drawable-hdpi-v4/bar.9.png",
+            ],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(binary));
     assertThat(args).doesNotContain("--useAaptCruncher=no");
@@ -2388,18 +2760,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoCrunchWithAndroidLibraryNoBinaryResources() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_library(name = 'resources',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['res/values/strings.xml',",
-        "                                  'res/drawable-hdpi-v4/foo.png',",
-        "                                  'res/drawable-hdpi-v4/bar.9.png'],",
-        "               )",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               deps = [':resources'],",
-        "               crunch_png = 0,",
-        "               )");
+        """
+        android_library(
+            name = "resources",
+            manifest = "AndroidManifest.xml",
+            resource_files = [
+                "res/values/strings.xml",
+                "res/drawable-hdpi-v4/foo.png",
+                "res/drawable-hdpi-v4/bar.9.png",
+            ],
+        )
+
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            crunch_png = 0,
+            manifest = "AndroidManifest.xml",
+            deps = [":resources"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(binary));
     assertThat(args).contains("--useAaptCruncher=no");
@@ -2409,19 +2788,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoCrunchWithMultidexNative() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_library(name = 'resources',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['res/values/strings.xml',",
-        "                                  'res/drawable-hdpi-v4/foo.png',",
-        "                                  'res/drawable-hdpi-v4/bar.9.png'],",
-        "               )",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               deps = [':resources'],",
-        "               multidex = 'native',",
-        "               crunch_png = 0,",
-        "               )");
+        """
+        android_library(
+            name = "resources",
+            manifest = "AndroidManifest.xml",
+            resource_files = [
+                "res/values/strings.xml",
+                "res/drawable-hdpi-v4/foo.png",
+                "res/drawable-hdpi-v4/bar.9.png",
+            ],
+        )
+
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            crunch_png = 0,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            deps = [":resources"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(binary));
     assertThat(args).contains("--useAaptCruncher=no");
@@ -2549,13 +2935,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testDexShardingDoesNotWorkWithManualMultidex() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='manual_main_dex',",
-        "    main_dex_list='main_dex_list.txt',",
-        "    manifest='AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            main_dex_list = "main_dex_list.txt",
+            manifest = "AndroidManifest.xml",
+            multidex = "manual_main_dex",
+        )
+        """);
     reporter.removeHandler(failFastHandler);
     getConfiguredTarget("//java/a:a");
     assertContainsEvent(".dex sharding is not available in manual multidex mode");
@@ -2566,12 +2955,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--noincremental_dexing");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='legacy',",
-        "    manifest='AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.LEGACY, false, "_desugared.jar");
   }
@@ -2581,12 +2973,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--noexperimental_desugar_for_android", "--noincremental_dexing");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='native',",
-        "    manifest='AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.NATIVE, false, "");
   }
@@ -2596,12 +2991,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--noincremental_dexing");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='native',",
-        "    manifest='AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.NATIVE, false, "_desugared.jar");
   }
@@ -2615,13 +3013,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='legacy',",
-        "    manifest='AndroidManifest.xml',",
-        "    proguard_specs=['proguard.cfg'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_specs = ["proguard.cfg"],
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.LEGACY, true, "");
   }
@@ -2634,13 +3035,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='legacy',",
-        "    manifest='AndroidManifest.xml',",
-        "    proguard_specs=['proguard.cfg'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+            proguard_specs = ["proguard.cfg"],
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.LEGACY, true, "_desugared.jar");
   }
@@ -2653,13 +3057,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='native',",
-        "    manifest='AndroidManifest.xml',",
-        "    proguard_specs=['proguard.cfg'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_specs = ["proguard.cfg"],
+        )
+        """);
 
     internalTestDexShardStructure(MultidexMode.NATIVE, true, "");
   }
@@ -2668,13 +3075,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testIncrementalApkAndProguardBuildStructure() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name='a',",
-        "    srcs=['A.java'],",
-        "    dex_shards=2,",
-        "    multidex='native',",
-        "    manifest='AndroidManifest.xml',",
-        "    proguard_specs=['proguard.cfg'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            dex_shards = 2,
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_specs = ["proguard.cfg"],
+        )
+        """);
 
     ConfiguredTarget target = getConfiguredTarget("//java/a:a");
     Action shardAction = getGeneratingAction(getBinArtifact("_dx/a/shard1.jar", target));
@@ -2740,34 +3150,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   @Test
   public void testMainDexListWithAndroidSdk() throws Exception {
     scratch.file(
-        "sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
-
-    scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'legacy',",
-        "    main_dex_list_opts = ['--hello', '--world'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            main_dex_list_opts = [
+                "--hello",
+                "--world",
+            ],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+        )
+        """);
 
-    useConfiguration("--android_sdk=//sdk:sdk");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     Artifact mainDexList =
         ActionsTestUtil.getFirstArtifactEndingWith(
@@ -2780,9 +3176,12 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testLegacyMainDexListWithAndroidSdk() throws Exception {
     scratch.file(
         "tools/fake/BUILD",
-        "cc_binary(",
-        "    name = 'generate_main_dex_list',",
-        "    srcs = ['main.cc'])");
+        """
+        cc_binary(
+            name = "generate_main_dex_list",
+            srcs = ["main.cc"],
+        )
+        """);
 
     scratch.file(
         "sdk/BUILD",
@@ -2802,17 +3201,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "    shrinked_android_jar = 'shrinked_android_jar',",
         "    zipalign = 'zipalign',",
         "    legacy_main_dex_list_generator = '//tools/fake:generate_main_dex_list',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
+        "    tags = ['__ANDROID_RULES_MIGRATION__'])",
+        "toolchain(",
+        "    name = 'sdk_toolchain',",
+        String.format("    toolchain_type = '%s',", TestConstants.ANDROID_TOOLCHAIN_TYPE_LABEL),
+        "    toolchain = ':sdk',",
+        ")");
 
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'legacy')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+        )
+        """);
 
-    useConfiguration("--android_sdk=//sdk:sdk");
+    useConfiguration("--extra_toolchains=//sdk:sdk_toolchain");
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     Artifact mainDexList =
         ActionsTestUtil.getFirstArtifactEndingWith(
@@ -2828,34 +3235,18 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
 
   @Test
   public void testMainDexAaptGenerationSupported() throws Exception {
-    useConfiguration("--android_sdk=//sdk:sdk", "--noincremental_dexing");
-    scratch.file(
-        "sdk/BUILD",
-        "android_sdk(",
-        "    name = 'sdk',",
-        "    build_tools_version = '24.0.0',",
-        "    aapt = 'aapt',",
-        "    aapt2 = 'aapt2',",
-        "    adb = 'adb',",
-        "    aidl = 'aidl',",
-        "    android_jar = 'android.jar',",
-        "    apksigner = 'apksigner',",
-        "    dx = 'dx',",
-        "    framework_aidl = 'framework_aidl',",
-        "    main_dex_classes = 'main_dex_classes',",
-        "    main_dex_list_creator = 'main_dex_list_creator',",
-        "    proguard = 'proguard',",
-        "    shrinked_android_jar = 'shrinked_android_jar',",
-        "    zipalign = 'zipalign',",
-        "    tags = ['__ANDROID_RULES_MIGRATION__'])");
+    useConfiguration("--noincremental_dexing");
 
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    multidex = 'legacy')");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "legacy",
+        )
+        """);
 
     ConfiguredTargetAndData a = getConfiguredTargetAndData("//java/a:a");
     Artifact intermediateJar =
@@ -2905,11 +3296,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testEmptyListAsProguardSpec() throws Exception {
     scratch.file(
         "java/foo/BUILD",
-        "android_binary(",
-        "    name = 'abin',",
-        "    srcs = ['a.java'],",
-        "    proguard_specs = [],",
-        "    manifest = 'AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "abin",
+            srcs = ["a.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [],
+        )
+        """);
     Rule rule = getTarget("//java/foo:abin").getAssociatedRule();
     assertNoEvents();
     ImmutableList<String> implicitOutputFilenames =
@@ -2955,10 +3349,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourcesWithConfigurationQualifier_localResources() throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = glob(['res/**']),",
-        "                )");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = glob(["res/**"]),
+        )
+        """);
     scratch.file(
         "java/android/resources/res/values-en/strings.xml",
         "<resources><string name = 'hello'>Hello Android!</string></resources>");
@@ -2976,10 +3373,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourcesInOtherPackage_exported_localResources() throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['//java/resources/other:res/values/strings.xml'],",
-        "                )");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["//java/resources/other:res/values/strings.xml"],
+        )
+        """);
     scratch.file("java/resources/other/BUILD", "exports_files(['res/values/strings.xml'])");
     ConfiguredTarget resource = getConfiguredTarget("//java/android/resources:r");
 
@@ -2992,15 +3392,21 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourcesInOtherPackage_filegroup_localResources() throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['//java/other/resources:fg'],",
-        "                )");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["//java/other/resources:fg"],
+        )
+        """);
     scratch.file(
         "java/other/resources/BUILD",
-        "filegroup(name = 'fg',",
-        "          srcs = ['res/values/strings.xml'],",
-        ")");
+        """
+        filegroup(
+            name = "fg",
+            srcs = ["res/values/strings.xml"],
+        )
+        """);
     ConfiguredTarget resource = getConfiguredTarget("//java/android/resources:r");
 
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(resource));
@@ -3013,12 +3419,18 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
       throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = [':fg'],",
-        "               )",
-        "filegroup(name = 'fg',",
-        "          srcs = ['//java/other/resources:res/values/strings.xml'])");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = [":fg"],
+        )
+
+        filegroup(
+            name = "fg",
+            srcs = ["//java/other/resources:res/values/strings.xml"],
+        )
+        """);
     scratch.file("java/other/resources/BUILD", "exports_files(['res/values/strings.xml'])");
     ConfiguredTarget resource = getConfiguredTarget("//java/android/resources:r");
 
@@ -3031,24 +3443,35 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testMultipleDependentResourceDirectories_localResources() throws Exception {
     scratch.file(
         "java/android/resources/d1/BUILD",
-        "android_library(name = 'd1',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['d1-res/values/strings.xml'],",
-        "                )");
+        """
+        android_library(
+            name = "d1",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["d1-res/values/strings.xml"],
+        )
+        """);
     scratch.file(
         "java/android/resources/d2/BUILD",
-        "android_library(name = 'd2',",
-        "                manifest = 'AndroidManifest.xml',",
-        "                resource_files = ['d2-res/values/strings.xml'],",
-        "                )");
+        """
+        android_library(
+            name = "d2",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["d2-res/values/strings.xml"],
+        )
+        """);
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['bin-res/values/strings.xml'],",
-        "               deps = [",
-        "                   '//java/android/resources/d1:d1','//java/android/resources/d2:d2'",
-        "               ])");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["bin-res/values/strings.xml"],
+            deps = [
+                "//java/android/resources/d1",
+                "//java/android/resources/d2",
+            ],
+        )
+        """);
     ConfiguredTarget resource = getConfiguredTarget("//java/android/resources:r");
 
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(resource));
@@ -3063,17 +3486,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourcesInOtherPackage_doubleFilegroup_localResources() throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = [':fg'],",
-        "               )",
-        "filegroup(name = 'fg',",
-        "          srcs = ['//java/other/resources:fg'])");
+        """
+        android_binary(
+            name = "r",
+            manifest = "AndroidManifest.xml",
+            resource_files = [":fg"],
+        )
+
+        filegroup(
+            name = "fg",
+            srcs = ["//java/other/resources:fg"],
+        )
+        """);
     scratch.file(
         "java/other/resources/BUILD",
-        "filegroup(name = 'fg',",
-        "          srcs = ['res/values/strings.xml'],",
-        ")");
+        """
+        filegroup(
+            name = "fg",
+            srcs = ["res/values/strings.xml"],
+        )
+        """);
     ConfiguredTarget resource = getConfiguredTarget("//java/android/resources:r");
 
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(resource));
@@ -3172,11 +3604,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testFileLocation_localResources() throws Exception {
     scratch.file(
         "java/android/resources/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+        )
+        """);
     ConfiguredTargetAndData r = getConfiguredTargetAndData("//java/android/resources:r");
     assertThat(
             getFirstArtifactEndingWith(getFilesToBuild(r.getConfiguredTarget()), ".apk").getRoot())
@@ -3187,12 +3622,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testCustomPackage_localResources() throws Exception {
     scratch.file(
         "a/r/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               custom_package = 'com.google.android.bar',",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            custom_package = "com.google.android.bar",
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+        )
+        """);
     ConfiguredTarget r = getConfiguredTarget("//a/r:r");
     assertNoEvents();
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(r));
@@ -3204,8 +3642,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     scratch.file("java/foo/A.java", "foo");
     scratch.file(
         "java/foo/BUILD",
-        "android_binary(name = 'a', manifest = 'AndroidManifest.xml', ",
-        "  srcs = ['A.java'], javacopts = ['-g:lines,source'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            javacopts = ["-g:lines,source"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
 
     Artifact deployJar = getFileConfiguredTarget("//java/foo:a_deploy.jar").getArtifact();
     Action deployAction = getGeneratingAction(deployJar);
@@ -3225,8 +3669,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     scratch.file("java/foo/A.java", "foo");
     scratch.file(
         "java/foo/BUILD",
-        "android_binary(name = 'a', manifest = 'AndroidManifest.xml', ",
-        "  srcs = ['A.java'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
 
     Iterable<String> commandLine =
         getJavacArguments(
@@ -3249,8 +3698,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     scratch.file("java/foo/A.java", "foo");
     scratch.file(
         "java/foo/BUILD",
-        "android_binary(name = 'a', manifest = 'AndroidManifest.xml', ",
-        "  srcs = ['A.java'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
 
     Iterable<String> commandLine =
         getJavacArguments(
@@ -3274,8 +3728,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     scratch.file("java/foo/A.java", "foo");
     scratch.file(
         "java/foo/BUILD",
-        "android_binary(name = 'a', manifest = 'AndroidManifest.xml', ",
-        "  srcs = ['A.java'], javacopts = ['-g:lines,source'])");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            javacopts = ["-g:lines,source"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
 
     final JavaCompilationArgsProvider provider =
         JavaInfo.getProvider(
@@ -3288,11 +3748,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoApplicationId_localResources() throws Exception {
     scratch.file(
         "java/a/r/BUILD",
-        "android_binary(name = 'r',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               )");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+        )
+        """);
     ConfiguredTarget r = getConfiguredTarget("//java/a/r:r");
     assertNoEvents();
     List<String> args = getGeneratingSpawnActionArgs(getResourceApk(r));
@@ -3319,12 +3782,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_desugar_java8_libs");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  multidex = 'native',",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+        )
+        """);
 
     ConfiguredTarget top = getConfiguredTarget("//java/com/google/android:foo");
     Artifact artifact = getBinArtifact("_dx/foo/_final_classes.dex.zip", top);
@@ -3339,13 +3804,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_desugar_java8_libs");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  multidex = 'native',",
-        "  proguard_specs = ['foo.cfg'],",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_specs = ["foo.cfg"],
+        )
+        """);
 
     ConfiguredTarget top = getConfiguredTarget("//java/com/google/android:foo");
     Artifact artifact = getBinArtifact("_dx/foo/_final_classes.dex.zip", top);
@@ -3365,14 +3832,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_desugar_java8_libs");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  multidex = 'native',",
-        "  proguard_specs = ['foo.cfg'],",
-        "  proguard_generate_mapping = 1,",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_generate_mapping = 1,
+            proguard_specs = ["foo.cfg"],
+        )
+        """);
 
     ConfiguredTarget top = getConfiguredTarget("//java/com/google/android:foo");
 
@@ -3416,13 +3885,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_desugar_java8_libs");
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  multidex = 'native',",
-        "  proguard_generate_mapping = 1,",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            multidex = "native",
+            proguard_generate_mapping = 1,
+        )
+        """);
 
     ConfiguredTarget top = getConfiguredTarget("//java/com/google/android:foo");
 
@@ -3443,13 +3914,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testApplyProguardMapping() throws Exception {
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  proguard_apply_mapping = 'proguard.map',",
-        "  proguard_specs = ['foo.pro'],",
-        "  manifest = 'AndroidManifest.xml',",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_apply_mapping = "proguard.map",
+            proguard_specs = ["foo.pro"],
+        )
+        """);
 
     ConfiguredTarget ct = getConfiguredTarget("//java/com/google/android:foo");
 
@@ -3485,13 +3958,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testApplyProguardDictionary() throws Exception {
     scratch.file(
         "java/com/google/android/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  srcs = ['foo.java'],",
-        "  proguard_apply_dictionary = 'dictionary.txt',",
-        "  proguard_specs = ['foo.pro'],",
-        "  manifest = 'AndroidManifest.xml',",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = ["foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_apply_dictionary = "dictionary.txt",
+            proguard_specs = ["foo.pro"],
+        )
+        """);
 
     ConfiguredTarget ct = getConfiguredTarget("//java/com/google/android:foo");
 
@@ -3536,46 +4011,65 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag1@on',",
-        "  flag_values = {':flag1': 'on'},",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "config_feature_flag(",
-        "  name = 'flag2',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag2@on',",
-        "  flag_values = {':flag2': 'on'},",
-        "  transitive_configs = [':flag2'],",
-        ")",
-        "android_library(",
-        "  name = 'lib',",
-        "  srcs = select({",
-        "    ':flag1@on': ['Flag1On.java'],",
-        "    '//conditions:default': ['Flag1Off.java'],",
-        "  }) + select({",
-        "    ':flag2@on': ['Flag2On.java'],",
-        "    '//conditions:default': ['Flag2Off.java'],",
-        "  }),",
-        "  transitive_configs = [':flag1', ':flag2'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  deps = [':lib'],",
-        "  feature_flags = {",
-        "    'flag1': 'on',",
-        "  },",
-        "  transitive_configs = [':flag1', ':flag2'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag1@on",
+            flag_values = {":flag1": "on"},
+            transitive_configs = [":flag1"],
+        )
+
+        config_feature_flag(
+            name = "flag2",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag2@on",
+            flag_values = {":flag2": "on"},
+            transitive_configs = [":flag2"],
+        )
+
+        android_library(
+            name = "lib",
+            srcs = select({
+                ":flag1@on": ["Flag1On.java"],
+                "//conditions:default": ["Flag1Off.java"],
+            }) + select({
+                ":flag2@on": ["Flag2On.java"],
+                "//conditions:default": ["Flag2Off.java"],
+            }),
+            transitive_configs = [
+                ":flag1",
+                ":flag2",
+            ],
+        )
+
+        android_binary(
+            name = "foo",
+            feature_flags = {
+                "flag1": "on",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [
+                ":flag1",
+                ":flag2",
+            ],
+            deps = [":lib"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/foo");
     List<String> inputs =
         prettyArtifactNames(actionsTestUtil().artifactClosureOf(getFinalUnsignedApk(binary)));
@@ -3589,41 +4083,56 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag1@on',",
-        "  flag_values = {':flag1': 'on'},",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "config_feature_flag(",
-        "  name = 'flag2',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag2@on',",
-        "  flag_values = {':flag2': 'on'},",
-        "  transitive_configs = [':flag2'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = select({",
-        "    ':flag1@on': ['Flag1On.java'],",
-        "    '//conditions:default': ['Flag1Off.java'],",
-        "  }) + select({",
-        "    ':flag2@on': ['Flag2On.java'],",
-        "    '//conditions:default': ['Flag2Off.java'],",
-        "  }),",
-        "  feature_flags = {",
-        "    'flag1': 'on',",
-        "  },",
-        "  transitive_configs = [':flag1', ':flag2'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag1@on",
+            flag_values = {":flag1": "on"},
+            transitive_configs = [":flag1"],
+        )
+
+        config_feature_flag(
+            name = "flag2",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag2@on",
+            flag_values = {":flag2": "on"},
+            transitive_configs = [":flag2"],
+        )
+
+        android_binary(
+            name = "foo",
+            srcs = select({
+                ":flag1@on": ["Flag1On.java"],
+                "//conditions:default": ["Flag1Off.java"],
+            }) + select({
+                ":flag2@on": ["Flag2On.java"],
+                "//conditions:default": ["Flag2Off.java"],
+            }),
+            feature_flags = {
+                "flag1": "on",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [
+                ":flag1",
+                ":flag2",
+            ],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/foo");
     List<String> inputs =
         prettyArtifactNames(actionsTestUtil().artifactClosureOf(getFinalUnsignedApk(binary)));
@@ -3637,32 +4146,40 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag1@on',",
-        "  flag_values = {':flag1': 'on'},",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = select({",
-        "    ':flag1@on': ['Flag1On.java'],",
-        "    '//conditions:default': ['Flag1Off.java'],",
-        "  }),",
-        "  feature_flags = {",
-        "    'flag1': 'on',",
-        "  },",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "alias(",
-        "  name = 'alias',",
-        "  actual = ':foo',",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag1@on",
+            flag_values = {":flag1": "on"},
+            transitive_configs = [":flag1"],
+        )
+
+        android_binary(
+            name = "foo",
+            srcs = select({
+                ":flag1@on": ["Flag1On.java"],
+                "//conditions:default": ["Flag1Off.java"],
+            }),
+            feature_flags = {
+                "flag1": "on",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [":flag1"],
+        )
+
+        alias(
+            name = "alias",
+            actual = ":foo",
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/foo:alias");
     List<String> inputs =
         prettyArtifactNames(actionsTestUtil().artifactClosureOf(getFinalUnsignedApk(binary)));
@@ -3677,33 +4194,41 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag1@on',",
-        "  flag_values = {':flag1': 'on'},",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "android_library(",
-        "  name = 'lib',",
-        "  srcs = select({",
-        "    ':flag1@on': ['Flag1On.java'],",
-        "    '//conditions:default': ['Flag1Off.java'],",
-        "  }),",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  deps = [':lib'],",
-        "  feature_flags = {",
-        "    'flag1': 'invalid',",
-        "  },",
-        "  transitive_configs = [':flag1'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag1@on",
+            flag_values = {":flag1": "on"},
+            transitive_configs = [":flag1"],
+        )
+
+        android_library(
+            name = "lib",
+            srcs = select({
+                ":flag1@on": ["Flag1On.java"],
+                "//conditions:default": ["Flag1Off.java"],
+            }),
+            transitive_configs = [":flag1"],
+        )
+
+        android_binary(
+            name = "foo",
+            feature_flags = {
+                "flag1": "invalid",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [":flag1"],
+            deps = [":lib"],
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/foo")).isNull();
     assertContainsEvent(
         "in config_feature_flag rule //java/com/foo:flag1: "
@@ -3717,24 +4242,31 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_setting(",
-        "  name = 'flag1@on',",
-        "  flag_values = {':flag1': 'on'},",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  feature_flags = {",
-        "    'flag1': 'invalid',",
-        "  },",
-        "  transitive_configs = [':flag1'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_setting(
+            name = "flag1@on",
+            flag_values = {":flag1": "on"},
+            transitive_configs = [":flag1"],
+        )
+
+        android_binary(
+            name = "foo",
+            feature_flags = {
+                "flag1": "invalid",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [":flag1"],
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/foo")).isNull();
     assertContainsEvent(
         "in config_feature_flag rule //java/com/foo:flag1: "
@@ -3747,24 +4279,31 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "alias(",
-        "  name = 'alias',",
-        "  actual = 'flag1',",
-        "  transitive_configs = [':flag1'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  feature_flags = {",
-        "    'alias': 'on',",
-        "  },",
-        "  transitive_configs = [':flag1'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        alias(
+            name = "alias",
+            actual = "flag1",
+            transitive_configs = [":flag1"],
+        )
+
+        android_binary(
+            name = "foo",
+            feature_flags = {
+                "alias": "on",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [":flag1"],
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/foo")).isNull();
     assertContainsEvent(
         "in feature_flags attribute of android_binary rule //java/com/foo:foo: "
@@ -3777,45 +4316,71 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.file(
         "java/com/foo/reader.bzl",
-        "def _impl(ctx):",
-        "  ctx.actions.write(",
-        "      ctx.outputs.java,",
-        "      '\\n'.join([",
-        "          str(target.label) + ': ' + target[config_common.FeatureFlagInfo].value",
-        "          for target in ctx.attr.flags]))",
-        "  return [DefaultInfo(files=depset([ctx.outputs.java]))]",
-        "flag_reader = rule(",
-        "  implementation=_impl,",
-        "  attrs={'flags': attr.label_list(providers=[config_common.FeatureFlagInfo])},",
-        "  outputs={'java': '%{name}.java'},",
-        ")");
+        """
+        def _impl(ctx):
+            ctx.actions.write(
+                ctx.outputs.java,
+                "\\n".join([
+                    str(target.label) + ": " + target[config_common.FeatureFlagInfo].value
+                    for target in ctx.attr.flags
+                ]),
+            )
+            return [DefaultInfo(files = depset([ctx.outputs.java]))]
+
+        flag_reader = rule(
+            implementation = _impl,
+            attrs = {"flags": attr.label_list(providers = [config_common.FeatureFlagInfo])},
+            outputs = {"java": "%{name}.java"},
+        )
+        """);
     scratch.file(
         "java/com/foo/BUILD",
-        "load('//java/com/foo:reader.bzl', 'flag_reader')",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "config_feature_flag(",
-        "  name = 'flag2',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "flag_reader(",
-        "  name = 'FooFlags',",
-        "  flags = [':flag1', ':flag2'],",
-        "  transitive_configs = [':flag1', ':flag2'],",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = [':FooFlags.java'],",
-        "  feature_flags = {",
-        "    'flag1': 'on',",
-        "  },",
-        "  transitive_configs = [':flag1', ':flag2'],",
-        ")");
+        """
+        load("//java/com/foo:reader.bzl", "flag_reader")
+
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_feature_flag(
+            name = "flag2",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        flag_reader(
+            name = "FooFlags",
+            flags = [
+                ":flag1",
+                ":flag2",
+            ],
+            transitive_configs = [
+                ":flag1",
+                ":flag2",
+            ],
+        )
+
+        android_binary(
+            name = "foo",
+            srcs = [":FooFlags.java"],
+            feature_flags = {
+                "flag1": "on",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = [
+                ":flag1",
+                ":flag2",
+            ],
+        )
+        """);
     Artifact flagList =
         getFirstArtifactEndingWith(
             actionsTestUtil()
@@ -3831,19 +4396,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--include_config_fragments_provider=direct");
     scratch.file(
         "java/com/foo/BUILD",
-        "config_feature_flag(",
-        "  name = 'flag1',",
-        "  allowed_values = ['on', 'off'],",
-        "  default_value = 'off',",
-        ")",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = [':FooFlags.java'],",
-        "  feature_flags = {",
-        "    'flag1': 'on',",
-        "  },",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag1",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        android_binary(
+            name = "foo",
+            srcs = [":FooFlags.java"],
+            feature_flags = {
+                "flag1": "on",
+            },
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     ConfiguredTarget ct = getConfiguredTarget("//java/com/foo:foo");
     assertThat(ct.getProvider(RequiredConfigFragmentsProvider.class).getStarlarkOptions())
         .containsExactly(Label.parseCanonicalUnchecked("//java/com/foo:flag1"));
@@ -3853,13 +4424,18 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNocompressExtensions() throws Exception {
     scratch.file(
         "java/r/android/BUILD",
-        "android_binary(",
-        "  name = 'r',",
-        "  srcs = ['Foo.java'],",
-        "  manifest = 'AndroidManifest.xml',",
-        "  resource_files = ['res/raw/foo.apk'],",
-        "  nocompress_extensions = ['.apk', '.so'],",
-        ")");
+        """
+        android_binary(
+            name = "r",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            nocompress_extensions = [
+                ".apk",
+                ".so",
+            ],
+            resource_files = ["res/raw/foo.apk"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/r/android:r");
     ValidatedAndroidResources resource = getValidatedResources(binary);
     List<String> args = resourceArguments(resource);
@@ -3886,28 +4462,38 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.overwriteFile(
         "tools/allowlists/config_feature_flag/BUILD",
-        "package_group(",
-        "    name = 'config_feature_flag',",
-        "    packages = ['//flag'])");
+        """
+        package_group(
+            name = "config_feature_flag",
+            packages = ["//flag"],
+        )
+        """);
     scratch.file(
         "flag/BUILD",
-        "config_feature_flag(",
-        "    name = 'flag',",
-        "    allowed_values = ['right', 'wrong'],",
-        "    default_value = 'right',",
-        "    visibility = ['//java/com/google/android/foo:__pkg__'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag",
+            allowed_values = [
+                "right",
+                "wrong",
+            ],
+            default_value = "right",
+            visibility = ["//java/com/google/android/foo:__pkg__"],
+        )
+        """);
     scratch.file(
         "java/com/google/android/foo/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = [':FooFlags.java'],",
-        "  feature_flags = {",
-        "    '//flag:flag': 'right',",
-        "  },",
-        "  transitive_configs = ['//flag:flag'],",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = [":FooFlags.java"],
+            feature_flags = {
+                "//flag:flag": "right",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = ["//flag:flag"],
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/google/android/foo:foo")).isNull();
     assertContainsEvent(
         "in android_binary rule //java/com/google/android/foo:foo: "
@@ -3919,28 +4505,41 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
     scratch.overwriteFile(
         "tools/allowlists/config_feature_flag/BUILD",
-        "package_group(",
-        "    name = 'config_feature_flag',",
-        "    packages = ['//flag', '//java/com/google/android/foo'])");
+        """
+        package_group(
+            name = "config_feature_flag",
+            packages = [
+                "//flag",
+                "//java/com/google/android/foo",
+            ],
+        )
+        """);
     scratch.file(
         "flag/BUILD",
-        "config_feature_flag(",
-        "    name = 'flag',",
-        "    allowed_values = ['right', 'wrong'],",
-        "    default_value = 'right',",
-        "    visibility = ['//java/com/google/android/foo:__pkg__'],",
-        ")");
+        """
+        config_feature_flag(
+            name = "flag",
+            allowed_values = [
+                "right",
+                "wrong",
+            ],
+            default_value = "right",
+            visibility = ["//java/com/google/android/foo:__pkg__"],
+        )
+        """);
     scratch.file(
         "java/com/google/android/foo/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = [':FooFlags.java'],",
-        "  feature_flags = {",
-        "    '//flag:flag': 'right',",
-        "  },",
-        "  transitive_configs = ['//flag:flag'],",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = [":FooFlags.java"],
+            feature_flags = {
+                "//flag:flag": "right",
+            },
+            manifest = "AndroidManifest.xml",
+            transitive_configs = ["//flag:flag"],
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/google/android/foo:foo")).isNotNull();
     assertNoEvents();
   }
@@ -3949,16 +4548,21 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testFeatureFlagPolicyIsNotUsedIfFlagValuesNotUsed() throws Exception {
     scratch.overwriteFile(
         "tools/allowlists/config_feature_flag/BUILD",
-        "package_group(",
-        "    name = 'config_feature_flag',",
-        "    packages = ['*super* busted package group'])");
+        """
+        package_group(
+            name = "config_feature_flag",
+            packages = ["*super* busted package group"],
+        )
+        """);
     scratch.file(
         "java/com/google/android/foo/BUILD",
-        "android_binary(",
-        "  name = 'foo',",
-        "  manifest = 'AndroidManifest.xml',",
-        "  srcs = [':FooFlags.java'],",
-        ")");
+        """
+        android_binary(
+            name = "foo",
+            srcs = [":FooFlags.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     assertThat(getConfiguredTarget("//java/com/google/android/foo:foo")).isNotNull();
     // the package_group is busted, so we would have failed to get this far if we depended on it
     assertNoEvents();
@@ -3973,12 +4577,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testAapt2WithAndroidSdk() throws Exception {
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+        )
+        """);
 
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     Artifact apk = getImplicitOutputArtifact(a, AndroidRuleClasses.ANDROID_RESOURCES_APK);
@@ -3996,22 +4602,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testAapt2WithAndroidSdkAndDependencies() throws Exception {
     scratch.file(
         "java/b/BUILD",
-        "android_library(",
-        "    name = 'b',",
-        "    srcs = ['B.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")");
+        """
+        android_library(
+            name = "b",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+        )
+        """);
 
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    deps = [ '//java/b:b' ],",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+            deps = ["//java/b"],
+        )
+        """);
 
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     ConfiguredTarget b = getDirectPrerequisite(a, "//java/b:b");
@@ -4043,12 +4653,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testAapt2ResourceShrinkingAction() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               shrink_resources = 1,",
-        "               proguard_specs = ['proguard-spec.pro'],)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            resource_files = ["res/values/strings.xml"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:hello");
@@ -4105,11 +4719,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testAapt2ResourceShrinking_proguardSpecsAbsent_noShrunkApk() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               shrink_resources = 1,)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:hello");
@@ -4125,12 +4743,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_cycle_shrinking=true");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               shrink_resources = 1,",
-        "               proguard_specs = ['proguard-spec.pro'],)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            resource_files = ["res/values/strings.xml"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:hello");
@@ -4154,14 +4776,16 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_cycle_shrinking=true");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        "    shrink_resources = 0,",
-        "    proguard_specs = ['proguard-spec.pro'],",
-        ")");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            resource_files = ["res/values/values.xml"],
+            shrink_resources = 0,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:a");
@@ -4185,11 +4809,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_cycle_shrinking=true");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               shrink_resources = 1)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/strings.xml"],
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:hello");
@@ -4206,10 +4834,14 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_android_resource_cycle_shrinking=true");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'hello',",
-        "               srcs = ['Foo.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               shrink_resources = 1)");
+        """
+        android_binary(
+            name = "hello",
+            srcs = ["Foo.java"],
+            manifest = "AndroidManifest.xml",
+            shrink_resources = 1,
+        )
+        """);
 
     ConfiguredTargetAndData targetAndData =
         getConfiguredTargetAndData("//java/com/google/android/hello:hello");
@@ -4228,21 +4860,40 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l2',",
-        "                srcs = ['MoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_library(name = 'l3',",
-        "                idl_srcs = ['A.aidl'],",
-        "                deps = [':l2'])",
-        "android_library(name = 'l4',",
-        "                srcs = ['SubMoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l2",
+            srcs = ["MoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_library(
+            name = "l3",
+            idl_srcs = ["A.aidl"],
+            deps = [":l2"],
+        )
+
+        android_library(
+            name = "l4",
+            srcs = ["SubMoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+        """);
     ConfiguredTargetAndData binary =
         getConfiguredTargetAndData("//java/com/google/android/hello:b");
     checkProguardUse(
@@ -4260,22 +4911,41 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testOnlyProguardSpecsProguardJar() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l2',",
-        "                srcs = ['MoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_library(name = 'l3',",
-        "                idl_srcs = ['A.aidl'],",
-        "                deps = [':l2'])",
-        "android_library(name = 'l4',",
-        "                srcs = ['SubMoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_generate_mapping = 1,",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l2",
+            srcs = ["MoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_library(
+            name = "l3",
+            idl_srcs = ["A.aidl"],
+            deps = [":l2"],
+        )
+
+        android_library(
+            name = "l4",
+            srcs = ["SubMoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_generate_mapping = 1,
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+        """);
 
     ConfiguredTarget output = getConfiguredTarget("//java/com/google/android/hello:b_proguard.jar");
     assertProguardUsed(output);
@@ -4292,15 +4962,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testCommandLineForMultipleProguardSpecs() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l1',",
-        "                srcs = ['Maps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l1'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l1",
+            srcs = ["Maps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [":l1"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:b");
     SpawnAction action =
         (SpawnAction)
@@ -4343,15 +5023,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoDuplicatesInProguardCommand() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l1',",
-        "                srcs = ['Maps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l1'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l1",
+            srcs = ["Maps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [":l1"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:b");
     SpawnAction action =
         (SpawnAction)
@@ -4389,11 +5079,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'],",
-        "               proguard_generate_mapping = 1)");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_generate_mapping = 1,
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
     checkProguardUse(
         getConfiguredTarget("//java/com/google/android/hello:b"),
         "b_proguard.jar",
@@ -4408,28 +5102,56 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testProguardMappingProvider() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l2',",
-        "                srcs = ['MoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_library(name = 'l3',",
-        "                idl_srcs = ['A.aidl'],",
-        "                deps = [':l2'])",
-        "android_library(name = 'l4',",
-        "                srcs = ['SubMoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b1',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_generate_mapping = 1,",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])",
-        "android_binary(name = 'b2',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l2",
+            srcs = ["MoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_library(
+            name = "l3",
+            idl_srcs = ["A.aidl"],
+            deps = [":l2"],
+        )
+
+        android_library(
+            name = "l4",
+            srcs = ["SubMoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b1",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_generate_mapping = 1,
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+        """);
 
     ConfiguredTarget output = getConfiguredTarget("//java/com/google/android/hello:b1");
     assertProguardUsed(output);
@@ -4446,21 +5168,37 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testProguardSpecFromLibraryUsedInBinary() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l2',",
-        "                srcs = ['MoreMaps.java'],",
-        "                proguard_specs = ['library_spec.cfg'])",
-        "android_library(name = 'l3',",
-        "                idl_srcs = ['A.aidl'],",
-        "                proguard_specs = ['library_spec.cfg'],",
-        "                deps = [':l2'])",
-        "android_library(name = 'l4',",
-        "                srcs = ['SubMoreMaps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l3', ':l4'],",
-        "               proguard_specs = ['proguard-spec.pro'],",
-        "               manifest = 'AndroidManifest.xml',)");
+        """
+        android_library(
+            name = "l2",
+            srcs = ["MoreMaps.java"],
+            proguard_specs = ["library_spec.cfg"],
+        )
+
+        android_library(
+            name = "l3",
+            idl_srcs = ["A.aidl"],
+            proguard_specs = ["library_spec.cfg"],
+            deps = [":l2"],
+        )
+
+        android_library(
+            name = "l4",
+            srcs = ["SubMoreMaps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = ["proguard-spec.pro"],
+            deps = [
+                ":l3",
+                ":l4",
+            ],
+        )
+        """);
     assertProguardUsed(getConfiguredTarget("//java/com/google/android/hello:b"));
     assertProguardGenerated(getConfiguredTarget("//java/com/google/android/hello:b"));
     SpawnAction action =
@@ -4481,12 +5219,19 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testResourcesUsedInProguardGenerate() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               resource_files = ['res/values/strings.xml'],",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            resource_files = ["res/values/strings.xml"],
+        )
+        """);
     scratch.file(
         "java/com/google/android/hello/res/values/strings.xml",
         "<resources><string name = 'hello'>Hello Android!</string></resources>");
@@ -4507,15 +5252,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testUseSingleJarForLibraryJars() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l1',",
-        "                srcs = ['Maps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l1'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l1",
+            srcs = ["Maps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [":l1"],
+        )
+        """);
     ConfiguredTargetAndData binary =
         getConfiguredTargetAndData("//java/com/google/android/hello:b");
     SpawnAction action =
@@ -4535,15 +5290,25 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_filter_library_jar_with_program_jar=true");
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_library(name = 'l1',",
-        "                srcs = ['Maps.java'],",
-        "                neverlink = 1)",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               deps = [':l1'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro', 'proguard-spec1.pro',",
-        "                                 'proguard-spec2.pro'])");
+        """
+        android_library(
+            name = "l1",
+            srcs = ["Maps.java"],
+            neverlink = 1,
+        )
+
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_specs = [
+                "proguard-spec.pro",
+                "proguard-spec1.pro",
+                "proguard-spec2.pro",
+            ],
+            deps = [":l1"],
+        )
+        """);
     ConfiguredTargetAndData binary =
         getConfiguredTargetAndData("//java/com/google/android/hello:b");
     SpawnAction action =
@@ -4562,11 +5327,15 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testOnlyOneLibraryJar() throws Exception {
     scratch.file(
         "java/com/google/android/hello/BUILD",
-        "android_binary(name = 'b',",
-        "               srcs = ['HelloApp.java'],",
-        "               manifest = 'AndroidManifest.xml',",
-        "               proguard_specs = ['proguard-spec.pro'],",
-        "               proguard_generate_mapping = 1)");
+        """
+        android_binary(
+            name = "b",
+            srcs = ["HelloApp.java"],
+            manifest = "AndroidManifest.xml",
+            proguard_generate_mapping = 1,
+            proguard_specs = ["proguard-spec.pro"],
+        )
+        """);
     ConfiguredTarget binary = getConfiguredTarget("//java/com/google/android/hello:b");
     SpawnAction action =
         (SpawnAction)
@@ -4580,18 +5349,33 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testApkInfoAccessibleFromStarlark() throws Exception {
     scratch.file(
         "java/com/google/android/BUILD",
-        "load(':postprocess.bzl', 'postprocess')",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               manifest = 'AndroidManifest.xml')",
-        "postprocess(name = 'postprocess', dep = ':b1')");
+        """
+        load(":postprocess.bzl", "postprocess")
+
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            manifest = "AndroidManifest.xml",
+        )
+
+        postprocess(
+            name = "postprocess",
+            dep = ":b1",
+        )
+        """);
     scratch.file(
         "java/com/google/android/postprocess.bzl",
-        "def _impl(ctx):",
-        "  return [DefaultInfo(files=depset(",
-        "    [ctx.attr.dep[ApkInfo].signed_apk, ctx.attr.dep[ApkInfo].deploy_jar]))]",
-        "postprocess = rule(implementation=_impl,",
-        "              attrs={'dep': attr.label(providers=[ApkInfo])})");
+        """
+        def _impl(ctx):
+            return [DefaultInfo(files = depset(
+                [ctx.attr.dep[ApkInfo].signed_apk, ctx.attr.dep[ApkInfo].deploy_jar],
+            ))]
+
+        postprocess = rule(
+            implementation = _impl,
+            attrs = {"dep": attr.label(providers = [ApkInfo])},
+        )
+        """);
     ConfiguredTarget postprocess = getConfiguredTarget("//java/com/google/android:postprocess");
     assertThat(postprocess).isNotNull();
     assertThat(
@@ -4603,22 +5387,39 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testInstrumentationInfoAccessibleFromStarlark() throws Exception {
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "load(':instr.bzl', 'instr')",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               instruments = ':b2',",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b2',",
-        "               srcs = ['b2.java'],",
-        "               manifest = 'AndroidManifest.xml')",
-        "instr(name = 'instr', dep = ':b1')");
+        """
+        load(":instr.bzl", "instr")
+
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "AndroidManifest.xml",
+        )
+
+        instr(
+            name = "instr",
+            dep = ":b1",
+        )
+        """);
     scratch.file(
         "java/com/google/android/instr/instr.bzl",
-        "def _impl(ctx):",
-        "  target = ctx.attr.dep[AndroidInstrumentationInfo].target.signed_apk",
-        "  return [DefaultInfo(files=depset([target]))]",
-        "instr = rule(implementation=_impl,",
-        "             attrs={'dep': attr.label(providers=[AndroidInstrumentationInfo])})");
+        """
+        def _impl(ctx):
+            target = ctx.attr.dep[AndroidInstrumentationInfo].target.signed_apk
+            return [DefaultInfo(files = depset([target]))]
+
+        instr = rule(
+            implementation = _impl,
+            attrs = {"dep": attr.label(providers = [AndroidInstrumentationInfo])},
+        )
+        """);
     ConfiguredTarget instr = getConfiguredTarget("//java/com/google/android/instr");
     assertThat(instr).isNotNull();
     assertThat(prettyArtifactNames(instr.getProvider(FilesToRunProvider.class).getFilesToRun()))
@@ -4629,22 +5430,39 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testInstrumentationInfoCreatableFromStarlark() throws Exception {
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "load(':instr.bzl', 'instr')",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               instruments = ':b2',",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b2',",
-        "               srcs = ['b2.java'],",
-        "               manifest = 'AndroidManifest.xml')",
-        "instr(name = 'instr', dep = ':b1')");
+        """
+        load(":instr.bzl", "instr")
+
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "AndroidManifest.xml",
+        )
+
+        instr(
+            name = "instr",
+            dep = ":b1",
+        )
+        """);
     scratch.file(
         "java/com/google/android/instr/instr.bzl",
-        "def _impl(ctx):",
-        "  target = ctx.attr.dep[AndroidInstrumentationInfo].target",
-        "  return [AndroidInstrumentationInfo(target=target)]",
-        "instr = rule(implementation=_impl,",
-        "             attrs={'dep': attr.label(providers=[AndroidInstrumentationInfo])})");
+        """
+        def _impl(ctx):
+            target = ctx.attr.dep[AndroidInstrumentationInfo].target
+            return [AndroidInstrumentationInfo(target = target)]
+
+        instr = rule(
+            implementation = _impl,
+            attrs = {"dep": attr.label(providers = [AndroidInstrumentationInfo])},
+        )
+        """);
     ConfiguredTarget instr = getConfiguredTarget("//java/com/google/android/instr");
     assertThat(instr).isNotNull();
     assertThat(instr.get(AndroidInstrumentationInfo.PROVIDER).getTarget().getApk().prettyPrint())
@@ -4655,13 +5473,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testInstrumentationInfoProviderHasApks() throws Exception {
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               instruments = ':b2',",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b2',",
-        "               srcs = ['b2.java'],",
-        "               manifest = 'AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     ConfiguredTarget b1 = getConfiguredTarget("//java/com/google/android/instr:b1");
     AndroidInstrumentationInfo provider = b1.get(AndroidInstrumentationInfo.PROVIDER);
     assertThat(provider.getTarget()).isNotNull();
@@ -4673,9 +5498,13 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testNoInstrumentationInfoProviderIfNotInstrumenting() throws Exception {
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               manifest = 'AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     ConfiguredTarget b1 = getConfiguredTarget("//java/com/google/android/instr:b1");
     AndroidInstrumentationInfo provider = b1.get(AndroidInstrumentationInfo.PROVIDER);
     assertThat(provider).isNull();
@@ -4685,13 +5514,20 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testFilterActionWithInstrumentedBinary() throws Exception {
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "android_binary(name = 'b1',",
-        "               srcs = ['b1.java'],",
-        "               instruments = ':b2',",
-        "               manifest = 'AndroidManifest.xml')",
-        "android_binary(name = 'b2',",
-        "               srcs = ['b2.java'],",
-        "               manifest = 'AndroidManifest.xml')");
+        """
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "AndroidManifest.xml",
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "AndroidManifest.xml",
+        )
+        """);
     ConfiguredTarget b1 = getConfiguredTarget("//java/com/google/android/instr:b1");
     SpawnAction action =
         (SpawnAction)
@@ -4727,12 +5563,17 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--experimental_incremental_dexing_after_proguard=1");
     scratch.file(
         "conditions/BUILD",
-        "config_setting(",
-        "    name = 'a',",
-        "    values = {'foo': 'a'})",
-        "config_setting(",
-        "    name = 'b',",
-        "    values = {'foo': 'b'})");
+        """
+        config_setting(
+            name = "a",
+            values = {"foo": "a"},
+        )
+
+        config_setting(
+            name = "b",
+            values = {"foo": "b"},
+        )
+        """);
     scratchConfiguredTarget(
         "java/foo",
         "abin",
@@ -4766,22 +5607,26 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void alwaysSkipParsingActionWithAapt2() throws Exception {
     scratch.file(
         "java/b/BUILD",
-        "android_library(",
-        "    name = 'b',",
-        "    srcs = ['B.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")");
+        """
+        android_library(
+            name = "b",
+            srcs = ["B.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+        )
+        """);
 
     scratch.file(
         "java/a/BUILD",
-        "android_binary(",
-        "    name = 'a',",
-        "    srcs = ['A.java'],",
-        "    manifest = 'AndroidManifest.xml',",
-        "    deps = [ '//java/b:b' ],",
-        "    resource_files = [ 'res/values/values.xml' ], ",
-        ")");
+        """
+        android_binary(
+            name = "a",
+            srcs = ["A.java"],
+            manifest = "AndroidManifest.xml",
+            resource_files = ["res/values/values.xml"],
+            deps = ["//java/b"],
+        )
+        """);
 
     ConfiguredTarget a = getConfiguredTarget("//java/a:a");
     ConfiguredTarget b = getDirectPrerequisite(a, "//java/b:b");
@@ -4805,34 +5650,42 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void starlarkJavaInfoToAndroidBinaryAttributes() throws Exception {
     scratch.file(
         "java/r/android/extension.bzl",
-        "def _impl(ctx):",
-        "  dep_params = ctx.attr.dep[JavaInfo]",
-        "  return [dep_params]",
-        "my_rule = rule(",
-        "    _impl,",
-        "    attrs = {",
-        "        'dep': attr.label(),",
-        "    },",
-        ")");
+        """
+        def _impl(ctx):
+            dep_params = ctx.attr.dep[JavaInfo]
+            return [dep_params]
+
+        my_rule = rule(
+            _impl,
+            attrs = {
+                "dep": attr.label(),
+            },
+        )
+        """);
     scratch.file(
         "java/r/android/BUILD",
-        "load(':extension.bzl', 'my_rule')",
-        "android_library(",
-        "    name = 'al_bottom_for_deps',",
-        "    srcs = ['java/A.java'],",
-        ")",
-        "my_rule(",
-        "    name = 'mya',",
-        "    dep = ':al_bottom_for_deps',",
-        ")",
-        "android_binary(",
-        "    name = 'foo_app',",
-        "    srcs = ['java/B.java'],",
-        "    deps = [':mya'],",
-        "    manifest = 'AndroidManifest.xml',",
-        // TODO(b/75051107): Remove the following line when fixed.
-        "    incremental_dexing = 0,",
-        ")");
+        """
+        load(":extension.bzl", "my_rule")
+
+        android_library(
+            name = "al_bottom_for_deps",
+            srcs = ["java/A.java"],
+        )
+
+        my_rule(
+            name = "mya",
+            dep = ":al_bottom_for_deps",
+        )
+
+        android_binary(
+            name = "foo_app",
+            srcs = ["java/B.java"],
+            # TODO(b/75051107): Remove the following line when fixed.
+            incremental_dexing = 0,
+            manifest = "AndroidManifest.xml",
+            deps = [":mya"],
+        )
+        """);
 
     // Test that all bottom jars are on the runtime classpath of the app.
     ConfiguredTarget target = getConfiguredTarget("//java/r/android:foo_app");
@@ -4863,48 +5716,60 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
      */
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_library(",
-        "    name = 'core',",
-        "    manifest = 'core/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['core/res/values/strings.xml'],",
-        ")",
-        "android_library(",
-        "    name = 'utility',",
-        "    manifest = 'utility/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['utility/res/values/values.xml'],",
-        "    deps = ['//java/common:common'],",
-        ")");
+        """
+        android_library(
+            name = "core",
+            exports_manifest = 1,
+            manifest = "core/AndroidManifest.xml",
+            resource_files = ["core/res/values/strings.xml"],
+        )
+
+        android_library(
+            name = "utility",
+            exports_manifest = 1,
+            manifest = "utility/AndroidManifest.xml",
+            resource_files = ["utility/res/values/values.xml"],
+            deps = ["//java/common"],
+        )
+        """);
     scratch.file(
         "java/binary/BUILD",
-        "android_binary(",
-        "    name = 'application',",
-        "    srcs = ['App.java'],",
-        "    manifest = 'app/AndroidManifest.xml',",
-        "    deps = [':library'],",
-        ")",
-        "android_library(",
-        "    name = 'library',",
-        "    manifest = 'library/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    deps = ['//java/common:theme', '//java/android:utility'],",
-        ")");
+        """
+        android_binary(
+            name = "application",
+            srcs = ["App.java"],
+            manifest = "app/AndroidManifest.xml",
+            deps = [":library"],
+        )
+
+        android_library(
+            name = "library",
+            exports_manifest = 1,
+            manifest = "library/AndroidManifest.xml",
+            deps = [
+                "//java/android:utility",
+                "//java/common:theme",
+            ],
+        )
+        """);
     scratch.file(
         "java/common/BUILD",
-        "android_library(",
-        "    name = 'common',",
-        "    manifest = 'common/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['common/res/values/common.xml'],",
-        "    deps = ['//java/android:core'],",
-        ")",
-        "android_library(",
-        "    name = 'theme',",
-        "    manifest = 'theme/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['theme/res/values/values.xml'],",
-        ")");
+        """
+        android_library(
+            name = "common",
+            exports_manifest = 1,
+            manifest = "common/AndroidManifest.xml",
+            resource_files = ["common/res/values/common.xml"],
+            deps = ["//java/android:core"],
+        )
+
+        android_library(
+            name = "theme",
+            exports_manifest = 1,
+            manifest = "theme/AndroidManifest.xml",
+            resource_files = ["theme/res/values/values.xml"],
+        )
+        """);
 
     // These have to be found via the same inheritance hierarchy, because getDirectPrerequsite can
     // only traverse one level.
@@ -4939,75 +5804,115 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
         "--android_manifest_merger_order=alphabetical_by_configuration");
     scratch.overwriteFile(
         "java/android/BUILD",
-        "android_library(",
-        "    name = 'core',",
-        "    manifest = 'core/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['core/res/values/strings.xml'],",
-        ")",
-        "android_library(",
-        "    name = 'utility',",
-        "    manifest = 'utility/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['utility/res/values/values.xml'],",
-        "    deps = ['//java/common:common'],",
-        "    transitive_configs = ['//flags:a', '//flags:b'],",
-        ")");
+        """
+        android_library(
+            name = "core",
+            exports_manifest = 1,
+            manifest = "core/AndroidManifest.xml",
+            resource_files = ["core/res/values/strings.xml"],
+        )
+
+        android_library(
+            name = "utility",
+            exports_manifest = 1,
+            manifest = "utility/AndroidManifest.xml",
+            resource_files = ["utility/res/values/values.xml"],
+            transitive_configs = [
+                "//flags:a",
+                "//flags:b",
+            ],
+            deps = ["//java/common"],
+        )
+        """);
     scratch.file(
         "java/binary/BUILD",
-        "android_binary(",
-        "    name = 'application',",
-        "    srcs = ['App.java'],",
-        "    manifest = 'app/AndroidManifest.xml',",
-        "    deps = [':library'],",
-        "    feature_flags = {",
-        "        '//flags:a': 'on',",
-        "        '//flags:b': 'on',",
-        "        '//flags:c': 'on',",
-        "    },",
-        "    transitive_configs = ['//flags:a', '//flags:b', '//flags:c'],",
-        ")",
-        "android_library(",
-        "    name = 'library',",
-        "    manifest = 'library/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    deps = ['//java/common:theme', '//java/android:utility'],",
-        "    transitive_configs = ['//flags:a', '//flags:b', '//flags:c'],",
-        ")");
+        """
+        android_binary(
+            name = "application",
+            srcs = ["App.java"],
+            feature_flags = {
+                "//flags:a": "on",
+                "//flags:b": "on",
+                "//flags:c": "on",
+            },
+            manifest = "app/AndroidManifest.xml",
+            transitive_configs = [
+                "//flags:a",
+                "//flags:b",
+                "//flags:c",
+            ],
+            deps = [":library"],
+        )
+
+        android_library(
+            name = "library",
+            exports_manifest = 1,
+            manifest = "library/AndroidManifest.xml",
+            transitive_configs = [
+                "//flags:a",
+                "//flags:b",
+                "//flags:c",
+            ],
+            deps = [
+                "//java/android:utility",
+                "//java/common:theme",
+            ],
+        )
+        """);
     scratch.file(
         "java/common/BUILD",
-        "android_library(",
-        "    name = 'common',",
-        "    manifest = 'common/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['common/res/values/common.xml'],",
-        "    deps = ['//java/android:core'],",
-        "    transitive_configs = ['//flags:a'],",
-        ")",
-        "android_library(",
-        "    name = 'theme',",
-        "    manifest = 'theme/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['theme/res/values/values.xml'],",
-        "    transitive_configs = ['//flags:a', '//flags:b', '//flags:c'],",
-        ")");
+        """
+        android_library(
+            name = "common",
+            exports_manifest = 1,
+            manifest = "common/AndroidManifest.xml",
+            resource_files = ["common/res/values/common.xml"],
+            transitive_configs = ["//flags:a"],
+            deps = ["//java/android:core"],
+        )
+
+        android_library(
+            name = "theme",
+            exports_manifest = 1,
+            manifest = "theme/AndroidManifest.xml",
+            resource_files = ["theme/res/values/values.xml"],
+            transitive_configs = [
+                "//flags:a",
+                "//flags:b",
+                "//flags:c",
+            ],
+        )
+        """);
     scratch.file(
         "flags/BUILD",
-        "config_feature_flag(",
-        "    name = 'a',",
-        "    allowed_values = ['on', 'off'],",
-        "    default_value = 'off',",
-        ")",
-        "config_feature_flag(",
-        "    name = 'b',",
-        "    allowed_values = ['on', 'off'],",
-        "    default_value = 'off',",
-        ")",
-        "config_feature_flag(",
-        "    name = 'c',",
-        "    allowed_values = ['on', 'off'],",
-        "    default_value = 'off',",
-        ")");
+        """
+        config_feature_flag(
+            name = "a",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_feature_flag(
+            name = "b",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+
+        config_feature_flag(
+            name = "c",
+            allowed_values = [
+                "on",
+                "off",
+            ],
+            default_value = "off",
+        )
+        """);
 
     assertThat(getBinaryMergeeManifests(getConfiguredTarget("//java/binary:application")).values())
         .containsExactly(
@@ -5023,31 +5928,40 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
   public void testAndroidStarlarkApiNativeLibs() throws Exception {
     scratch.file(
         "java/a/fetch_native_libs.bzl",
-        "def _impl(ctx):",
-        "  libs = ctx.attr.android_binary.android.native_libs",
-        "  return [DefaultInfo(files = libs.values()[0])]",
-        "fetch_native_libs = rule(implementation = _impl,",
-        "    attrs = {",
-        "        'android_binary': attr.label(),",
-        "    },",
-        ")");
+        """
+        def _impl(ctx):
+            libs = ctx.attr.android_binary.android.native_libs
+            return [DefaultInfo(files = libs.values()[0])]
+
+        fetch_native_libs = rule(
+            implementation = _impl,
+            attrs = {
+                "android_binary": attr.label(),
+            },
+        )
+        """);
     scratch.file(
         "java/a/BUILD",
-        "load('//java/a:fetch_native_libs.bzl', 'fetch_native_libs')",
-        "android_binary(",
-        "    name = 'app',",
-        "    srcs=['Main.java'],",
-        "    manifest='AndroidManifest.xml',",
-        "    deps=[':cc'],",
-        ")",
-        "cc_library(",
-        "    name = 'cc',",
-        "    srcs = ['cc.cc'],",
-        ")",
-        "fetch_native_libs(",
-        "    name = 'clibs',",
-        "    android_binary = 'app',",
-        ")");
+        """
+        load("//java/a:fetch_native_libs.bzl", "fetch_native_libs")
+
+        android_binary(
+            name = "app",
+            srcs = ["Main.java"],
+            manifest = "AndroidManifest.xml",
+            deps = [":cc"],
+        )
+
+        cc_library(
+            name = "cc",
+            srcs = ["cc.cc"],
+        )
+
+        fetch_native_libs(
+            name = "clibs",
+            android_binary = "app",
+        )
+        """);
     ConfiguredTarget clibs = getConfiguredTarget("//java/a:clibs");
 
     assertThat(
@@ -5062,25 +5976,29 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--noexperimental_disable_instrumentation_manifest_merge");
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "android_binary(",
-        "    name = 'b1',",
-        "    srcs = ['b1.java'],",
-        "    instruments = ':b2',",
-        "    deps = [':lib'],",
-        "    manifest = 'test/AndroidManifest.xml',",
-        ")",
-        "android_library(",
-        "    name = 'lib',",
-        "    manifest = 'lib/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['lib/res/values/strings.xml'],",
-        ")",
-        "android_binary(",
-        "    name = 'b2',",
-        "    srcs = ['b2.java'],",
-        "    deps = [':lib'],",
-        "    manifest = 'bin/AndroidManifest.xml',",
-        ")");
+        """
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "test/AndroidManifest.xml",
+            deps = [":lib"],
+        )
+
+        android_library(
+            name = "lib",
+            exports_manifest = 1,
+            manifest = "lib/AndroidManifest.xml",
+            resource_files = ["lib/res/values/strings.xml"],
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "bin/AndroidManifest.xml",
+            deps = [":lib"],
+        )
+        """);
     assertThat(
             getBinaryMergeeManifests(getConfiguredTarget("//java/com/google/android/instr:b1"))
                 .values())
@@ -5093,25 +6011,29 @@ public class AndroidBinaryTest extends AndroidBuildViewTestCase {
     useConfiguration("--experimental_disable_instrumentation_manifest_merge");
     scratch.file(
         "java/com/google/android/instr/BUILD",
-        "android_binary(",
-        "    name = 'b1',",
-        "    srcs = ['b1.java'],",
-        "    instruments = ':b2',",
-        "    deps = [':lib'],",
-        "    manifest = 'test/AndroidManifest.xml',",
-        ")",
-        "android_library(",
-        "    name = 'lib',",
-        "    manifest = 'lib/AndroidManifest.xml',",
-        "    exports_manifest = 1,",
-        "    resource_files = ['lib/res/values/strings.xml'],",
-        ")",
-        "android_binary(",
-        "    name = 'b2',",
-        "    srcs = ['b2.java'],",
-        "    deps = [':lib'],",
-        "    manifest = 'bin/AndroidManifest.xml',",
-        ")");
+        """
+        android_binary(
+            name = "b1",
+            srcs = ["b1.java"],
+            instruments = ":b2",
+            manifest = "test/AndroidManifest.xml",
+            deps = [":lib"],
+        )
+
+        android_library(
+            name = "lib",
+            exports_manifest = 1,
+            manifest = "lib/AndroidManifest.xml",
+            resource_files = ["lib/res/values/strings.xml"],
+        )
+
+        android_binary(
+            name = "b2",
+            srcs = ["b2.java"],
+            manifest = "bin/AndroidManifest.xml",
+            deps = [":lib"],
+        )
+        """);
     assertThat(
             getBinaryMergeeManifests(getConfiguredTarget("//java/com/google/android/instr:b1"))
                 .values())

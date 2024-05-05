@@ -16,12 +16,14 @@ package com.google.devtools.build.lib.analysis.actions;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertThat;
+import static java.lang.String.format;
 
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.exec.util.FakeActionInputFileCache;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
 import java.io.IOException;
@@ -45,28 +47,30 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
   public void javaLibraryWithJavacopts() throws Exception {
     scratch.file(
         "java/com/google/test/BUILD",
-        "genrule(",
-        "    name = 'gen_b',",
-        "    outs = ['B.java'],",
-        "    cmd = '<some command>',",
-        ")",
-        "genrule(",
-        "    name = 'gen_c',",
-        "    outs = ['C.java'],",
-        "    cmd = '<some command>',",
-        ")",
-        "java_library(",
-        "    name = 'a',",
-        "    javacopts = [",
-        "        '-XepOpt:foo:bar=$(location B.java)',",
-        "        '-XepOpt:baz=$(location C.java),$(location B.java)',",
-        "    ],",
-        "    srcs = [",
-        "        'A.java',",
-        "        'B.java',",
-        "        'C.java',",
-        "    ],",
-        ")");
+        """
+        genrule(
+            name = 'gen_b',
+            outs = ['B.java'],
+            cmd = '<some command>',
+        )
+        genrule(
+            name = 'gen_c',
+            outs = ['C.java'],
+            cmd = '<some command>',
+        )
+        java_library(
+            name = 'a',
+            javacopts = [
+                '-XepOpt:foo:bar=$(location B.java)',
+                '-XepOpt:baz=$(location C.java),$(location B.java)',
+            ],
+            srcs = [
+                'A.java',
+                'B.java',
+                'C.java',
+            ],
+        )
+        """);
 
     ConfiguredTarget configuredTarget = getConfiguredTarget("//java/com/google/test:a");
     Artifact compiledArtifact =
@@ -75,7 +79,11 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
             .toList()
             .get(0);
     SpawnAction action = (SpawnAction) getGeneratingAction(compiledArtifact);
-    Spawn spawn = action.getSpawn(new ActionExecutionContextBuilder().build());
+    Spawn spawn =
+        action.getSpawn(
+            new ActionExecutionContextBuilder()
+                .setMetadataProvider(new FakeActionInputFileCache())
+                .build());
 
     assertThat(spawn.getPathMapper().isNoop()).isFalse();
     String outDir = analysisMock.getProductName() + "-out";
@@ -85,22 +93,22 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
                 .collect(toImmutableList()))
         .containsExactly(
             "java/com/google/test/A.java",
-            outDir + "/cfg/bin/java/com/google/test/B.java",
-            outDir + "/cfg/bin/java/com/google/test/C.java",
-            outDir + "/cfg/bin/java/com/google/test/liba-hjar.jar",
-            outDir + "/cfg/bin/java/com/google/test/liba-hjar.jdeps",
-            "-XepOpt:foo:bar=" + outDir + "/cfg/bin/java/com/google/test/B.java",
-            "-XepOpt:baz="
-                + outDir
-                + "/cfg/bin/java/com/google/test/C.java,"
-                + outDir
-                + "/cfg/bin/java/com/google/test/B.java");
+            format("%s/cfg/bin/java/com/google/test/B.java", outDir),
+            format("%s/cfg/bin/java/com/google/test/C.java", outDir),
+            format("%s/cfg/bin/java/com/google/test/liba-hjar.jar", outDir),
+            format("%s/cfg/bin/java/com/google/test/liba-hjar.jdeps", outDir),
+            format("-XepOpt:foo:bar=%s/cfg/bin/java/com/google/test/B.java", outDir),
+            format(
+                "-XepOpt:baz=%s/cfg/bin/java/com/google/test/C.java,%s/cfg/bin/java/com/google/test/B.java",
+                outDir, outDir));
   }
 
   private void addStarlarkRule(Dict<String, String> executionRequirements) throws IOException {
     scratch.file("defs/BUILD");
     scratch.file(
         "defs/defs.bzl",
+        "def _map_each(file):",
+        "    return '{}:{}:{}:{}'.format(file.short_path, file.path, file.root.path, file.dirname)",
         "def _my_rule_impl(ctx):",
         "    args = ctx.actions.args()",
         "    args.add(ctx.outputs.out)",
@@ -108,6 +116,7 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
         "        depset(ctx.files.srcs),",
         "        before_each = '-source',",
         "        format_each = '<%s>',",
+        "        map_each = _map_each,",
         "    )",
         "    ctx.actions.run(",
         "        outputs = [ctx.outputs.out],",
@@ -115,7 +124,7 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
         "        executable = ctx.executable._tool,",
         "        arguments = [args],",
         "        mnemonic = 'MyRuleAction',",
-        String.format("        execution_requirements = %s,", Starlark.repr(executionRequirements)),
+        format("        execution_requirements = %s,", Starlark.repr(executionRequirements)),
         "    )",
         "    return [DefaultInfo(files = depset([ctx.outputs.out]))]",
         "my_rule = rule(",
@@ -132,27 +141,31 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "pkg/BUILD",
-        "load('//defs:defs.bzl', 'my_rule')",
-        "genrule(",
-        "    name = 'gen_src',",
-        "    outs = ['gen_src.txt'],",
-        "    cmd = '<some command>',",
-        ")",
-        "my_rule(",
-        "    name = 'my_rule',",
-        "    out = 'out.bin',",
-        "    srcs = [",
-        "        ':gen_src',",
-        "        'source.txt',",
-        "    ],",
-        ")");
+        """
+        load('//defs:defs.bzl', 'my_rule')
+        genrule(
+            name = 'gen_src',
+            outs = ['gen_src.txt'],
+            cmd = '<some command>',
+        )
+        my_rule(
+            name = 'my_rule',
+            out = 'out.bin',
+            srcs = [
+                ':gen_src',
+                'source.txt',
+            ],
+        )
+        """);
     scratch.file(
         "tool/BUILD",
-        "sh_binary(",
-        "    name = 'tool',",
-        "    srcs = ['tool.sh'],",
-        "    visibility = ['//visibility:public'],",
-        ")");
+        """
+        sh_binary(
+            name = 'tool',
+            srcs = ['tool.sh'],
+            visibility = ['//visibility:public'],
+        )
+        """);
   }
 
   @Test
@@ -164,18 +177,24 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
     Artifact outputArtifact =
         configuredTarget.getProvider(FileProvider.class).getFilesToBuild().toList().get(0);
     SpawnAction action = (SpawnAction) getGeneratingAction(outputArtifact);
-    Spawn spawn = action.getSpawn(new ActionExecutionContextBuilder().build());
+    Spawn spawn =
+        action.getSpawn(
+            new ActionExecutionContextBuilder()
+                .setMetadataProvider(new FakeActionInputFileCache())
+                .build());
 
     assertThat(spawn.getPathMapper().isNoop()).isFalse();
     String outDir = analysisMock.getProductName() + "-out";
     assertThat(spawn.getArguments().stream().collect(toImmutableList()))
         .containsExactly(
-            outDir + "/cfg/bin/tool/tool",
-            outDir + "/cfg/bin/pkg/out.bin",
+            format("%s/cfg/bin/tool/tool", outDir),
+            format("%s/cfg/bin/pkg/out.bin", outDir),
             "-source",
-            "<" + outDir + "/cfg/bin/pkg/gen_src.txt>",
+            format(
+                "<pkg/gen_src.txt:%1$s/cfg/bin/pkg/gen_src.txt:%1$s/cfg/bin:%1$s/cfg/bin/pkg>",
+                outDir),
             "-source",
-            "<pkg/source.txt>")
+            "<pkg/source.txt:pkg/source.txt::pkg>")
         .inOrder();
   }
 
@@ -190,18 +209,24 @@ public class StrippingPathMapperTest extends BuildViewTestCase {
     Artifact outputArtifact =
         configuredTarget.getProvider(FileProvider.class).getFilesToBuild().toList().get(0);
     SpawnAction action = (SpawnAction) getGeneratingAction(outputArtifact);
-    Spawn spawn = action.getSpawn(new ActionExecutionContextBuilder().build());
+    Spawn spawn =
+        action.getSpawn(
+            new ActionExecutionContextBuilder()
+                .setMetadataProvider(new FakeActionInputFileCache())
+                .build());
 
     assertThat(spawn.getPathMapper().isNoop()).isFalse();
     String outDir = analysisMock.getProductName() + "-out";
     assertThat(spawn.getArguments().stream().collect(toImmutableList()))
         .containsExactly(
-            outDir + "/cfg/bin/tool/tool",
-            outDir + "/cfg/bin/pkg/out.bin",
+            format("%s/cfg/bin/tool/tool", outDir),
+            format("%s/cfg/bin/pkg/out.bin", outDir),
             "-source",
-            "<" + outDir + "/cfg/bin/pkg/gen_src.txt>",
+            format(
+                "<pkg/gen_src.txt:%1$s/cfg/bin/pkg/gen_src.txt:%1$s/cfg/bin:%1$s/cfg/bin/pkg>",
+                outDir),
             "-source",
-            "<pkg/source.txt>")
+            "<pkg/source.txt:pkg/source.txt::pkg>")
         .inOrder();
   }
 }

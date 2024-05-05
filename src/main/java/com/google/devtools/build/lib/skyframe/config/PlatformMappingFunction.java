@@ -15,8 +15,6 @@
 package com.google.devtools.build.lib.skyframe.config;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.devtools.build.lib.server.FailureDetails.TargetPatterns.Code.DEPENDENCY_NOT_FOUND;
-import static com.google.devtools.common.options.OptionsParser.STARLARK_SKIPPED_PREFIXES;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -29,21 +27,16 @@ import com.google.devtools.build.lib.actions.FileValue;
 import com.google.devtools.build.lib.actions.MissingInputFileException;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.Label.PackageContext;
 import com.google.devtools.build.lib.cmdline.Label.RepoContext;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
-import com.google.devtools.build.lib.cmdline.TargetParsingException;
-import com.google.devtools.build.lib.packages.NoSuchTargetException;
-import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
-import com.google.devtools.build.lib.runtime.StarlarkOptionsParser;
 import com.google.devtools.build.lib.server.FailureDetails.BuildConfiguration;
 import com.google.devtools.build.lib.server.FailureDetails.BuildConfiguration.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
-import com.google.devtools.build.lib.skyframe.PackageValue;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.RepositoryMappingValue;
-import com.google.devtools.build.lib.skyframe.config.PlatformMappingValue.NativeAndStarlarkFlags;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Root;
@@ -51,7 +44,6 @@ import com.google.devtools.build.lib.vfs.RootedPath;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
-import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.io.IOException;
 import java.util.List;
@@ -139,8 +131,7 @@ public final class PlatformMappingFunction implements SkyFunction {
     if (!platformMappingKey.wasExplicitlySetByUser()) {
       // If no flag was passed and the default mapping file does not exist treat this as if the
       // mapping file was empty rather than an error.
-      return new PlatformMappingValue(
-          ImmutableMap.of(), ImmutableMap.of(), ImmutableSet.of(), mainRepoContext.repoMapping());
+      return new PlatformMappingValue(ImmutableMap.of(), ImmutableMap.of(), ImmutableSet.of());
     }
     throw new PlatformMappingFunctionException(
         new MissingInputFileException(
@@ -164,7 +155,7 @@ public final class PlatformMappingFunction implements SkyFunction {
   @VisibleForTesting
   @Nullable
   static Mappings parse(Environment env, List<String> lines, RepoContext mainRepoContext)
-      throws PlatformMappingParsingException {
+      throws PlatformMappingParsingException, InterruptedException {
     PeekingIterator<String> it =
         Iterators.peekingIterator(
             lines.stream()
@@ -173,7 +164,7 @@ public final class PlatformMappingFunction implements SkyFunction {
                 .iterator());
 
     if (!it.hasNext()) {
-      return new Mappings(ImmutableMap.of(), ImmutableMap.of(), mainRepoContext);
+      return new Mappings(ImmutableMap.of(), ImmutableMap.of());
     }
 
     if (!it.peek().equalsIgnoreCase("platforms:") && !it.peek().equalsIgnoreCase("flags:")) {
@@ -181,9 +172,7 @@ public final class PlatformMappingFunction implements SkyFunction {
     }
 
     ImmutableMap<Label, NativeAndStarlarkFlags> platformsToFlags = ImmutableMap.of();
-    // Flags -> platform mapping doesn't support Starlark flags. If the need arises we could upgrade
-    // this to NativeAndStarlarkFlags like above.
-    ImmutableMap<ImmutableSet<String>, Label> flagsToPlatforms = ImmutableMap.of();
+    ImmutableMap<NativeAndStarlarkFlags, Label> flagsToPlatforms = ImmutableMap.of();
 
     if (it.peek().equalsIgnoreCase("platforms:")) {
       it.next();
@@ -198,50 +187,16 @@ public final class PlatformMappingFunction implements SkyFunction {
       if (!line.equalsIgnoreCase("flags:")) {
         throw parsingException("Expected 'flags:' but got " + line);
       }
-      flagsToPlatforms = readFlagsToPlatforms(it, mainRepoContext);
+      flagsToPlatforms = readFlagsToPlatforms(it, env, mainRepoContext);
+      if (flagsToPlatforms == null) {
+        return null;
+      }
     }
 
     if (it.hasNext()) {
       throw parsingException("Expected end of file but got " + it.next());
     }
-    return new Mappings(platformsToFlags, flagsToPlatforms, mainRepoContext);
-  }
-
-  /**
-   * Lets {@link StarlarkOptionsParser} convert flag names to {@link Target}s through a Skyframe
-   * {@link PackageValue} lookup.
-   */
-  private static class SkyframeTargetLoader implements StarlarkOptionsParser.BuildSettingLoader {
-    private final Environment env;
-    private final RepoContext mainRepoContext;
-
-    public SkyframeTargetLoader(Environment env, RepoContext mainRepoContext) {
-      this.env = env;
-      this.mainRepoContext = mainRepoContext;
-    }
-
-    @Nullable
-    @Override
-    public Target loadBuildSetting(String name)
-        throws InterruptedException, TargetParsingException {
-      Label asLabel;
-      try {
-        asLabel = Label.parseWithRepoContext(name, mainRepoContext);
-      } catch (LabelSyntaxException e) {
-        throw new IllegalArgumentException(e);
-      }
-      SkyKey pkgKey = asLabel.getPackageIdentifier();
-      PackageValue pkg = (PackageValue) env.getValue(pkgKey);
-      if (pkg == null) {
-        return null;
-      }
-      try {
-        return pkg.getPackage().getTarget(asLabel.getName());
-      } catch (NoSuchTargetException e) {
-        throw new TargetParsingException(
-            String.format("Failed to load %s", name), e, DEPENDENCY_NOT_FOUND);
-      }
-    }
+    return new Mappings(platformsToFlags, flagsToPlatforms);
   }
 
   /**
@@ -250,32 +205,20 @@ public final class PlatformMappingFunction implements SkyFunction {
    */
   @Nullable
   private static NativeAndStarlarkFlags parseStarlarkFlags(
-      ImmutableSet<String> rawFlags, Environment env, RepoContext mainRepoContext)
-      throws PlatformMappingParsingException {
-    ImmutableSet.Builder<String> nativeFlags = ImmutableSet.builder();
-    ImmutableList.Builder<String> starlarkFlags = ImmutableList.builder();
-    for (String flagSetting : rawFlags) {
-      if (STARLARK_SKIPPED_PREFIXES.stream().noneMatch(flagSetting::startsWith)) {
-        nativeFlags.add(flagSetting);
-      } else {
-        starlarkFlags.add(flagSetting);
-      }
-    }
-    // The StarlarkOptionsParser needs a native options parser just to inject its Starlark flag
-    // values. It doesn't actually parse anything with the native parser.
-    OptionsParser fakeNativeParser = OptionsParser.builder().build();
-    StarlarkOptionsParser starlarkFlagParser =
-        StarlarkOptionsParser.newStarlarkOptionsParser(
-            new SkyframeTargetLoader(env, mainRepoContext), fakeNativeParser);
+      ImmutableList<String> rawFlags, Environment env, RepoContext mainRepoContext)
+      throws PlatformMappingParsingException, InterruptedException {
+    PackageContext rootPackage = mainRepoContext.rootPackage();
+    ParsedFlagsValue.Key parsedFlagsKey = ParsedFlagsValue.Key.create(rawFlags, rootPackage);
     try {
-      if (!starlarkFlagParser.parseGivenArgs(starlarkFlags.build())) {
+      ParsedFlagsValue parsedFlags =
+          (ParsedFlagsValue) env.getValueOrThrow(parsedFlagsKey, OptionsParsingException.class);
+      if (parsedFlags == null) {
         return null;
       }
+      return parsedFlags.flags();
     } catch (OptionsParsingException e) {
       throw new PlatformMappingParsingException(e);
     }
-      return NativeAndStarlarkFlags.create(
-          nativeFlags.build(), fakeNativeParser.getStarlarkOptions());
   }
 
   /**
@@ -284,12 +227,12 @@ public final class PlatformMappingFunction implements SkyFunction {
   @Nullable
   private static ImmutableMap<Label, NativeAndStarlarkFlags> readPlatformsToFlags(
       PeekingIterator<String> it, Environment env, RepoContext mainRepoContext)
-      throws PlatformMappingParsingException {
+      throws PlatformMappingParsingException, InterruptedException {
     ImmutableMap.Builder<Label, NativeAndStarlarkFlags> platformsToFlags = ImmutableMap.builder();
     boolean needSkyframeDeps = false;
     while (it.hasNext() && !it.peek().equalsIgnoreCase("flags:")) {
       Label platform = readPlatform(it, mainRepoContext);
-      ImmutableSet<String> flags = readFlags(it);
+      ImmutableList<String> flags = readFlags(it);
       NativeAndStarlarkFlags parsedFlags = parseStarlarkFlags(flags, env, mainRepoContext);
       if (parsedFlags == null) {
         needSkyframeDeps = true;
@@ -310,14 +253,29 @@ public final class PlatformMappingFunction implements SkyFunction {
     }
   }
 
-  private static ImmutableMap<ImmutableSet<String>, Label> readFlagsToPlatforms(
-      PeekingIterator<String> it, RepoContext mainRepoContext)
-      throws PlatformMappingParsingException {
-    ImmutableMap.Builder<ImmutableSet<String>, Label> flagsToPlatforms = ImmutableMap.builder();
+  /**
+   * Returns a parsed {@code flags -> platform setting}, or null if not all Skyframe deps are ready
+   */
+  @Nullable
+  private static ImmutableMap<NativeAndStarlarkFlags, Label> readFlagsToPlatforms(
+      PeekingIterator<String> it, Environment env, RepoContext mainRepoContext)
+      throws PlatformMappingParsingException, InterruptedException {
+    ImmutableMap.Builder<NativeAndStarlarkFlags, Label> flagsToPlatforms = ImmutableMap.builder();
+    boolean needSkyframeDeps = false;
     while (it.hasNext() && it.peek().startsWith("--")) {
-      ImmutableSet<String> flags = readFlags(it);
+      ImmutableList<String> flags = readFlags(it);
       Label platform = readPlatform(it, mainRepoContext);
-      flagsToPlatforms.put(flags, platform);
+
+      NativeAndStarlarkFlags parsedFlags = parseStarlarkFlags(flags, env, mainRepoContext);
+      if (parsedFlags == null) {
+        needSkyframeDeps = true;
+      } else {
+        flagsToPlatforms.put(parsedFlags, platform);
+      }
+    }
+
+    if (needSkyframeDeps) {
+      return null;
     }
 
     try {
@@ -341,14 +299,14 @@ public final class PlatformMappingFunction implements SkyFunction {
     }
   }
 
-  private static ImmutableSet<String> readFlags(PeekingIterator<String> it)
+  private static ImmutableList<String> readFlags(PeekingIterator<String> it)
       throws PlatformMappingParsingException {
-    ImmutableSet.Builder<String> flags = ImmutableSet.builder();
+    ImmutableList.Builder<String> flags = ImmutableList.builder();
     // Note: Short form flags are not supported.
     while (it.hasNext() && it.peek().startsWith("--")) {
       flags.add(it.next());
     }
-    ImmutableSet<String> parsedFlags = flags.build();
+    ImmutableList<String> parsedFlags = flags.build();
     if (parsedFlags.isEmpty()) {
       throw parsingException(
           it.hasNext()
@@ -372,22 +330,18 @@ public final class PlatformMappingFunction implements SkyFunction {
   @VisibleForTesting
   static final class Mappings {
     final ImmutableMap<Label, NativeAndStarlarkFlags> platformsToFlags;
-    final ImmutableMap<ImmutableSet<String>, Label> flagsToPlatforms;
-    final RepoContext mainRepoContext;
+    final ImmutableMap<NativeAndStarlarkFlags, Label> flagsToPlatforms;
 
     Mappings(
         ImmutableMap<Label, NativeAndStarlarkFlags> platformsToFlags,
-        ImmutableMap<ImmutableSet<String>, Label> flagsToPlatforms,
-        RepoContext mainRepoContext) {
+        ImmutableMap<NativeAndStarlarkFlags, Label> flagsToPlatforms) {
       this.platformsToFlags = platformsToFlags;
       this.flagsToPlatforms = flagsToPlatforms;
-      this.mainRepoContext = mainRepoContext;
     }
 
     PlatformMappingValue toPlatformMappingValue(
         ImmutableSet<Class<? extends FragmentOptions>> optionsClasses) {
-      return new PlatformMappingValue(
-          platformsToFlags, flagsToPlatforms, optionsClasses, mainRepoContext.repoMapping());
+      return new PlatformMappingValue(platformsToFlags, flagsToPlatforms, optionsClasses);
     }
   }
 

@@ -102,16 +102,22 @@ public class RegisteredToolchainsFunctionTest extends ToolchainTestCase {
     // Add an extra toolchain.
     scratch.file(
         "extra/BUILD",
-        "load('//toolchain:toolchain_def.bzl', 'test_toolchain')",
-        "toolchain(",
-        "    name = 'extra_toolchain',",
-        "    toolchain_type = '//toolchain:test_toolchain',",
-        "    exec_compatible_with = ['//constraints:linux'],",
-        "    target_compatible_with = ['//constraints:linux'],",
-        "    toolchain = ':extra_toolchain_impl')",
-        "test_toolchain(",
-        "  name='extra_toolchain_impl',",
-        "  data = 'extra')");
+        """
+        load("//toolchain:toolchain_def.bzl", "test_toolchain")
+
+        toolchain(
+            name = "extra_toolchain",
+            exec_compatible_with = ["//constraints:linux"],
+            target_compatible_with = ["//constraints:linux"],
+            toolchain = ":extra_toolchain_impl",
+            toolchain_type = "//toolchain:test_toolchain",
+        )
+
+        test_toolchain(
+            name = "extra_toolchain_impl",
+            data = "extra",
+        )
+        """);
 
     rewriteWorkspace("register_toolchains('//toolchain:toolchain_1')");
     useConfiguration("--extra_toolchains=//extra:extra_toolchain");
@@ -135,25 +141,35 @@ public class RegisteredToolchainsFunctionTest extends ToolchainTestCase {
     // Add an extra toolchain.
     scratch.file(
         "extra/BUILD",
-        "load('//toolchain:toolchain_def.bzl', 'test_toolchain')",
-        "toolchain(",
-        "    name = 'extra_toolchain_1',",
-        "    toolchain_type = '//toolchain:test_toolchain',",
-        "    exec_compatible_with = ['//constraints:linux'],",
-        "    target_compatible_with = ['//constraints:linux'],",
-        "    toolchain = ':extra_toolchain_impl_1')",
-        "test_toolchain(",
-        "  name='extra_toolchain_impl_1',",
-        "  data = 'extra')",
-        "toolchain(",
-        "    name = 'extra_toolchain_2',",
-        "    toolchain_type = '//toolchain:test_toolchain',",
-        "    exec_compatible_with = ['//constraints:mac'],",
-        "    target_compatible_with = ['//constraints:linux'],",
-        "    toolchain = ':extra_toolchain_impl_2')",
-        "test_toolchain(",
-        "  name='extra_toolchain_impl_2',",
-        "  data = 'extra2')");
+        """
+        load("//toolchain:toolchain_def.bzl", "test_toolchain")
+
+        toolchain(
+            name = "extra_toolchain_1",
+            exec_compatible_with = ["//constraints:linux"],
+            target_compatible_with = ["//constraints:linux"],
+            toolchain = ":extra_toolchain_impl_1",
+            toolchain_type = "//toolchain:test_toolchain",
+        )
+
+        test_toolchain(
+            name = "extra_toolchain_impl_1",
+            data = "extra",
+        )
+
+        toolchain(
+            name = "extra_toolchain_2",
+            exec_compatible_with = ["//constraints:mac"],
+            target_compatible_with = ["//constraints:linux"],
+            toolchain = ":extra_toolchain_impl_2",
+            toolchain_type = "//toolchain:test_toolchain",
+        )
+
+        test_toolchain(
+            name = "extra_toolchain_impl_2",
+            data = "extra2",
+        )
+        """);
 
     useConfiguration(
         "--extra_toolchains=//extra:extra_toolchain_1",
@@ -403,7 +419,7 @@ public class RegisteredToolchainsFunctionTest extends ToolchainTestCase {
             createModuleKey("toolchain_def", "1.0"), "module(name='toolchain_def',version='1.0')");
 
     // Everyone depends on toolchain_def@1.0 for the declare_toolchain macro.
-    Path toolchainDefDir = moduleRoot.getRelative("toolchain_def~1.0");
+    Path toolchainDefDir = moduleRoot.getRelative("toolchain_def~v1.0");
     scratch.file(toolchainDefDir.getRelative("WORKSPACE").getPathString());
     scratch.file(
         toolchainDefDir.getRelative("BUILD").getPathString(),
@@ -424,7 +440,8 @@ public class RegisteredToolchainsFunctionTest extends ToolchainTestCase {
         "        data = 'stuff')");
 
     // Now create the toolchains for each module.
-    for (String repo : ImmutableList.of("bbb~1.0", "ccc~1.1", "ddd~1.0", "ddd~1.1", "eee~1.0")) {
+    for (String repo :
+        ImmutableList.of("bbb~v1.0", "ccc~v1.1", "ddd~v1.0", "ddd~v1.1", "eee~v1.0")) {
       scratch.file(moduleRoot.getRelative(repo).getRelative("WORKSPACE").getPathString());
       scratch.file(
           moduleRoot.getRelative(repo).getRelative("BUILD").getPathString(),
@@ -476,10 +493,10 @@ public class RegisteredToolchainsFunctionTest extends ToolchainTestCase {
             Label.parseCanonical("//toolchain:suffix_toolchain_2_impl"),
             Label.parseCanonical("//:wstool2_impl"),
             // Other modules' toolchains
-            Label.parseCanonical("@@bbb~1.0//:tool_impl"),
-            Label.parseCanonical("@@ccc~1.1//:tool_impl"),
-            Label.parseCanonical("@@eee~1.0//:tool_impl"),
-            Label.parseCanonical("@@ddd~1.1//:tool_impl"),
+            Label.parseCanonical("@@bbb~//:tool_impl"),
+            Label.parseCanonical("@@ccc~//:tool_impl"),
+            Label.parseCanonical("@@eee~//:tool_impl"),
+            Label.parseCanonical("@@ddd~//:tool_impl"),
             // WORKSPACE suffix toolchains
             Label.parseCanonical("//toolchain:suffix_toolchain_1_impl"))
         .inOrder();

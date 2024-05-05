@@ -23,7 +23,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.actions.extra.JavaCompileInfo;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -172,7 +171,7 @@ public final class JavaCompileActionBuilder {
     this.execGroup = execGroup;
   }
 
-  public JavaCompileAction build() throws RuleErrorException {
+  public JavaCompileAction build() throws RuleErrorException, InterruptedException {
     // TODO(bazel-team): all the params should be calculated before getting here, and the various
     // aggregation code below should go away.
 
@@ -230,20 +229,6 @@ public final class JavaCompileActionBuilder {
       classpathMode = JavaClasspathMode.OFF;
     }
 
-    if (outputs.depsProto() != null) {
-      JavaConfiguration javaConfiguration =
-          ruleContext.getConfiguration().getFragment(JavaConfiguration.class);
-      if (javaConfiguration.inmemoryJdepsFiles()) {
-        executionInfo =
-            ImmutableMap.<String, String>builderWithExpectedSize(this.executionInfo.size() + 1)
-                .putAll(this.executionInfo)
-                .put(
-                    ExecutionRequirements.REMOTE_EXECUTION_INLINE_OUTPUTS,
-                    outputs.depsProto().getExecPathString())
-                .buildOrThrow();
-      }
-    }
-
     NestedSet<Artifact> tools = toolsBuilder.build();
     mandatoryInputsBuilder.addTransitive(tools);
     NestedSet<Artifact> mandatoryInputs = mandatoryInputsBuilder.build();
@@ -286,7 +271,7 @@ public final class JavaCompileActionBuilder {
   }
 
   private CustomCommandLine buildParamFileContents(ImmutableList<String> javacOpts)
-      throws RuleErrorException {
+      throws RuleErrorException, InterruptedException {
 
     CustomCommandLine.Builder result = CustomCommandLine.builder();
 
@@ -319,7 +304,8 @@ public final class JavaCompileActionBuilder {
       } else {
         // @-prefixed strings will be assumed to be filenames and expanded by
         // {@link JavaLibraryBuildRequest}, so add an extra &at; to escape it.
-        result.addPrefixedLabel("@", targetLabel);
+        result.addPrefixedLabel(
+            "@", targetLabel, ruleContext.getAnalysisEnvironment().getMainRepoMapping());
       }
     }
     result.add("--injecting_rule_kind", injectingRuleKind);

@@ -18,7 +18,7 @@ load(":common/cc/cc_common.bzl", "cc_common")
 load(":common/cc/cc_helper.bzl", "cc_helper")
 load(":common/cc/cc_info.bzl", "CcInfo")
 load(":common/cc/cc_toolchain_info.bzl", "CcToolchainInfo")
-load(":common/objc/objc_common.bzl", "objc_common")
+load(":common/cc/fdo/fdo_context.bzl", "create_fdo_context")
 load(":common/paths.bzl", "paths")
 
 cc_internal = _builtins.internal.cc_internal
@@ -157,13 +157,21 @@ def _resolve_include_dir(target_label, s, sysroot, crosstool_path):
 
     return paths.get_relative(path_prefix, path_string)
 
-def get_cc_toolchain_provider(ctx, attributes, xcode_config_info):
+def _get_cc_toolchain_vars(cpp_config, sysroot):
+    variables = {}
+    min_os_version = cpp_config.minimum_os_version()
+    if min_os_version != None:
+        variables["minimum_os_version"] = min_os_version
+    if sysroot != None:
+        variables["sysroot"] = sysroot
+    return variables
+
+def get_cc_toolchain_provider(ctx, attributes):
     """Constructs a CcToolchainProvider instance.
 
     Args:
         ctx: rule context.
         attributes: encapsulated attributes of cc_toolchain rule.
-        xcode_config_info: XcodeConfigInfo provider can be none if not present.
     Returns:
         A constructed CcToolchainProvider instance.
     """
@@ -175,23 +183,12 @@ def get_cc_toolchain_provider(ctx, attributes, xcode_config_info):
     )
     tool_paths = _compute_tool_paths(toolchain_config_info, tools_directory)
     toolchain_features = cc_internal.cc_toolchain_features(toolchain_config_info = toolchain_config_info, tools_directory = tools_directory)
-    fdo_context = cc_internal.fdo_context(
-        ctx = ctx,
-        configuration = ctx.configuration,
-        cpp_config = ctx.fragments.cpp,
-        tool_paths = tool_paths,
-        fdo_prefetch_provider = attributes.fdo_prefetch_provider,
-        propeller_optimize_provider = attributes.propeller_optimize_provider,
-        mem_prof_profile_provider = attributes.mem_prof_profile_provider,
-        fdo_optimize_provider = attributes.fdo_optimize_provider,
-        fdo_profile_provider = attributes.fdo_profile_provider,
-        x_fdo_profile_provider = attributes.x_fdo_profile_provider,
-        cs_fdo_profile_provider = attributes.cs_fdo_profile_provider,
+    fdo_context = create_fdo_context(
+        llvm_profdata = tool_paths.get("llvm-profdata"),
         all_files = attributes.all_files,
         zipper = attributes.zipper,
-        cc_toolchain_config_info = attributes.cc_toolchain_config_info,
-        fdo_optimize_artifacts = attributes.fdo_optimize_artifacts,
-        fdo_optimize_label = attributes.fdo_optimize_label,
+        cc_toolchain_config_info = toolchain_config_info,
+        coverage_enabled = ctx.configuration.coverage_enabled,
     )
     if fdo_context == None:
         return None
@@ -240,16 +237,9 @@ def get_cc_toolchain_provider(ctx, attributes, xcode_config_info):
     for s in toolchain_config_info.cxx_builtin_include_directories():
         builtin_include_directories.append(_resolve_include_dir(ctx.label, s, sysroot, tools_directory))
 
-    if xcode_config_info:
-        build_vars = objc_common.apple_cc_toolchain_build_variables(
-            xcode_config_info,
-            ctx.fragments.apple.single_arch_platform,
-            ctx.fragments.apple.cpu(),
-            ctx.fragments.cpp,
-            sysroot,
-        )
-    else:
-        build_vars = cc_internal.cc_toolchain_variables(vars = objc_common.get_common_vars(ctx.fragments.cpp, sysroot))
+    build_vars = cc_internal.cc_toolchain_variables(
+        vars = _get_cc_toolchain_vars(ctx.fragments.cpp, sysroot),
+    )
 
     return CcToolchainInfo(
         cpp_configuration = ctx.fragments.cpp,
@@ -287,7 +277,6 @@ def get_cc_toolchain_provider(ctx, attributes, xcode_config_info):
         ld_executable = tool_paths.get("ld", ""),
         gcov_executable = tool_paths.get("gcov", ""),
         build_variables = build_vars,
-        xcode_config_info = xcode_config_info,
         all_files = attributes.all_files,
         all_files_including_libc = attributes.all_files_including_libc,
         compiler_files = attributes.compiler_files,

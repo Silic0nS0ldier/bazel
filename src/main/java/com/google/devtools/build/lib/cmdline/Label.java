@@ -108,6 +108,10 @@ public final class Label implements Comparable<Label>, StarlarkValue, SkyKey, Co
     RepositoryName currentRepo();
 
     RepositoryMapping repoMapping();
+
+    default PackageContext rootPackage() {
+      return PackageContext.of(PackageIdentifier.createRootPackage(currentRepo()), repoMapping());
+    }
   }
 
   @AutoValue
@@ -525,8 +529,8 @@ public final class Label implements Comparable<Label>, StarlarkValue, SkyKey, Co
       doc =
           "<strong>Deprecated.</strong> This method behaves surprisingly when used with an argument"
               + " containing an apparent repo name. Prefer <a"
-              + " href=\"#local_target_label\"><code>Label.same_package_label()</code></a>, <a"
-              + " href=\"../toplevel/native#package_relative_label\"><code>native.package_relative_label()</code></a>,"
+              + " href=\"#same_package_label\"><code>Label.same_package_label()</code></a>, <a"
+              + " href=\"../toplevel/native.html#package_relative_label\"><code>native.package_relative_label()</code></a>,"
               + " or <a href=\"#Label\"><code>Label()</code></a> instead.<p>Resolves a label that"
               + " is either absolute (starts with <code>//</code>) or relative to the current"
               + " package. If this label is in a remote repository, the argument will be resolved"

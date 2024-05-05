@@ -166,7 +166,7 @@ def merge(
         ),
         "plugins": plugin_info.plugins,
         "api_generating_plugins": plugin_info.api_generating_plugins,
-        "_neverlink": _neverlink,
+        "_neverlink": bool(_neverlink),
         "_constraints": depset(_constraints).to_list(),
         "annotation_processing": None,
         "compilation_info": None,
@@ -502,6 +502,7 @@ def _minimize_cc_info(cc_info):
     return CcInfo(
         linking_context = cc_info.linking_context,
         cc_native_library_info = CcNativeLibraryInfo(libraries_to_link = cc_info.transitive_native_libraries()),
+        debug_context = cc_info.debug_context(),
     )
 
 def _compute_concatenated_deps(deps, runtime_deps, exports):
@@ -625,7 +626,7 @@ def _javainfo_init_base(
             transitive = [dep._compile_time_java_dependencies for dep in exports] +
                          ([depset([compile_jdeps])] if compile_jdeps else []),
         ),
-        "_neverlink": neverlink,
+        "_neverlink": bool(neverlink),
         "compilation_info": None,
         "_constraints": [],
     }

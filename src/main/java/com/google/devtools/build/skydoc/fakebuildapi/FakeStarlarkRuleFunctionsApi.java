@@ -129,13 +129,13 @@ public class FakeStarlarkRuleFunctionsApi implements StarlarkRuleFunctionsApi {
   }
 
   @Override
-  public StarlarkCallable macro(StarlarkFunction implementation, StarlarkThread thread) {
-    // We don't support documenting symbolic macros -- at least not in legacy Stardoc.
-    // Return a dummy.
+  public StarlarkCallable macro(
+      StarlarkFunction implementation, Dict<?, ?> attrs, Object doc, StarlarkThread thread) {
+    // We don't support documenting symbolic macros in legacy Stardoc. Return a dummy.
     return new StarlarkCallable() {
       @Override
       public String getName() {
-        return "UNNAMED";
+        return "_UNSUPPORTED_IN_LEGACY_STARDOC";
       }
     };
   }
@@ -192,8 +192,8 @@ public class FakeStarlarkRuleFunctionsApi implements StarlarkRuleFunctionsApi {
 
   @Override
   public Label label(Object input, StarlarkThread thread) throws EvalException {
-    if (input instanceof Label) {
-      return (Label) input;
+    if (input instanceof Label label) {
+      return label;
     }
     try {
       return Label.parseCanonical((String) input);

@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.proto;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.prettyArtifactNames;
+import static com.google.devtools.build.lib.skyframe.BzlLoadValue.keyForBuild;
 
 import com.google.common.truth.Correspondence;
 import com.google.devtools.build.lib.actions.ResourceSet;
@@ -47,7 +48,8 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
   private static final StarlarkProviderIdentifier boolProviderId =
       StarlarkProviderIdentifier.forKey(
           new StarlarkProvider.Key(
-              Label.parseCanonicalUnchecked("//foo:should_generate.bzl"), "BoolProvider"));
+              keyForBuild(Label.parseCanonicalUnchecked("//foo:should_generate.bzl")),
+              "BoolProvider"));
 
   @Before
   public final void setup() throws Exception {
@@ -56,14 +58,16 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
 
     scratch.file(
         "third_party/x/BUILD",
-        "licenses(['unencumbered'])",
-        "cc_binary(name = 'plugin', srcs = ['plugin.cc'])",
-        "cc_library(name = 'runtime', srcs = ['runtime.cc'])",
-        "filegroup(name = 'descriptors', srcs = ['metadata.proto', 'descriptor.proto'])",
-        "filegroup(name = 'any', srcs = ['any.proto'])",
-        "filegroup(name = 'something', srcs = ['something.proto'])",
-        "proto_library(name = 'mixed', srcs = [':descriptors', ':something'])",
-        "proto_library(name = 'denied', srcs = [':descriptors', ':any'])");
+        """
+        licenses(['unencumbered'])
+        cc_binary(name = 'plugin', srcs = ['plugin.cc'])
+        cc_library(name = 'runtime', srcs = ['runtime.cc'])
+        filegroup(name = 'descriptors', srcs = ['metadata.proto', 'descriptor.proto'])
+        filegroup(name = 'any', srcs = ['any.proto'])
+        filegroup(name = 'something', srcs = ['something.proto'])
+        proto_library(name = 'mixed', srcs = [':descriptors', ':something'])
+        proto_library(name = 'denied', srcs = [':descriptors', ':any'])
+        """);
     scratch.file(
         "foo/BUILD",
         TestConstants.LOAD_PROTO_LANG_TOOLCHAIN,
@@ -90,102 +94,112 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
 
     mockToolsConfig.overwrite(
         "tools/allowlists/proto_library_allowlists/BUILD",
-        "package_group(",
-        "    name='lang_proto_library_allowed_in_different_package',",
-        "    packages=['//...', '-//test/...'],",
-        ")");
+        """
+        package_group(
+            name='lang_proto_library_allowed_in_different_package',
+            packages=['//...', '-//test/...'],
+        )
+        """);
 
     scratch.file(
         "foo/generate.bzl",
-        "def _resource_set_callback(os, inputs_size):",
-        "   return {'memory': 25 + 0.15 * inputs_size, 'cpu': 1}",
-        "def _impl(ctx):",
-        "  outfile = ctx.actions.declare_file('out')",
-        "  kwargs = {}",
-        "  if ctx.attr.plugin_output == 'single':",
-        "    kwargs['plugin_output'] = outfile.path",
-        "  elif ctx.attr.plugin_output == 'multiple':",
-        "    kwargs['plugin_output'] = ctx.genfiles_dir.path",
-        "  elif ctx.attr.plugin_output == 'wrong':",
-        "    kwargs['plugin_output'] = ctx.genfiles_dir.path + '///'",
-        "  if ctx.attr.additional_args:",
-        "    additional_args = ctx.actions.args()",
-        "    additional_args.add_all(ctx.attr.additional_args)",
-        "    kwargs['additional_args'] = additional_args",
-        "  if ctx.files.additional_tools:",
-        "    kwargs['additional_tools'] = ctx.files.additional_tools",
-        "  if ctx.files.additional_inputs:",
-        "    kwargs['additional_inputs'] = depset(ctx.files.additional_inputs)",
-        "  if ctx.attr.use_resource_set:",
-        "    kwargs['resource_set'] = _resource_set_callback",
-        "  if ctx.attr.progress_message:",
-        "    kwargs['experimental_progress_message'] = ctx.attr.progress_message",
-        "  proto_common_do_not_use.compile(",
-        "    ctx.actions,",
-        "    ctx.attr.proto_dep[ProtoInfo],",
-        "    ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo],",
-        "    [outfile],",
-        "    **kwargs)",
-        "  return [DefaultInfo(files = depset([outfile]))]",
-        "generate_rule = rule(_impl,",
-        "  attrs = {",
-        "     'proto_dep': attr.label(),",
-        "     'plugin_output': attr.string(),",
-        "     'toolchain': attr.label(default = '//foo:toolchain'),",
-        "     'additional_args': attr.string_list(),",
-        "     'additional_tools': attr.label_list(cfg = 'exec'),",
-        "     'additional_inputs': attr.label_list(allow_files = True),",
-        "     'use_resource_set': attr.bool(),",
-        "     'progress_message': attr.string(),",
-        "  })");
+        """
+        def _resource_set_callback(os, inputs_size):
+           return {'memory': 25 + 0.15 * inputs_size, 'cpu': 1}
+        def _impl(ctx):
+          outfile = ctx.actions.declare_file('out')
+          kwargs = {}
+          if ctx.attr.plugin_output == 'single':
+            kwargs['plugin_output'] = outfile.path
+          elif ctx.attr.plugin_output == 'multiple':
+            kwargs['plugin_output'] = ctx.genfiles_dir.path
+          elif ctx.attr.plugin_output == 'wrong':
+            kwargs['plugin_output'] = ctx.genfiles_dir.path + '///'
+          if ctx.attr.additional_args:
+            additional_args = ctx.actions.args()
+            additional_args.add_all(ctx.attr.additional_args)
+            kwargs['additional_args'] = additional_args
+          if ctx.files.additional_tools:
+            kwargs['additional_tools'] = ctx.files.additional_tools
+          if ctx.files.additional_inputs:
+            kwargs['additional_inputs'] = depset(ctx.files.additional_inputs)
+          if ctx.attr.use_resource_set:
+            kwargs['resource_set'] = _resource_set_callback
+          if ctx.attr.progress_message:
+            kwargs['experimental_progress_message'] = ctx.attr.progress_message
+          proto_common_do_not_use.compile(
+            ctx.actions,
+            ctx.attr.proto_dep[ProtoInfo],
+            ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo],
+            [outfile],
+            **kwargs)
+          return [DefaultInfo(files = depset([outfile]))]
+        generate_rule = rule(_impl,
+          attrs = {
+             'proto_dep': attr.label(),
+             'plugin_output': attr.string(),
+             'toolchain': attr.label(default = '//foo:toolchain'),
+             'additional_args': attr.string_list(),
+             'additional_tools': attr.label_list(cfg = 'exec'),
+             'additional_inputs': attr.label_list(allow_files = True),
+             'use_resource_set': attr.bool(),
+             'progress_message': attr.string(),
+          })
+        """);
 
     scratch.file(
         "foo/should_generate.bzl",
-        "BoolProvider = provider()",
-        "def _impl(ctx):",
-        "  result = proto_common_do_not_use.experimental_should_generate_code(",
-        "    ctx.attr.proto_dep[ProtoInfo],",
-        "    ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo],",
-        "    'MyRule',",
-        "    ctx.attr.proto_dep.label)",
-        "  return [BoolProvider(value = result)]",
-        "should_generate_rule = rule(_impl,",
-        "  attrs = {",
-        "     'proto_dep': attr.label(),",
-        "     'toolchain': attr.label(default = '//foo:toolchain'),",
-        "  })");
+        """
+        BoolProvider = provider()
+        def _impl(ctx):
+          result = proto_common_do_not_use.experimental_should_generate_code(
+            ctx.attr.proto_dep[ProtoInfo],
+            ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo],
+            'MyRule',
+            ctx.attr.proto_dep.label)
+          return [BoolProvider(value = result)]
+        should_generate_rule = rule(_impl,
+          attrs = {
+             'proto_dep': attr.label(),
+             'toolchain': attr.label(default = '//foo:toolchain'),
+          })
+        """);
 
     scratch.file(
         "foo/declare_generated_files.bzl",
-        "def _impl(ctx):",
-        "  files = proto_common_do_not_use.declare_generated_files(",
-        "    ctx.actions,",
-        "    ctx.attr.proto_dep[ProtoInfo],",
-        "    ctx.attr.extension,",
-        "    (lambda s: s.replace('-','_').replace('.','/')) if ctx.attr.python_names else None)",
-        "  for f in files:",
-        "    ctx.actions.write(f, '')",
-        "  return [DefaultInfo(files = depset(files))]",
-        "declare_generated_files = rule(_impl,",
-        "  attrs = {",
-        "     'proto_dep': attr.label(),",
-        "     'extension': attr.string(),",
-        "     'python_names': attr.bool(default = False),",
-        "  })");
+        """
+        def _impl(ctx):
+          files = proto_common_do_not_use.declare_generated_files(
+            ctx.actions,
+            ctx.attr.proto_dep[ProtoInfo],
+            ctx.attr.extension,
+            (lambda s: s.replace('-','_').replace('.','/')) if ctx.attr.python_names else None)
+          for f in files:
+            ctx.actions.write(f, '')
+          return [DefaultInfo(files = depset(files))]
+        declare_generated_files = rule(_impl,
+          attrs = {
+             'proto_dep': attr.label(),
+             'extension': attr.string(),
+             'python_names': attr.bool(default = False),
+          })
+        """);
 
     scratch.file(
         "foo/check_collocated.bzl",
-        "def _impl(ctx):",
-        "  proto_common_do_not_use.check_collocated(",
-        "    ctx.label,",
-        "    ctx.attr.proto_dep[ProtoInfo],",
-        "    ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo])",
-        "  return None",
-        "check_collocated = rule(_impl,",
-        "  attrs = {",
-        "     'proto_dep': attr.label(),",
-        "     'toolchain': attr.label(default = '//foo:toolchain'),",
-        "  })");
+        """
+        def _impl(ctx):
+          proto_common_do_not_use.check_collocated(
+            ctx.label,
+            ctx.attr.proto_dep[ProtoInfo],
+            ctx.attr.toolchain[proto_common_do_not_use.ProtoLangToolchainInfo])
+          return None
+        check_collocated = rule(_impl,
+          attrs = {
+             'proto_dep': attr.label(),
+             'toolchain': attr.label(default = '//foo:toolchain'),
+          })
+        """);
   }
 
   /** Verifies basic usage of <code>proto_common.generate_code</code>. */
@@ -244,7 +258,12 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "load('//foo:generate.bzl', 'generate_rule')",
         "proto_library(name = 'proto', srcs = ['A.proto'])",
         "generate_rule(name = 'simple', proto_dep = ':proto', plugin_output = 'single')");
-
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--experimental_platform_in_output_dir",
+        String.format(
+            "--experimental_override_name_platform_in_output_dir=%s=k8",
+            TestConstants.PLATFORM_LABEL));
     ConfiguredTarget target = getConfiguredTarget("//bar:simple");
 
     List<String> cmdLine =
@@ -253,7 +272,7 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         .comparingElementsUsing(MATCHES_REGEX)
         .containsExactly(
             "--java_out=param1,param2:bl?azel?-out/k8-fastbuild/bin/bar/out",
-            "--plugin=bl?azel?-out/[^/]*-exec-[^/]*/bin/third_party/x/plugin",
+            "--plugin=bl?azel?-out/[^/]*-exec/bin/third_party/x/plugin",
             "-I.",
             "bar/A.proto")
         .inOrder();
@@ -271,6 +290,12 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "load('//foo:generate.bzl', 'generate_rule')",
         "proto_library(name = 'proto', srcs = ['A.proto'])",
         "generate_rule(name = 'simple', proto_dep = ':proto', plugin_output = 'multiple')");
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--experimental_platform_in_output_dir",
+        String.format(
+            "--experimental_override_name_platform_in_output_dir=%s=k8",
+            TestConstants.PLATFORM_LABEL));
 
     ConfiguredTarget target = getConfiguredTarget("//bar:simple");
 
@@ -280,7 +305,7 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         .comparingElementsUsing(MATCHES_REGEX)
         .containsExactly(
             "--java_out=param1,param2:bl?azel?-out/k8-fastbuild/bin",
-            "--plugin=bl?azel?-out/[^/]*-exec-[^/]*/bin/third_party/x/plugin",
+            "--plugin=bl?azel?-out/[^/]*-exec/bin/third_party/x/plugin",
             "-I.",
             "bar/A.proto")
         .inOrder();
@@ -445,6 +470,12 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "genrule(name = 'generate', srcs = ['A.txt'], cmd = '', outs = ['G.proto'])",
         "proto_library(name = 'proto', srcs = ['A.proto', 'G.proto'])",
         "generate_rule(name = 'simple', proto_dep = ':proto')");
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--experimental_platform_in_output_dir",
+        String.format(
+            "--experimental_override_name_platform_in_output_dir=%s=k8",
+            TestConstants.PLATFORM_LABEL));
 
     ConfiguredTarget target = getConfiguredTarget("//bar:simple");
 
@@ -453,7 +484,7 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
     assertThat(cmdLine)
         .comparingElementsUsing(MATCHES_REGEX)
         .containsExactly(
-            "--plugin=bl?azel?-out/[^/]*-exec-[^/]*/bin/third_party/x/plugin",
+            "--plugin=bl?azel?-out/[^/]*-exec/bin/third_party/x/plugin",
             "-Ibl?azel?-out/k8-fastbuild/bin",
             "-I.",
             "bar/A.proto",
@@ -476,6 +507,13 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "proto_library(name = 'proto', srcs = ['A.proto'], deps = [':generated'])",
         "generate_rule(name = 'simple', proto_dep = ':proto')");
 
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--experimental_platform_in_output_dir",
+        String.format(
+            "--experimental_override_name_platform_in_output_dir=%s=k8",
+            TestConstants.PLATFORM_LABEL));
+
     ConfiguredTarget target = getConfiguredTarget("//bar:simple");
 
     SpawnAction spawnAction = getGeneratingSpawnAction(getBinArtifact("out", target));
@@ -483,7 +521,7 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
     assertThat(cmdLine)
         .comparingElementsUsing(MATCHES_REGEX)
         .containsExactly(
-            "--plugin=bl?azel?-out/[^/]*-exec-[^/]*/bin/third_party/x/plugin",
+            "--plugin=bl?azel?-out/[^/]*-exec/bin/third_party/x/plugin",
             "-Ibl?azel?-out/k8-fastbuild/bin",
             "-I.",
             "bar/A.proto")
@@ -523,6 +561,12 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "load('//foo:generate.bzl', 'generate_rule')",
         "proto_library(name = 'proto', srcs = ['A.proto'], deps = ['@foo//e:e'])",
         "generate_rule(name = 'simple', proto_dep = ':proto')");
+    useConfiguration(
+        "--platforms=" + TestConstants.PLATFORM_LABEL,
+        "--experimental_platform_in_output_dir",
+        String.format(
+            "--experimental_override_name_platform_in_output_dir=%s=k8",
+            TestConstants.PLATFORM_LABEL));
 
     ConfiguredTarget target = getConfiguredTarget("//bar:simple");
 
@@ -531,7 +575,7 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
     assertThat(cmdLine)
         .comparingElementsUsing(MATCHES_REGEX)
         .containsExactly(
-            "--plugin=bl?azel?-out/[^/]*-exec-[^/]*/bin/third_party/x/plugin",
+            "--plugin=bl?azel?-out/[^/]*-exec/bin/third_party/x/plugin",
             expectedFlags.get(0),
             "-I.",
             "bar/A.proto")
@@ -653,8 +697,10 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "proto_library(name = 'proto', srcs = ['A.proto'])");
     scratch.file(
         "bar/BUILD",
-        "load('//foo:check_collocated.bzl', 'check_collocated')",
-        "check_collocated(name = 'simple', proto_dep = '//proto:proto')");
+        """
+        load('//foo:check_collocated.bzl', 'check_collocated')
+        check_collocated(name = 'simple', proto_dep = '//proto:proto')
+        """);
 
     getConfiguredTarget("//bar:simple");
 
@@ -669,8 +715,10 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
         "proto_library(name = 'proto', srcs = ['A.proto'])");
     scratch.file(
         "test/BUILD",
-        "load('//foo:check_collocated.bzl', 'check_collocated')",
-        "check_collocated(name = 'simple', proto_dep = '//proto:proto')");
+        """
+        load('//foo:check_collocated.bzl', 'check_collocated')
+        check_collocated(name = 'simple', proto_dep = '//proto:proto')
+        """);
 
     reporter.removeHandler(failFastHandler);
     getConfiguredTarget("//test:simple");
@@ -684,15 +732,19 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
   public void langProtoLibrary_exportNotAllowed() throws Exception {
     scratch.file(
         "x/BUILD",
-        "proto_library(name='foo', srcs=['foo.proto'], allow_exports = ':test')",
-        "package_group(",
-        "    name='test',",
-        "    packages=['//allowed'],",
-        ")");
+        """
+        proto_library(name='foo', srcs=['foo.proto'], allow_exports = ':test')
+        package_group(
+            name='test',
+            packages=['//allowed'],
+        )
+        """);
     scratch.file(
         "notallowed/BUILD",
-        "load('//foo:check_collocated.bzl', 'check_collocated')",
-        "check_collocated(name = 'simple', proto_dep = '//x:foo')");
+        """
+        load('//foo:check_collocated.bzl', 'check_collocated')
+        check_collocated(name = 'simple', proto_dep = '//x:foo')
+        """);
 
     reporter.removeHandler(failFastHandler);
     getConfiguredTarget("//notallowed:simple");
@@ -706,15 +758,19 @@ public class BazelProtoCommonTest extends BuildViewTestCase {
   public void langProtoLibrary_exportAllowed() throws Exception {
     scratch.file(
         "x/BUILD",
-        "proto_library(name='foo', srcs=['foo.proto'], allow_exports = ':test')",
-        "package_group(",
-        "    name='test',",
-        "    packages=['//allowed'],",
-        ")");
+        """
+        proto_library(name='foo', srcs=['foo.proto'], allow_exports = ':test')
+        package_group(
+            name='test',
+            packages=['//allowed'],
+        )
+        """);
     scratch.file(
         "allowed/BUILD",
-        "load('//foo:check_collocated.bzl', 'check_collocated')",
-        "check_collocated(name = 'simple', proto_dep = '//x:foo')");
+        """
+        load('//foo:check_collocated.bzl', 'check_collocated')
+        check_collocated(name = 'simple', proto_dep = '//x:foo')
+        """);
 
     getConfiguredTarget("//allowed:simple");
 

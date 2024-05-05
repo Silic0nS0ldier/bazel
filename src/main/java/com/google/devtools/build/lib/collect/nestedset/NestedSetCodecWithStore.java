@@ -17,9 +17,9 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.devtools.build.lib.collect.nestedset.NestedSetStore.FingerprintComputationResult;
 import com.google.devtools.build.lib.skyframe.serialization.DeserializationContext;
 import com.google.devtools.build.lib.skyframe.serialization.ObjectCodec;
+import com.google.devtools.build.lib.skyframe.serialization.PutOperation;
 import com.google.devtools.build.lib.skyframe.serialization.SerializationContext;
 import com.google.devtools.build.lib.skyframe.serialization.SerializationException;
 import com.google.protobuf.ByteString;
@@ -83,7 +83,7 @@ public class NestedSetCodecWithStore implements ObjectCodec<NestedSet<?>> {
     } else {
       codedOut.writeEnumNoTag(NestedSetSize.NONLEAF.ordinal());
       codedOut.writeInt32NoTag(obj.getApproxDepth());
-      FingerprintComputationResult fingerprintComputationResult =
+      PutOperation fingerprintComputationResult =
           nestedSetStore.computeFingerprintAndStore((Object[]) obj.getChildren(), context);
       context.addFutureToBlockWritingOn(fingerprintComputationResult.writeStatus());
       codedOut.writeByteArrayNoTag(fingerprintComputationResult.fingerprint().toByteArray());
@@ -191,12 +191,11 @@ public class NestedSetCodecWithStore implements ObjectCodec<NestedSet<?>> {
       if (this == obj) {
         return true;
       }
-      if (!(obj instanceof EqualsWrapper)) {
+      if (!(obj instanceof EqualsWrapper that)) {
         return false;
       }
 
       // Both sets contain Object[] or both sets contain ListenableFuture<Object[]>
-      EqualsWrapper that = (EqualsWrapper) obj;
       if (this.order.equals(that.order) && this.children.equals(that.children)) {
         return true;
       }

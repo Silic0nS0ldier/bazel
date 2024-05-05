@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.analysis.config;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -51,7 +50,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 import javax.annotation.Nullable;
 import net.starlark.java.annot.StarlarkAnnotations;
 import net.starlark.java.annot.StarlarkBuiltin;
@@ -135,11 +133,12 @@ public class BuildConfigurationValue
   /** Data for introspecting the options used by this configuration. */
   private final BuildOptionDetails buildOptionDetails;
 
-  private final Supplier<BuildConfigurationEvent> buildEventSupplier;
-
   private final boolean siblingRepositoryLayout;
 
   private final FeatureSet defaultFeatures;
+
+  @Nullable // lazily initialized
+  private transient volatile BuildConfigurationEvent buildEvent;
 
   /**
    * Validates the options for this BuildConfigurationValue. Issues warnings for the use of
@@ -304,7 +303,6 @@ public class BuildConfigurationValue
             getGenfilesDirectory(RepositoryName.MAIN).getExecPathString());
 
     this.reservedActionMnemonics = reservedActionMnemonics;
-    this.buildEventSupplier = Suppliers.memoize(this::createBuildEvent);
     this.commandLineLimits = new CommandLineLimits(options.minParamFileSize);
     this.defaultFeatures = FeatureSet.parse(options.defaultFeatures);
   }
@@ -314,11 +312,10 @@ public class BuildConfigurationValue
     if (this == other) {
       return true;
     }
-    if (!(other instanceof BuildConfigurationValue)) {
+    if (!(other instanceof BuildConfigurationValue otherVal)) {
       return false;
     }
     // Only considering arguments that are non-dependent and non-server-global.
-    BuildConfigurationValue otherVal = (BuildConfigurationValue) other;
     return this.buildOptions.equals(otherVal.buildOptions)
         && this.workspaceName.equals(otherVal.workspaceName)
         && this.siblingRepositoryLayout == otherVal.siblingRepositoryLayout
@@ -438,9 +435,8 @@ public class BuildConfigurationValue
   /**
    * Returns the testlogs directory for this build configuration.
    *
-   * @deprecated Use {@code RuleContext#getTestLogsDirectory} instead whenever possible.
+   * <p>Use {@code RuleContext#getTestLogsDirectory} instead whenever possible.
    */
-  @Deprecated
   public ArtifactRoot getTestLogsDirectory(RepositoryName repositoryName) {
     return outputDirectories.getTestLogsDirectory(repositoryName);
   }
@@ -631,6 +627,11 @@ public class BuildConfigurationValue
   /** Returns a configuration fragment instances of the given class. */
   public <T extends Fragment> T getFragment(Class<T> clazz) {
     return clazz.cast(fragments.get(clazz));
+  }
+
+  /** Return all the configuration fragments. */
+  public ImmutableSortedMap<Class<? extends Fragment>, Fragment> getFragments() {
+    return fragments;
   }
 
   /** Returns true if the requested configuration fragment is present. */
@@ -833,12 +834,6 @@ public class BuildConfigurationValue
     return options.cpu;
   }
 
-  @Override
-  public String getCpuForStarlark(StarlarkThread thread) throws EvalException {
-    BuiltinRestriction.failIfCalledOutsideBuiltins(thread);
-    return getCpu();
-  }
-
   @VisibleForTesting
   public String getHostCpu() {
     return options.hostCpu;
@@ -847,8 +842,8 @@ public class BuildConfigurationValue
   /**
    * Describes how to create runfile symlink trees.
    *
-   * <p>May be overridden if an {@link OutputService} capable of creating symlink trees is
-   * available.
+   * <p>May be overridden if an {@link com.google.devtools.build.lib.vfs.OutputService} capable of
+   * creating symlink trees is available.
    */
   public enum RunfileSymlinksMode {
     /** Do not create. */
@@ -925,14 +920,6 @@ public class BuildConfigurationValue
     return options.targetEnvironments;
   }
 
-  /**
-   * Returns the {@link Label} of the {@code environment_group} target that will be used to find the
-   * target environment during auto-population.
-   */
-  public Label getAutoCpuEnvironmentGroup() {
-    return options.autoCpuEnvironmentGroup;
-  }
-
   @Nullable
   public Class<? extends Fragment> getStarlarkFragmentByName(String name) {
     return starlarkVisibleFragments.get(name);
@@ -948,7 +935,14 @@ public class BuildConfigurationValue
 
   @Override
   public BuildConfigurationEvent toBuildEvent() {
-    return buildEventSupplier.get();
+    if (buildEvent == null) {
+      synchronized (this) {
+        if (buildEvent == null) {
+          buildEvent = createBuildEvent();
+        }
+      }
+    }
+    return buildEvent;
   }
 
   private BuildConfigurationEvent createBuildEvent() {

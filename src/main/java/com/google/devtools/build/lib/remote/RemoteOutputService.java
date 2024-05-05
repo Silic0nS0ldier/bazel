@@ -16,16 +16,15 @@ package com.google.devtools.build.lib.remote;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.eventbus.Subscribe;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
-import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputMap;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactPathResolver;
 import com.google.devtools.build.lib.actions.FilesetOutputSymlink;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
@@ -54,7 +53,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
-/** Output service implementation for the remote module */
+/** Output service implementation for the remote build without local output service daemon. */
 public class RemoteOutputService implements OutputService {
 
   private final CommandEnvironment env;
@@ -168,11 +167,7 @@ public class RemoteOutputService implements OutputService {
   @Subscribe
   public void onExecutionPhaseCompleteEvent(ExecutionPhaseCompleteEvent event) {
     if (leaseService != null) {
-      var missingActionInputs = ImmutableSet.<ActionInput>of();
-      if (actionInputFetcher != null) {
-        missingActionInputs = actionInputFetcher.getMissingActionInputs();
-      }
-      leaseService.finalizeExecution(missingActionInputs);
+      leaseService.finalizeExecution();
     }
   }
 
@@ -233,7 +228,7 @@ public class RemoteOutputService implements OutputService {
       FileSystem fileSystem,
       ImmutableList<Root> pathEntries,
       ActionInputMap actionInputMap,
-      Map<Artifact, ImmutableCollection<? extends Artifact>> expandedArtifacts,
+      Map<Artifact, ImmutableSortedSet<TreeFileArtifact>> treeArtifacts,
       Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesets) {
     FileSystem remoteFileSystem =
         new RemoteActionFileSystem(

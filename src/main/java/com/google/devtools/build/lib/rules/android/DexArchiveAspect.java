@@ -17,10 +17,12 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType.UNQUOTED;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.NODEP_LABEL;
 import static com.google.devtools.build.lib.packages.BuildType.TRISTATE;
 import static com.google.devtools.build.lib.packages.StarlarkProviderIdentifier.forKey;
 import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.rules.android.AndroidCommon.getAndroidConfig;
+import static com.google.devtools.build.lib.rules.android.AndroidSdkProvider.ANDROID_SDK_TOOLCHAIN_TYPE_ATTRIBUTE_NAME;
 
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
@@ -34,9 +36,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Streams;
+import com.google.devtools.build.lib.actions.ActionConflictException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ExecutionRequirements;
-import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.actions.ParamFileInfo;
 import com.google.devtools.build.lib.analysis.Allowlist;
 import com.google.devtools.build.lib.analysis.ConfiguredAspect;
@@ -52,7 +54,6 @@ import com.google.devtools.build.lib.analysis.config.ToolchainTypeRequirement;
 import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
-import com.google.devtools.build.lib.collect.IterablesChain;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.packages.AspectDefinition;
@@ -76,6 +77,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import javax.annotation.Nullable;
 
 /** Aspect to {@link DexArchiveProvider build .dex Archives} from Jars. */
@@ -160,6 +162,7 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
                     // For proto_lang_toolchain rules, where we just want to get at their runtime
                     // deps.
                     ImmutableSet.of(ProtoLangToolchainProvider.PROVIDER_ID)))
+            .add(attr(ANDROID_SDK_TOOLCHAIN_TYPE_ATTRIBUTE_NAME, NODEP_LABEL).value(toolchainType))
             .addToolchainTypes(
                 ToolchainTypeRequirement.builder(toolchainType).mandatory(true).build())
             // Parse labels since we don't have RuleDefinitionEnvironment.getLabel like in a rule
@@ -211,16 +214,7 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
    */
   private static ImmutableList<Artifact> getPlatformBasedToolchainJars(RuleContext ruleContext)
       throws RuleErrorException {
-    if (!ruleContext
-        .getConfiguration()
-        .getFragment(AndroidConfiguration.class)
-        .incompatibleUseToolchainResolution()) {
-      // Legacy toolchains: toolchain .jars are dexed by propagating the aspect down the
-      // ":android_sdk" attribute. That makes them transitive deps, so no special logic is needed
-      // in the parent target to process them.
-      return ImmutableList.of();
-
-    } else if (!ruleContext.attributes().has(":android_sdk")) {
+    if (!ruleContext.attributes().has(":android_sdk")) {
       // If we're dexing a non-Android target (like a java_library), there's no Android toolchain to
       // include.
       return ImmutableList.of();
@@ -245,6 +239,7 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
       AspectParameters params,
       RepositoryName toolsRepository)
       throws InterruptedException, ActionConflictException {
+
     ConfiguredAspect.Builder result = new ConfiguredAspect.Builder(ruleContext);
 
     // No-op out of the aspect in the android_binary rule if the Starlark dex/desugar will execute
@@ -287,14 +282,15 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
       return result.addProvider(DexArchiveProvider.NEVERLINK).build();
     }
 
-    DexArchiveProvider.Builder dexArchives =
-        new DexArchiveProvider.Builder()
-            .addTransitiveProviders(collectPrerequisites(ruleContext, DexArchiveProvider.class));
+    DexArchiveProvider.Builder dexArchives = new DexArchiveProvider.Builder();
+    collectPrerequisites(
+        ruleContext, DexArchiveProvider.class, dexArchives::addTransitiveProviders);
     if (runtimeJars != null) {
       boolean basenameClash = checkBasenameClash(runtimeJars);
       Set<Set<String>> aspectDexopts = aspectDexopts(ruleContext);
       String minSdkFilenamePart = minSdkVersion > 0 ? "--min_sdk_version=" + minSdkVersion : "";
       for (Artifact jar : runtimeJars) {
+        Artifact desugaredJar = desugaredJars.apply(jar);
         for (Set<String> incrementalDexopts : aspectDexopts) {
           // Since we're potentially dexing the same jar multiple times with different flags, we
           // need to write unique artifacts for each flag combination. Here, it is convenient to
@@ -311,7 +307,7 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
               createDexArchiveAction(
                   ruleContext,
                   ASPECT_DEXBUILDER_PREREQ,
-                  desugaredJars.apply(jar),
+                  desugaredJar,
                   incrementalDexopts,
                   minSdkVersion,
                   AndroidBinary.getDxArtifact(ruleContext, uniqueFilename));
@@ -342,10 +338,9 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
       result.addProvider(AndroidRuntimeJarProvider.NEVERLINK);
       return Functions.forMap(newlyDesugared);
     }
-    AndroidRuntimeJarProvider.Builder desugaredJars =
-        new AndroidRuntimeJarProvider.Builder()
-            .addTransitiveProviders(
-                collectPrerequisites(ruleContext, AndroidRuntimeJarProvider.class));
+    AndroidRuntimeJarProvider.Builder desugaredJars = new AndroidRuntimeJarProvider.Builder();
+    collectPrerequisites(
+        ruleContext, AndroidRuntimeJarProvider.class, desugaredJars::addTransitiveProviders);
     if (isProtoLibrary(ruleContext)) {
       // TODO(b/33557068): Desugar protos if needed instead of assuming they don't need desugaring
       result.addProvider(desugaredJars.build());
@@ -390,7 +385,14 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
       }
     }
     result.addProvider(desugaredJars.build());
-    return Functions.forMap(newlyDesugared);
+
+    return key -> {
+      if (newlyDesugared.containsKey(key)) {
+        return newlyDesugared.get(key);
+      }
+      // Fall back to the original un-desugared artifact.
+      return key;
+    };
   }
 
   @Nullable
@@ -463,15 +465,13 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
     return false;
   }
 
-  private static <T extends TransitiveInfoProvider> Iterable<T> collectPrerequisites(
-      RuleContext ruleContext, Class<T> classType) {
-    IterablesChain.Builder<T> result = IterablesChain.builder();
+  private static <T extends TransitiveInfoProvider> void collectPrerequisites(
+      RuleContext ruleContext, Class<T> classType, Consumer<List<T>> sink) {
     for (String attr : TRANSITIVE_ATTRIBUTES) {
       if (ruleContext.attributes().getAttributeType(attr) != null) {
-        result.add(ruleContext.getPrerequisites(attr, classType));
+        sink.accept(ruleContext.getPrerequisites(attr, classType));
       }
     }
-    return result.build();
   }
 
   private NestedSet<Artifact> getBootclasspath(ConfiguredTarget base, RuleContext ruleContext)
@@ -491,8 +491,7 @@ public class DexArchiveAspect extends NativeAspectClass implements ConfiguredAsp
   @Nullable
   private Artifact getAndroidJar(RuleContext ruleContext) throws RuleErrorException {
     Label toolchainType = Label.parseCanonicalUnchecked(toolsRepository + sdkToolchainLabel);
-    AndroidSdkProvider androidSdk =
-        AndroidSdkProvider.fromRuleContext(ruleContext, ":dex_archive_android_sdk", toolchainType);
+    AndroidSdkProvider androidSdk = AndroidSdkProvider.fromRuleContext(ruleContext, toolchainType);
     if (androidSdk == null) {
       // If the Android SDK is null, we don't have a valid toolchain. Expect a rule error reported
       // from AndroidSdkProvider.

@@ -20,7 +20,6 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.HashMap;
@@ -76,14 +75,13 @@ public class FakeRegistry implements Registry {
   }
 
   @Override
-  public RepoSpec getRepoSpec(
-      ModuleKey key, RepositoryName repoName, ExtendedEventHandler eventHandler) {
+  public RepoSpec getRepoSpec(ModuleKey key, ExtendedEventHandler eventHandler) {
     return RepoSpec.builder()
         .setRuleClassName("local_repository")
         .setAttributes(
             AttributeValues.create(
                 ImmutableMap.of(
-                    "name", repoName.getName(), "path", rootPath + "/" + repoName.getName())))
+                    "path", rootPath + "/" + key.getCanonicalRepoNameWithVersion().getName())))
         .build();
   }
 
@@ -95,9 +93,9 @@ public class FakeRegistry implements Registry {
 
   @Override
   public boolean equals(Object other) {
-    return other instanceof FakeRegistry
-        && this.url.equals(((FakeRegistry) other).url)
-        && this.modules.equals(((FakeRegistry) other).modules);
+    return other instanceof FakeRegistry fakeRegistry
+        && this.url.equals(fakeRegistry.url)
+        && this.modules.equals(fakeRegistry.modules);
   }
 
   @Override
@@ -120,7 +118,7 @@ public class FakeRegistry implements Registry {
     }
 
     @Override
-    public Registry getRegistryWithUrl(String url) {
+    public Registry createRegistry(String url) {
       return Preconditions.checkNotNull(registries.get(url), "unknown registry url: %s", url);
     }
   }

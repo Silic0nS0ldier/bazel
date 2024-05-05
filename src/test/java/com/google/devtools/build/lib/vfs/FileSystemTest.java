@@ -16,10 +16,12 @@ package com.google.devtools.build.lib.vfs;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.truth.Truth.assertThat;
+import static java.lang.Math.min;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeTrue;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -29,8 +31,8 @@ import com.google.devtools.build.lib.unix.FileStatus;
 import com.google.devtools.build.lib.unix.NativePosixFiles;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.testing.junit.testparameterinjector.TestParameter;
-import com.google.testing.junit.testparameterinjector.TestParameter.TestParameterValuesProvider;
 import com.google.testing.junit.testparameterinjector.TestParameterInjector;
+import com.google.testing.junit.testparameterinjector.TestParameterValuesProvider;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -73,9 +75,9 @@ public abstract class FileSystemTest {
   @TestParameter(valuesProvider = DigestHashFunctionsProvider.class)
   public DigestHashFunction digestHashFunction;
 
-  private static final class DigestHashFunctionsProvider implements TestParameterValuesProvider {
+  private static final class DigestHashFunctionsProvider extends TestParameterValuesProvider {
     @Override
-    public ImmutableList<?> provideValues() {
+    public ImmutableList<?> provideValues(Context context) {
       return DigestHashFunction.getPossibleHashFunctions().asList();
     }
   }
@@ -1308,6 +1310,7 @@ public abstract class FileSystemTest {
       throws Exception {
     String text = "hello";
     Path file = overwrite ? xFile : xNothing;
+    FileSystemUtils.writeContent(xFile, UTF_8, "goodbye"); // longer than hello
     try (SeekableByteChannel channel = file.createReadWriteByteChannel()) {
       writeToChannelAsLatin1(channel, text);
       assertThat(channel.position()).isEqualTo(text.length());
@@ -1329,16 +1332,99 @@ public abstract class FileSystemTest {
   }
 
   @Test
-  public void testCreateReadWriteByteChannelRead(@TestParameter({"0", "5", "12"}) int seekPosition)
+  public void testCreateReadWriteByteChannelSeek(@TestParameter({"0", "5", "12"}) int seekPosition)
       throws Exception {
     String text = "hello there!";
     try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
       writeToChannelAsLatin1(channel, text);
       channel.position(seekPosition);
-
+      assertThat(channel.position()).isEqualTo(seekPosition);
       String read = readAllAsString(channel, text.length() - seekPosition);
       assertThat(channel.position()).isEqualTo(text.length());
       assertThat(read).isEqualTo(text.substring(seekPosition));
+    }
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelSeekHole(@TestParameter boolean write)
+      throws Exception {
+    String text1 = "goodbye";
+    String text2 = "and thanks for all the fish";
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      writeToChannelAsLatin1(channel, text1);
+      channel.position(text1.length() + 1);
+      assertThat(channel.position()).isEqualTo(text1.length() + 1);
+      assertThat(channel.size()).isEqualTo(text1.length());
+      assertThat(channel.read(ByteBuffer.allocate(1))).isEqualTo(-1);
+      if (write) {
+        writeToChannelAsLatin1(channel, text2);
+        assertThat(channel.position()).isEqualTo(text1.length() + 1 + text2.length());
+      }
+    }
+
+    assertThat(FileSystemUtils.readContent(xNothing, ISO_8859_1))
+        .isEqualTo(write ? text1 + "\0" + text2 : text1);
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelSeekNegative() throws Exception {
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      assertThrows(IllegalArgumentException.class, () -> channel.position(-1));
+    }
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelTruncate(
+      @TestParameter({"0", "5", "12", "100"}) int truncateSize) throws Exception {
+    String text = "hello there!";
+    int expectedSize = min(truncateSize, text.length());
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      writeToChannelAsLatin1(channel, text);
+      channel.truncate(truncateSize);
+      assertThat(channel.position()).isEqualTo(expectedSize);
+      assertThat(channel.size()).isEqualTo(expectedSize);
+      assertThat(channel.read(ByteBuffer.allocate(1))).isEqualTo(-1);
+    }
+
+    assertThat(FileSystemUtils.readContent(xNothing, ISO_8859_1))
+        .isEqualTo(text.substring(0, expectedSize));
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelTruncateHole(@TestParameter boolean shrink)
+      throws Exception {
+    String text = "hello";
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      writeToChannelAsLatin1(channel, text);
+      channel.position(text.length() + 5);
+      assertThat(channel.position()).isEqualTo(text.length() + 5);
+      assertThat(channel.size()).isEqualTo(text.length());
+      int truncateSize = shrink ? text.length() - 1 : text.length() + 1;
+      channel.truncate(truncateSize);
+      assertThat(channel.position()).isEqualTo(truncateSize);
+      assertThat(channel.size()).isEqualTo(shrink ? text.length() - 1 : text.length());
+    }
+
+    assertThat(FileSystemUtils.readContent(xNothing, ISO_8859_1))
+        .isEqualTo(shrink ? "hell" : "hello");
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelTruncateAndSeekToErase() throws Exception {
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      writeToChannelAsLatin1(channel, "hello");
+      channel.truncate("hello".length() - 1);
+      channel.position("hello".length());
+      writeToChannelAsLatin1(channel, "world");
+    }
+
+    assertThat(FileSystemUtils.readContent(xNothing, ISO_8859_1)).isEqualTo("hell\0world");
+  }
+
+  @Test
+  public void testCreateReadWriteByteChannelTruncateNegative() throws Exception {
+    try (SeekableByteChannel channel = xNothing.createReadWriteByteChannel()) {
+      assertThrows(IllegalArgumentException.class, () -> channel.truncate(-1));
     }
   }
 
@@ -1405,6 +1491,17 @@ public abstract class FileSystemTest {
     try (InputStream inStream = xFile.getInputStream()) {
       assertThat(inStream.read()).isEqualTo(-1);
     }
+  }
+
+  @Test
+  public void testOutputStreamConcurrentAppend() throws Exception {
+    try (OutputStream s1 = xFile.getOutputStream(true);
+        OutputStream s2 = xFile.getOutputStream(true)) {
+      s1.write("hello".getBytes(UTF_8));
+      s2.write("world".getBytes(UTF_8));
+    }
+
+    assertThat(FileSystemUtils.readContent(xFile, UTF_8)).isEqualTo("helloworld");
   }
 
   @Test
@@ -1721,29 +1818,68 @@ public abstract class FileSystemTest {
 
   @Test
   public void testResolveSymlinks() throws Exception {
-    if (testFS.supportsSymbolicLinksNatively(xLink.asFragment())) {
-      createSymbolicLink(xLink, xFile);
-      FileSystemUtils.createEmptyFile(xFile);
-      assertThat(testFS.resolveOneLink(xLink.asFragment())).isEqualTo(xFile.asFragment());
-      assertThat(xLink.resolveSymbolicLinks()).isEqualTo(xFile);
-    }
+    assumeTrue(testFS.supportsSymbolicLinksNatively(xLink.asFragment()));
+
+    createSymbolicLink(xLink, xFile);
+    FileSystemUtils.createEmptyFile(xFile);
+    assertThat(testFS.resolveOneLink(xLink.asFragment())).isEqualTo(xFile.asFragment());
+    assertThat(xLink.resolveSymbolicLinks()).isEqualTo(xFile);
   }
 
   @Test
   public void testResolveDanglingSymlinks() throws Exception {
-    if (testFS.supportsSymbolicLinksNatively(xLink.asFragment())) {
-      createSymbolicLink(xLink, xNothing);
-      assertThat(testFS.resolveOneLink(xLink.asFragment())).isEqualTo(xNothing.asFragment());
-      assertThrows(IOException.class, () -> xLink.resolveSymbolicLinks());
-    }
+    assumeTrue(testFS.supportsSymbolicLinksNatively(xLink.asFragment()));
+
+    createSymbolicLink(xLink, xNothing);
+    assertThat(testFS.resolveOneLink(xLink.asFragment())).isEqualTo(xNothing.asFragment());
+    assertThrows(IOException.class, () -> xLink.resolveSymbolicLinks());
   }
 
   @Test
   public void testResolveNonSymlinks() throws Exception {
-    if (testFS.supportsSymbolicLinksNatively(xFile.asFragment())) {
-      assertThat(testFS.resolveOneLink(xFile.asFragment())).isNull();
-      assertThat(xFile.resolveSymbolicLinks()).isEqualTo(xFile);
-    }
+    assertThat(testFS.resolveOneLink(xFile.asFragment())).isNull();
+    assertThat(xFile.resolveSymbolicLinks()).isEqualTo(xFile);
+  }
+
+  @Test
+  public void testReaddir() throws Exception {
+    Path dir = workingDir.getChild("readdir");
+
+    assumeTrue(testFS.supportsSymbolicLinksNatively(dir.asFragment()));
+
+    dir.getChild("dir").createDirectoryAndParents();
+    FileSystemUtils.createEmptyFile(dir.getChild("file"));
+    dir.getChild("file_link").createSymbolicLink(dir.getChild("file"));
+    dir.getChild("dir_link").createSymbolicLink(dir.getChild("dir"));
+    dir.getChild("looping_link").createSymbolicLink(dir.getChild("looping_link"));
+    dir.getChild("dangling_link").createSymbolicLink(testFS.getPath("/does_not_exist"));
+
+    assertThat(dir.getDirectoryEntries())
+        .containsExactly(
+            dir.getChild("file"),
+            dir.getChild("dir"),
+            dir.getChild("file_link"),
+            dir.getChild("dir_link"),
+            dir.getChild("looping_link"),
+            dir.getChild("dangling_link"));
+
+    assertThat(dir.readdir(Symlinks.NOFOLLOW))
+        .containsExactly(
+            new Dirent("file", Dirent.Type.FILE),
+            new Dirent("dir", Dirent.Type.DIRECTORY),
+            new Dirent("file_link", Dirent.Type.SYMLINK),
+            new Dirent("dir_link", Dirent.Type.SYMLINK),
+            new Dirent("looping_link", Dirent.Type.SYMLINK),
+            new Dirent("dangling_link", Dirent.Type.SYMLINK));
+
+    assertThat(dir.readdir(Symlinks.FOLLOW))
+        .containsExactly(
+            new Dirent("file", Dirent.Type.FILE),
+            new Dirent("dir", Dirent.Type.DIRECTORY),
+            new Dirent("file_link", Dirent.Type.FILE),
+            new Dirent("dir_link", Dirent.Type.DIRECTORY),
+            new Dirent("looping_link", Dirent.Type.UNKNOWN),
+            new Dirent("dangling_link", Dirent.Type.UNKNOWN));
   }
 
   @Test

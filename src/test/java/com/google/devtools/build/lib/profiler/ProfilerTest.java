@@ -111,14 +111,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     return buffer;
   }
 
@@ -136,14 +137,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
   }
 
   @Test
@@ -246,14 +248,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     try (SilentCloseable c = profiler.profile(ProfilerTask.ACTION, "action task")) {
       // Next task takes less than 10 ms but should be recorded anyway.
       long before = clock.nanoTime();
@@ -329,14 +332,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ true,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        workerProcessMetricsCollector,
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            workerProcessMetricsCollector,
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ true,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     Thread.sleep(400);
     profiler.stop();
 
@@ -365,14 +369,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     profiler.logSimpleTask(10000, 20000, ProfilerTask.VFS_STAT, "stat");
     // Unlike the VFS_STAT event above, the remote execution event will not be recorded since we
     // don't record the slowest remote exec events (see ProfilerTask.java).
@@ -495,14 +500,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     profiler.logSimpleTask(10000, 20000, ProfilerTask.VFS_STAT, "stat");
 
     assertThat(ProfilerTask.VFS_STAT.collectsSlowestInstances()).isTrue();
@@ -698,14 +704,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     profiler.logSimpleTask(badClock.nanoTime(), ProfilerTask.INFO, "some task");
     profiler.stop();
   }
@@ -764,14 +771,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     profiler.logSimpleTaskDuration(
         Profiler.nanoTimeMaybe(), Duration.ofSeconds(10), ProfilerTask.INFO, "foo");
     IOException expected = assertThrows(IOException.class, profiler::stop);
@@ -800,14 +808,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     profiler.logSimpleTaskDuration(
         Profiler.nanoTimeMaybe(), Duration.ofSeconds(10), ProfilerTask.INFO, "foo");
     IOException expected = assertThrows(IOException.class, profiler::stop);
@@ -831,14 +840,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ true,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     try (SilentCloseable c = profiler.profileAction(ProfilerTask.ACTION, "test", "foo.out", "")) {
       profiler.logEvent(ProfilerTask.PHASE, "event1");
     }
@@ -870,14 +880,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ true,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     try (SilentCloseable c =
         profiler.profileAction(ProfilerTask.ACTION, "test", "foo.out", "//foo:bar")) {
       profiler.logEvent(ProfilerTask.PHASE, "event1");
@@ -908,14 +919,15 @@ public final class ProfilerTest {
         /* includePrimaryOutput= */ false,
         /* includeTargetLabel= */ false,
         /* collectTaskHistograms= */ true,
-        /* collectWorkerDataInProfiler= */ false,
-        /* collectLoadAverage= */ false,
-        /* collectSystemNetworkUsage= */ false,
-        /* collectPressureStallIndicators= */ false,
-        /* collectResourceEstimation= */ false,
-        ResourceManager.instance(),
-        WorkerProcessMetricsCollector.instance(),
-        BugReporter.defaultInstance());
+        new CollectLocalResourceUsage(
+            BugReporter.defaultInstance(),
+            WorkerProcessMetricsCollector.instance(),
+            ResourceManager.instance(),
+            /* collectWorkerDataInProfiler= */ false,
+            /* collectLoadAverage= */ false,
+            /* collectSystemNetworkUsage= */ false,
+            /* collectResourceManagerEstimation= */ false,
+            /* collectPressureStallIndicators= */ false));
     long curTime = Profiler.nanoTimeMaybe();
     for (int i = 0; i < 100_000; i++) {
       Duration duration;
@@ -1029,6 +1041,41 @@ public final class ProfilerTest {
     assertThat(first.processId()).isEqualTo(CounterSeriesTraceData.PROCESS_ID);
     assertThat(first.threadId()).isEqualTo(Thread.currentThread().getId());
     // One of the cache hit checks spilled over and used half of the second bucket.
-    assertThat(second.args()).containsExactly("local action cache", 0.5);
+    assertThat(second.args()).containsExactly("action", 0.0, "local action cache", 0.5);
+  }
+
+  @Test
+  public void testLocalActionsCounted() throws Exception {
+    // Given 2 subsequent local actions with length of 200 ms and 100ms
+    ByteArrayOutputStream buffer = start(getAllProfilerTasks(), JSON_TRACE_FILE_FORMAT);
+
+    long startTime1 = clock.nanoTime();
+    clock.advanceMillis(200);
+    profiler.completeTask(startTime1, ProfilerTask.LOCAL_ACTION_COUNTS, "resource usage 1");
+    long startTime2 = clock.nanoTime();
+    clock.advanceMillis(100);
+    profiler.completeTask(startTime2, ProfilerTask.LOCAL_ACTION_COUNTS, "resource usage 2");
+
+    // When profiler builded the profile.
+    profiler.stop();
+
+    // Then find 2 records of local actions of length 1 and 0.5 (because size of window is 200 ms)
+    JsonProfile jsonProfile = new JsonProfile(new ByteArrayInputStream(buffer.toByteArray()));
+    Object[] actionCountEvents =
+        jsonProfile.getTraceEvents().stream()
+            .filter(e -> e.name().equals("action count (local)"))
+            .toArray();
+
+    assertThat(actionCountEvents).hasLength(2);
+
+    TraceEvent first = (TraceEvent) actionCountEvents[0];
+    assertThat(first.processId()).isEqualTo(CounterSeriesTraceData.PROCESS_ID);
+    assertThat(first.threadId()).isEqualTo(Thread.currentThread().getId());
+    assertThat(first.args()).containsExactly("local action", 1.0);
+
+    TraceEvent second = (TraceEvent) actionCountEvents[1];
+    assertThat(first.processId()).isEqualTo(CounterSeriesTraceData.PROCESS_ID);
+    assertThat(first.threadId()).isEqualTo(Thread.currentThread().getId());
+    assertThat(second.args()).containsExactly("local action", 0.5);
   }
 }

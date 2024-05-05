@@ -18,24 +18,18 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.AbstractCommandLine;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.CommandLine;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.PathMapper;
-import com.google.devtools.build.lib.analysis.RuleErrorConsumer;
 import com.google.devtools.build.lib.analysis.actions.ActionConstructionContext;
-import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
-import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.analysis.config.CoreOptions;
-import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
-import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.ExpansionException;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
-import com.google.devtools.build.lib.rules.cpp.CppConfiguration.Tool;
-import com.google.devtools.build.lib.rules.cpp.CppLinkAction.LinkArtifactFactory;
+import com.google.devtools.build.lib.rules.cpp.CppLinkActionBuilder.LinkActionConstruction;
 import com.google.devtools.build.lib.starlarkbuildapi.cpp.LtoBackendArtifactsApi;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -43,6 +37,7 @@ import java.util.List;
 import java.util.Objects;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkThread;
 
 /**
@@ -90,25 +85,18 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
    * optimization, by not generating import and index files.
    */
   LtoBackendArtifacts(
-      StarlarkThread thread,
-      RuleErrorConsumer ruleErrorConsumer,
-      BuildOptions buildOptions,
-      CppConfiguration cppConfiguration,
       PathFragment ltoOutputRootPrefix,
       PathFragment ltoObjRootPrefix,
       Artifact bitcodeFile,
       @Nullable BitcodeFiles allBitcodeFiles,
-      ActionConstructionContext actionConstructionContext,
-      RepositoryName repositoryName,
-      BuildConfigurationValue configuration,
-      LinkArtifactFactory linkArtifactFactory,
+      LinkActionConstruction linkActionConstruction,
       FeatureConfiguration featureConfiguration,
       CcToolchainProvider ccToolchain,
       FdoContext fdoContext,
       boolean usePic,
       boolean generateDwo,
       List<String> userCompileFlags)
-      throws RuleErrorException, InterruptedException {
+      throws EvalException {
     boolean createSharedNonLto = allBitcodeFiles == null;
     this.bitcodeFile = bitcodeFile;
     PathFragment obj = ltoObjRootPrefix.getRelative(bitcodeFile.getExecPath());
@@ -120,18 +108,7 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
 
     CcToolchainVariables ccToolchainVariables;
 
-    try {
-      ccToolchainVariables =
-          CcToolchainProvider.getBuildVars(
-              ccToolchain,
-              thread,
-              cppConfiguration,
-              buildOptions,
-              buildOptions.get(CoreOptions.class).cpu,
-              ccToolchain.getBuildVarsFunc());
-    } catch (EvalException e) {
-      throw new RuleErrorException(e.getMessage());
-    }
+    ccToolchainVariables = ccToolchain.getBuildVars();
 
     CcToolchainVariables.Builder buildVariablesBuilder =
         CcToolchainVariables.builder(ccToolchainVariables);
@@ -140,23 +117,17 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
         builder,
         buildVariablesBuilder,
         ccToolchain,
-        cppConfiguration,
         fdoContext,
         featureConfiguration,
-        userCompileFlags,
-        ruleErrorConsumer);
+        userCompileFlags);
     CcToolchainVariables buildVariables = buildVariablesBuilder.build();
     if (bitcodeFile.isTreeArtifact()) {
-      objectFile =
-          linkArtifactFactory.createTreeArtifact(
-              actionConstructionContext, repositoryName, configuration, obj);
+      objectFile = linkActionConstruction.createTreeArtifact(obj);
       if (createSharedNonLto) {
         imports = null;
         index = null;
       } else {
-        imports =
-            linkArtifactFactory.createTreeArtifact(
-                actionConstructionContext, repositoryName, configuration, indexObj);
+        imports = linkActionConstruction.createTreeArtifact(indexObj);
         index = imports;
       }
       if (generateDwo) {
@@ -166,15 +137,14 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
         dwoFile = null;
       }
       createLtoBackendActionTemplate(
-          actionConstructionContext,
+          linkActionConstruction.getContext(),
           featureConfiguration,
           builder,
           buildVariables,
           usePic,
           allBitcodeFiles);
     } else {
-      objectFile =
-          linkArtifactFactory.create(actionConstructionContext, repositoryName, configuration, obj);
+      objectFile = linkActionConstruction.create(obj);
       if (createSharedNonLto) {
         imports = null;
         index = null;
@@ -183,32 +153,21 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
         String indexExt =
             Iterables.getOnlyElement(CppFileTypes.LTO_INDEXING_ANALYSIS_FILE.getExtensions());
         imports =
-            linkArtifactFactory.create(
-                actionConstructionContext,
-                repositoryName,
-                configuration,
-                FileSystemUtils.appendExtension(indexObj, importsExt));
-        index =
-            linkArtifactFactory.create(
-                actionConstructionContext,
-                repositoryName,
-                configuration,
-                FileSystemUtils.appendExtension(indexObj, indexExt));
+            linkActionConstruction.create(FileSystemUtils.appendExtension(indexObj, importsExt));
+        index = linkActionConstruction.create(FileSystemUtils.appendExtension(indexObj, indexExt));
       }
       if (generateDwo) {
         dwoFile =
-            linkArtifactFactory.create(
-                actionConstructionContext,
-                repositoryName,
-                configuration,
+            linkActionConstruction.create(
                 FileSystemUtils.replaceExtension(
-                    objectFile.getOutputDirRelativePath(configuration.isSiblingRepositoryLayout()),
+                    objectFile.getOutputDirRelativePath(
+                        linkActionConstruction.getConfig().isSiblingRepositoryLayout()),
                     ".dwo"));
       }
       scheduleLtoBackendAction(
           builder,
           buildVariables,
-          actionConstructionContext,
+          linkActionConstruction.getContext(),
           featureConfiguration,
           usePic,
           allBitcodeFiles);
@@ -258,49 +217,30 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
       LtoBackendAction.Builder builder,
       CcToolchainVariables.Builder buildVariablesBuilder,
       CcToolchainProvider ccToolchain,
-      CppConfiguration cppConfiguration,
       FdoContext fdoContext,
       FeatureConfiguration featureConfiguration,
-      List<String> userCompileFlags,
-      RuleErrorConsumer ruleErrorConsumer)
-      throws RuleErrorException {
-    try {
-      builder.addTransitiveInputs(ccToolchain.getCompilerFiles());
-      builder.setMnemonic("CcLtoBackendCompile");
-      addProfileForLtoBackend(builder, fdoContext, featureConfiguration, buildVariablesBuilder);
-      // Add the context sensitive instrument path to the backend.
-      if (featureConfiguration.isEnabled(CppRuleClasses.CS_FDO_INSTRUMENT)) {
-        buildVariablesBuilder.addStringVariable(
-            CompileBuildVariables.CS_FDO_INSTRUMENT_PATH.getVariableName(),
-            ccToolchain.getCSFdoInstrument());
-      }
-      buildVariablesBuilder.addStringSequenceVariable(
-          CompileBuildVariables.USER_COMPILE_FLAGS.getVariableName(), userCompileFlags);
-
-      if (cppConfiguration.useStandaloneLtoIndexingCommandLines()) {
-        if (!featureConfiguration.actionIsConfigured(CppActionNames.LTO_BACKEND)) {
-          throw ruleErrorConsumer.throwWithRuleError(
-              "Thinlto build is requested, but the C++ toolchain doesn't define an action_config"
-                  + " for 'lto-backend' action.");
-        }
-        PathFragment compiler =
-            PathFragment.create(
-                featureConfiguration.getToolPathForAction(CppActionNames.LTO_BACKEND));
-        builder.setExecutable(compiler);
-    } else {
-      PathFragment compiler =
-          PathFragment.create(
-              CcToolchainProvider.getToolPathString(
-                  ccToolchain.getToolPaths(),
-                  Tool.GCC,
-                  ccToolchain.getCcToolchainLabel(),
-                  ccToolchain.getToolchainIdentifier(),
-                  ruleErrorConsumer));
-        builder.setExecutable(compiler);
-      }
-    } catch (EvalException e) {
-      throw new RuleErrorException(e.getMessage());
+      List<String> userCompileFlags)
+      throws EvalException {
+    builder.addTransitiveInputs(ccToolchain.getCompilerFiles());
+    builder.setMnemonic("CcLtoBackendCompile");
+    addProfileForLtoBackend(builder, fdoContext, featureConfiguration, buildVariablesBuilder);
+    // Add the context sensitive instrument path to the backend.
+    if (featureConfiguration.isEnabled(CppRuleClasses.CS_FDO_INSTRUMENT)) {
+      buildVariablesBuilder.addStringVariable(
+          CompileBuildVariables.CS_FDO_INSTRUMENT_PATH.getVariableName(),
+          ccToolchain.getCSFdoInstrument());
     }
+    buildVariablesBuilder.addStringSequenceVariable(
+        CompileBuildVariables.USER_COMPILE_FLAGS.getVariableName(), userCompileFlags);
+
+    if (!featureConfiguration.actionIsConfigured(CppActionNames.LTO_BACKEND)) {
+      throw Starlark.errorf(
+          "Thinlto build is requested, but the C++ toolchain doesn't define an action_config"
+              + " for 'lto-backend' action.");
+    }
+    PathFragment compiler =
+        PathFragment.create(featureConfiguration.getToolPathForAction(CppActionNames.LTO_BACKEND));
+    builder.setExecutable(compiler);
   }
 
   private static void addPathsToBuildVariablesBuilder(
@@ -371,7 +311,7 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
       CcToolchainVariables buildVariables,
       boolean usePic) {
     CommandLine ltoCommandLine =
-        new CommandLine() {
+        new AbstractCommandLine() {
 
           @Override
           public Iterable<String> arguments() throws CommandLineExpansionException {
@@ -531,7 +471,8 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
       LtoBackendAction.Builder builder,
       FdoContext fdoContext,
       FeatureConfiguration featureConfiguration,
-      CcToolchainVariables.Builder buildVariables) {
+      CcToolchainVariables.Builder buildVariables)
+      throws EvalException {
     Artifact prefetch = fdoContext.getPrefetchHintsArtifact();
     if (prefetch != null) {
       buildVariables.addStringVariable("fdo_prefetch_hints_path", prefetch.getExecPathString());
@@ -569,10 +510,9 @@ public final class LtoBackendArtifacts implements LtoBackendArtifactsApi<Artifac
     if (this == o) {
       return true;
     }
-    if (!(o instanceof LtoBackendArtifacts)) {
+    if (!(o instanceof LtoBackendArtifacts that)) {
       return false;
     }
-    LtoBackendArtifacts that = (LtoBackendArtifacts) o;
     return Objects.equals(index, that.index)
         && bitcodeFile.equals(that.bitcodeFile)
         && Objects.equals(imports, that.imports)

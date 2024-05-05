@@ -16,26 +16,14 @@
 
 load(":common/cc/cc_helper.bzl", "cc_helper")
 load(":common/cc/cc_toolchain_provider_helper.bzl", "get_cc_toolchain_provider")
-load(":common/cc/fdo_prefetch_hints.bzl", "FdoPrefetchHintsInfo")
-load(":common/cc/fdo_profile.bzl", "FdoProfileInfo")
-load(":common/cc/memprof_profile.bzl", "MemProfProfileInfo")
-load(":common/cc/propeller_optimize.bzl", "PropellerOptimizeInfo")
+load(":common/cc/fdo/fdo_context.bzl", "create_fdo_context")
 load(":common/cc/semantics.bzl", "semantics")
 
 cc_internal = _builtins.internal.cc_internal
 ToolchainInfo = _builtins.toplevel.platform_common.ToolchainInfo
 TemplateVariableInfo = _builtins.toplevel.platform_common.TemplateVariableInfo
-apple_common = _builtins.toplevel.apple_common
 PackageSpecificationInfo = _builtins.toplevel.PackageSpecificationInfo
 CcToolchainConfigInfo = _builtins.toplevel.CcToolchainConfigInfo
-
-def _validate_toolchain(ctx, is_apple):
-    if not is_apple:
-        return
-    if ctx.attr._xcode_config[apple_common.XcodeVersionConfig].xcode_version() == None:
-        fail("Xcode version must be specified to use an Apple CROSSTOOL. If your Xcode version has " +
-             "changed recently, verify that \"xcode-select -p\" is correct and then try: " +
-             "\"bazel shutdown\" to re-run Xcode configuration")
 
 def _files(ctx, attr_name):
     attr = getattr(ctx.attr, attr_name, None)
@@ -53,13 +41,11 @@ def _latebound_libc(ctx, attr_name, implicit_attr_name):
         return attr_name
     return implicit_attr_name
 
-def _full_inputs_for_link(ctx, linker_files, libc, is_apple_toolchain):
-    if not is_apple_toolchain:
-        return depset(
-            [ctx.file._interface_library_builder, ctx.file._link_dynamic_library_tool],
-            transitive = [linker_files, libc],
-        )
-    return depset(transitive = [linker_files, libc])
+def _full_inputs_for_link(ctx, linker_files, libc):
+    return depset(
+        [ctx.file._interface_library_builder, ctx.file._link_dynamic_library_tool],
+        transitive = [linker_files, libc],
+    )
 
 def _label(ctx, attr_name):
     if getattr(ctx.attr, attr_name, None) != None:
@@ -83,7 +69,7 @@ def _single_file(ctx, attr_name):
         return files[0]
     return None
 
-def _attributes(ctx, is_apple):
+def _attributes(ctx):
     grep_includes = None
     if not semantics.is_bazel:
         grep_includes = _single_file(ctx, "_grep_includes")
@@ -95,11 +81,7 @@ def _attributes(ctx, is_apple):
     return struct(
         supports_param_files = ctx.attr.supports_param_files,
         runtime_solib_dir_base = "_solib__" + cc_internal.escape_label(label = ctx.label),
-        fdo_prefetch_provider = _provider(ctx.attr._fdo_prefetch_hints, FdoPrefetchHintsInfo),
-        propeller_optimize_provider = _provider(ctx.attr._propeller_optimize, PropellerOptimizeInfo),
-        mem_prof_profile_provider = _provider(ctx.attr._memprof_profile, MemProfProfileInfo),
         cc_toolchain_config_info = _provider(ctx.attr.toolchain_config, CcToolchainConfigInfo),
-        fdo_optimize_artifacts = ctx.files._fdo_optimize,
         licenses_provider = cc_internal.licenses(ctx = ctx),
         static_runtime_lib = ctx.attr.static_runtime_lib,
         dynamic_runtime_lib = ctx.attr.dynamic_runtime_lib,
@@ -108,25 +90,19 @@ def _attributes(ctx, is_apple):
         compiler_files = _files(ctx, "compiler_files"),
         strip_files = _files(ctx, "strip_files"),
         objcopy_files = _files(ctx, "objcopy_files"),
-        fdo_optimize_label = _label(ctx, "_fdo_optimize"),
         link_dynamic_library_tool = ctx.file._link_dynamic_library_tool,
         grep_includes = grep_includes,
         module_map = ctx.attr.module_map,
         as_files = _files(ctx, "as_files"),
         ar_files = _files(ctx, "ar_files"),
         dwp_files = _files(ctx, "dwp_files"),
-        fdo_optimize_provider = _provider(ctx.attr._fdo_optimize, FdoProfileInfo),
         module_map_artifact = _single_file(ctx, "module_map"),
         all_files_including_libc = depset(transitive = [_files(ctx, "all_files"), _files(ctx, latebound_libc)]),
-        fdo_profile_provider = _provider(ctx.attr._fdo_profile, FdoProfileInfo),
-        cs_fdo_profile_provider = _provider(ctx.attr._csfdo_profile, FdoProfileInfo),
-        x_fdo_profile_provider = _provider(ctx.attr._xfdo_profile, FdoProfileInfo),
         zipper = ctx.file._zipper,
         linker_files = _full_inputs_for_link(
             ctx,
             _files(ctx, "linker_files"),
             _files(ctx, latebound_libc),
-            is_apple,
         ),
         cc_toolchain_label = ctx.label,
         coverage_files = _files(ctx, "coverage_files") or all_files,
@@ -141,16 +117,12 @@ def _attributes(ctx, is_apple):
     )
 
 def _cc_toolchain_impl(ctx):
-    _validate_toolchain(ctx, ctx.attr._is_apple)
-    xcode_config_info = None
-    if ctx.attr._is_apple:
-        xcode_config_info = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
-    attributes = _attributes(ctx, ctx.attr._is_apple)
+    attributes = _attributes(ctx)
     providers = []
     if attributes.licenses_provider != None:
         providers.append(attributes.licenses_provider)
 
-    cc_toolchain = get_cc_toolchain_provider(ctx, attributes, xcode_config_info)
+    cc_toolchain = get_cc_toolchain_provider(ctx, attributes)
     if cc_toolchain == None:
         fail("This should never happen")
     template_variable_info = TemplateVariableInfo(
@@ -168,10 +140,201 @@ def _cc_toolchain_impl(ctx):
     providers.append(DefaultInfo(files = cc_toolchain._all_files_including_libc))
     return providers
 
-def make_cc_toolchain(cc_toolchain_attrs, **kwargs):
-    return rule(
-        implementation = _cc_toolchain_impl,
-        fragments = ["cpp", "platform", "apple"],
-        attrs = cc_toolchain_attrs,
-        **kwargs
-    )
+cc_toolchain = rule(
+    implementation = _cc_toolchain_impl,
+    fragments = ["cpp"],
+    doc = """
+<p>Represents a C++ toolchain.</p>
+
+<p>
+  This rule is responsible for:
+
+  <ul>
+    <li>
+      Collecting all artifacts needed for C++ actions to run. This is done by
+      attributes such as <code>all_files</code>, <code>compiler_files</code>,
+      <code>linker_files</code>, or other attributes ending with <code>_files</code>). These are
+      most commonly filegroups globbing all required files.
+    </li>
+    <li>
+      Generating correct command lines for C++ actions. This is done using
+      <code>CcToolchainConfigInfo</code> provider (details below).
+    </li>
+  </ul>
+</p>
+<p>
+  Use <code>toolchain_config</code> attribute to configure the C++ toolchain.
+  See also this
+  <a href="https://bazel.build/docs/cc-toolchain-config-reference">
+    page
+  </a> for elaborate C++ toolchain configuration and toolchain selection documentation.
+</p>
+<p>
+  Use <code>tags = ["manual"]</code> in order to prevent toolchains from being built and configured
+  unnecessarily when invoking <code>bazel build //...</code>
+</p>""",
+    subrules = [create_fdo_context],
+    attrs = {
+        # buildifier: disable=attr-license
+        "licenses": attr.license() if hasattr(attr, "license") else attr.string_list(),
+        # buildifier: disable=attr-license
+        "output_licenses": attr.license() if hasattr(attr, "license") else attr.string_list(),
+        "toolchain_identifier": attr.string(
+            default = "",
+            doc = """
+The identifier used to match this cc_toolchain with the corresponding
+crosstool_config.toolchain.
+
+<p>
+  Until issue <a href="https://github.com/bazelbuild/bazel/issues/5380">#5380</a> is fixed
+  this is the recommended way of associating <code>cc_toolchain</code> with
+  <code>CROSSTOOL.toolchain</code>. It will be replaced by the <code>toolchain_config</code>
+  attribute (<a href="https://github.com/bazelbuild/bazel/issues/5380">#5380</a>).</p>""",
+        ),
+        "all_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts. These artifacts will be added as inputs to all
+rules_cc related actions (with the exception of actions that are using more precise sets of
+artifacts from attributes below). Bazel assumes that <code>all_files</code> is a superset
+of all other artifact-providing attributes (e.g. linkstamp compilation needs both compile
+and link files, so it takes <code>all_files</code>).
+
+<p>
+This is what <code>cc_toolchain.files</code> contains, and this is used by all Starlark
+rules using C++ toolchain.</p>""",
+        ),
+        "compiler_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for compile actions.""",
+        ),
+        "compiler_files_without_includes": attr.label(
+            allow_files = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for compile actions in case when
+input discovery is supported (currently Google-only).""",
+        ),
+        "strip_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for strip actions.""",
+        ),
+        "objcopy_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for objcopy actions.""",
+        ),
+        "as_files": attr.label(
+            allow_files = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for assembly actions.""",
+        ),
+        "ar_files": attr.label(
+            allow_files = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for archiving actions.""",
+        ),
+        "linker_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for linking actions.""",
+        ),
+        "dwp_files": attr.label(
+            allow_files = True,
+            mandatory = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for dwp actions.""",
+        ),
+        "coverage_files": attr.label(
+            allow_files = True,
+            doc = """
+Collection of all cc_toolchain artifacts required for coverage actions. If not specified,
+all_files are used.""",
+        ),
+        "libc_top": attr.label(
+            # TODO(b/78578234): Make this the default and remove the late-bound versions.
+            allow_files = False,
+            doc = """
+A collection of artifacts for libc passed as inputs to compile/linking actions.""",
+        ),
+        "static_runtime_lib": attr.label(
+            allow_files = True,
+            doc = """
+Static library artifact for the C++ runtime library (e.g. libstdc++.a).
+
+<p>This will be used when 'static_link_cpp_runtimes' feature is enabled, and we're linking
+dependencies statically.</p>""",
+        ),
+        "dynamic_runtime_lib": attr.label(
+            allow_files = True,
+            doc = """
+Dynamic library artifact for the C++ runtime library (e.g. libstdc++.so).
+
+<p>This will be used when 'static_link_cpp_runtimes' feature is enabled, and we're linking
+dependencies dynamically.</p>""",
+        ),
+        "module_map": attr.label(
+            allow_files = True,
+            doc = """
+Module map artifact to be used for modular builds.""",
+        ),
+        "supports_param_files": attr.bool(
+            default = True,
+            doc = """
+Set to True when cc_toolchain supports using param files for linking actions.""",
+        ),
+        "supports_header_parsing": attr.bool(
+            default = False,
+            doc = """
+Set to True when cc_toolchain supports header parsing actions.""",
+        ),
+        "exec_transition_for_inputs": attr.bool(
+            default = False,  # No-op.
+            doc = "Deprecated. No-op.",
+        ),
+        "toolchain_config": attr.label(
+            allow_files = False,
+            mandatory = True,
+            providers = [CcToolchainConfigInfo],
+            doc = """
+The label of the rule providing <code>cc_toolchain_config_info</code>.""",
+        ),
+        "_libc_top": attr.label(
+            default = configuration_field(fragment = "cpp", name = "libc_top"),
+        ),
+        "_grep_includes": semantics.get_grep_includes(),
+        "_interface_library_builder": attr.label(
+            default = "@" + semantics.get_repo() + "//tools/cpp:interface_library_builder",
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+        "_link_dynamic_library_tool": attr.label(
+            default = "@" + semantics.get_repo() + "//tools/cpp:link_dynamic_library",
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+        "_cc_toolchain_type": attr.label(default = "@" + semantics.get_repo() + "//tools/cpp:toolchain_type"),
+        "_zipper": attr.label(
+            default = configuration_field(fragment = "cpp", name = "zipper"),
+            allow_single_file = True,
+            cfg = "exec",
+        ),
+        "_target_libc_top": attr.label(
+            default = configuration_field(fragment = "cpp", name = "target_libc_top_DO_NOT_USE_ONLY_FOR_CC_TOOLCHAIN"),
+        ),
+        "_whitelist_disabling_parse_headers_and_layering_check_allowed": attr.label(
+            default = "@" + semantics.get_repo() + "//tools/build_defs/cc/whitelists/parse_headers_and_layering_check:disabling_parse_headers_and_layering_check_allowed",
+            providers = [PackageSpecificationInfo],
+        ),
+        "_build_info_translator": attr.label(
+            default = semantics.BUILD_INFO_TRANLATOR_LABEL,
+            providers = [OutputGroupInfo],
+        ),
+    },
+)

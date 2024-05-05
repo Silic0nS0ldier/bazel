@@ -38,7 +38,6 @@ import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ExecutionRequirements;
 import com.google.devtools.build.lib.actions.NotifyOnActionCacheHit;
 import com.google.devtools.build.lib.actions.ResourceSet;
-import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnResult;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
@@ -108,7 +107,6 @@ public final class CoverageReportActionBuilder {
     private final ImmutableList<String> command;
     private final boolean remotable;
     private final String locationMessage;
-    private final RunfilesSupplier runfilesSupplier;
 
     CoverageReportAction(
         ActionOwner owner,
@@ -116,13 +114,11 @@ public final class CoverageReportActionBuilder {
         ImmutableSet<Artifact> outputs,
         ImmutableList<String> command,
         String locationMessage,
-        boolean remotable,
-        RunfilesSupplier runfilesSupplier) {
+        boolean remotable) {
       super(owner, inputs, outputs);
       this.command = command;
       this.remotable = remotable;
       this.locationMessage = locationMessage;
-      this.runfilesSupplier = runfilesSupplier;
     }
 
     @Override
@@ -132,8 +128,7 @@ public final class CoverageReportActionBuilder {
         ImmutableMap<String, String> executionInfo =
             remotable ? ImmutableMap.of() : ImmutableMap.of(ExecutionRequirements.NO_REMOTE, "");
         Spawn spawn =
-            new BaseSpawn(
-                command, ImmutableMap.of(), executionInfo, runfilesSupplier, this, LOCAL_RESOURCES);
+            new BaseSpawn(command, ImmutableMap.of(), executionInfo, this, LOCAL_RESOURCES);
         ImmutableList<SpawnResult> spawnResults =
             actionExecutionContext
                 .getContext(SpawnStrategyResolver.class)
@@ -149,11 +144,6 @@ public final class CoverageReportActionBuilder {
       } catch (ExecException e) {
         throw ActionExecutionException.fromExecException(e, this);
       }
-    }
-
-    @Override
-    public RunfilesSupplier getRunfilesSupplier() {
-      return runfilesSupplier;
     }
 
     @Override
@@ -279,6 +269,8 @@ public final class CoverageReportActionBuilder {
                 coverageDir.getRelative("_coverage_report.dat"), root, args.artifactOwner());
     Artifact reportGeneratorExec = args.reportGenerator().getExecutable();
     RunfilesSupport runfilesSupport = args.reportGenerator().getRunfilesSupport();
+    Artifact runfilesMiddleman =
+        runfilesSupport != null ? runfilesSupport.getRunfilesMiddleman() : null;
     args = CoverageArgs.createCopyWithCoverageDirAndLcovOutput(args, coverageDir, lcovOutput);
     ImmutableList<String> actionArgs = argsFunc.apply(args);
 
@@ -287,8 +279,8 @@ public final class CoverageReportActionBuilder {
             .addAll(args.coverageArtifacts())
             .add(reportGeneratorExec)
             .add(args.lcovArtifact());
-    if (runfilesSupport != null) {
-      inputsBuilder.add(runfilesSupport.getRunfilesMiddleman());
+    if (runfilesMiddleman != null) {
+      inputsBuilder.add(runfilesMiddleman);
     }
     return new CoverageReportAction(
         ACTION_OWNER,
@@ -296,7 +288,6 @@ public final class CoverageReportActionBuilder {
         ImmutableSet.of(lcovOutput),
         actionArgs,
         locationFunc.apply(args),
-        !args.htmlReport(),
-        args.reportGenerator().getRunfilesSupplier());
+        !args.htmlReport());
   }
 }

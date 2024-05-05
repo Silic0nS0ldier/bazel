@@ -15,15 +15,15 @@
 
 package com.google.devtools.build.lib.bazel.bzlmod;
 
+import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
+import static com.google.devtools.build.lib.bazel.bzlmod.YankedVersionsUtil.BZLMOD_ALLOWED_YANKED_VERSIONS_ENV;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableCollection;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.bazel.BazelVersion;
@@ -37,6 +37,8 @@ import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.server.FailureDetails.ExternalDeps.Code;
+import com.google.devtools.build.lib.skyframe.ClientEnvironmentFunction;
+import com.google.devtools.build.lib.skyframe.ClientEnvironmentValue;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Precomputed;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
@@ -46,6 +48,7 @@ import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.SkyframeLookupResult;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import javax.annotation.Nullable;
 
@@ -64,6 +67,23 @@ public class BazelModuleResolutionFunction implements SkyFunction {
   @Nullable
   public SkyValue compute(SkyKey skyKey, Environment env)
       throws BazelModuleResolutionFunctionException, InterruptedException {
+    ClientEnvironmentValue allowedYankedVersionsFromEnv =
+        (ClientEnvironmentValue)
+            env.getValue(ClientEnvironmentFunction.key(BZLMOD_ALLOWED_YANKED_VERSIONS_ENV));
+    if (allowedYankedVersionsFromEnv == null) {
+      return null;
+    }
+
+    Optional<ImmutableSet<ModuleKey>> allowedYankedVersions;
+    try {
+      allowedYankedVersions =
+          YankedVersionsUtil.parseAllowedYankedVersions(
+              allowedYankedVersionsFromEnv.getValue(),
+              Objects.requireNonNull(YankedVersionsUtil.ALLOWED_YANKED_VERSIONS.get(env)));
+    } catch (ExternalDepsException e) {
+      throw new BazelModuleResolutionFunctionException(e, Transience.PERSISTENT);
+    }
+
     RootModuleFileValue root =
         (RootModuleFileValue) env.getValue(ModuleFileValue.KEY_FOR_ROOT_MODULE);
     if (root == null) {
@@ -72,7 +92,7 @@ public class BazelModuleResolutionFunction implements SkyFunction {
 
     var state = env.getState(ModuleResolutionComputeState::new);
     if (state.selectionResult == null) {
-      state.selectionResult = discoverAndSelect(env, root);
+      state.selectionResult = discoverAndSelect(env, root, allowedYankedVersions);
       if (state.selectionResult == null) {
         return null;
       }
@@ -110,7 +130,10 @@ public class BazelModuleResolutionFunction implements SkyFunction {
   }
 
   @Nullable
-  private static Selection.Result discoverAndSelect(Environment env, RootModuleFileValue root)
+  private static Selection.Result discoverAndSelect(
+      Environment env,
+      RootModuleFileValue root,
+      Optional<ImmutableSet<ModuleKey>> allowedYankedVersions)
       throws BazelModuleResolutionFunctionException, InterruptedException {
     ImmutableMap<ModuleKey, InterimModule> initialDepGraph;
     try (SilentCloseable c = Profiler.instance().profile(ProfilerTask.BZLMOD, "discovery")) {
@@ -132,6 +155,24 @@ public class BazelModuleResolutionFunction implements SkyFunction {
     }
     ImmutableMap<ModuleKey, InterimModule> resolvedDepGraph = selectionResult.getResolvedDepGraph();
 
+    var yankedVersionsKeys =
+        resolvedDepGraph.values().stream()
+            .filter(m -> m.getRegistry() != null)
+            .map(m -> YankedVersionsValue.Key.create(m.getName(), m.getRegistry().getUrl()))
+            .collect(toImmutableSet());
+    SkyframeLookupResult yankedVersionsResult = env.getValuesAndExceptions(yankedVersionsKeys);
+    if (env.valuesMissing()) {
+      return null;
+    }
+    var yankedVersionValues =
+        yankedVersionsKeys.stream()
+            .collect(
+                toImmutableMap(
+                    key -> key, key -> (YankedVersionsValue) yankedVersionsResult.get(key)));
+    if (yankedVersionValues.values().stream().anyMatch(Objects::isNull)) {
+      return null;
+    }
+
     try (SilentCloseable c =
         Profiler.instance().profile(ProfilerTask.BZLMOD, "verify root module direct deps")) {
       verifyRootModuleDirectDepsAreAccurate(
@@ -151,7 +192,7 @@ public class BazelModuleResolutionFunction implements SkyFunction {
 
     try (SilentCloseable c =
         Profiler.instance().profile(ProfilerTask.BZLMOD, "check no yanked versions")) {
-      checkNoYankedVersions(resolvedDepGraph);
+      checkNoYankedVersions(resolvedDepGraph, yankedVersionValues, allowedYankedVersions);
     }
 
     return selectionResult;
@@ -191,7 +232,8 @@ public class BazelModuleResolutionFunction implements SkyFunction {
         String message =
             String.format(
                 "For repository '%s', the root module requires module version %s, but got %s in the"
-                    + " resolved dependency graph.",
+                    + " resolved dependency graph. Please update the version in your MODULE.bazel"
+                    + " or set --check_direct_dependencies=off",
                 dep.getKey(), dep.getValue().toModuleKey(), resolved);
         if (mode == CheckDirectDepsMode.WARNING) {
           eventHandler.handle(Event.warn(message));
@@ -247,10 +289,23 @@ public class BazelModuleResolutionFunction implements SkyFunction {
     }
   }
 
-  private static void checkNoYankedVersions(ImmutableMap<ModuleKey, InterimModule> depGraph)
+  private static void checkNoYankedVersions(
+      ImmutableMap<ModuleKey, InterimModule> depGraph,
+      ImmutableMap<YankedVersionsValue.Key, YankedVersionsValue> yankedVersionValues,
+      Optional<ImmutableSet<ModuleKey>> allowedYankedVersions)
       throws BazelModuleResolutionFunctionException {
     for (InterimModule m : depGraph.values()) {
-      if (m.getYankedInfo().isPresent()) {
+      if (m.getRegistry() == null) {
+        // Non-registry modules do not have yanked versions.
+        continue;
+      }
+      Optional<String> yankedInfo =
+          YankedVersionsUtil.getYankedInfo(
+              m.getKey(),
+              yankedVersionValues.get(
+                  YankedVersionsValue.Key.create(m.getName(), m.getRegistry().getUrl())),
+              allowedYankedVersions);
+      if (yankedInfo.isPresent()) {
         throw new BazelModuleResolutionFunctionException(
             ExternalDepsException.withMessage(
                 Code.VERSION_RESOLUTION_ERROR,
@@ -260,53 +315,10 @@ public class BazelModuleResolutionFunction implements SkyFunction {
                     + "continue using this version, allow it using the --allow_yanked_versions "
                     + "flag or the BZLMOD_ALLOW_YANKED_VERSIONS env variable.",
                 m.getKey(),
-                m.getYankedInfo().get()),
+                yankedInfo.get()),
             Transience.PERSISTENT);
       }
     }
-  }
-
-  private static RepoSpec maybeAppendAdditionalPatches(
-      @Nullable RepoSpec repoSpec, @Nullable ModuleOverride override) {
-    if (!(override instanceof SingleVersionOverride)) {
-      return repoSpec;
-    }
-    SingleVersionOverride singleVersion = (SingleVersionOverride) override;
-    if (singleVersion.getPatches().isEmpty()) {
-      return repoSpec;
-    }
-    ImmutableMap.Builder<String, Object> attrBuilder = ImmutableMap.builder();
-    attrBuilder.putAll(repoSpec.attributes().attributes());
-    attrBuilder.put("patches", singleVersion.getPatches());
-    attrBuilder.put("patch_cmds", singleVersion.getPatchCmds());
-    attrBuilder.put("patch_args", ImmutableList.of("-p" + singleVersion.getPatchStrip()));
-    return RepoSpec.builder()
-        .setBzlFile(repoSpec.bzlFile())
-        .setRuleClassName(repoSpec.ruleClassName())
-        .setAttributes(AttributeValues.create(attrBuilder.buildOrThrow()))
-        .build();
-  }
-
-  /**
-   * Builds a {@link Module} from an {@link InterimModule}, discarding unnecessary fields and adding
-   * extra necessary ones (such as the repo spec).
-   *
-   * @param remoteRepoSpec the {@link RepoSpec} for the module obtained from a registry or null if
-   *     the module has a non-registry override
-   */
-  static Module moduleFromInterimModule(
-      InterimModule interim, @Nullable ModuleOverride override, @Nullable RepoSpec remoteRepoSpec) {
-    return Module.builder()
-        .setName(interim.getName())
-        .setVersion(interim.getVersion())
-        .setKey(interim.getKey())
-        .setRepoName(interim.getRepoName())
-        .setExecutionPlatformsToRegister(interim.getExecutionPlatformsToRegister())
-        .setToolchainsToRegister(interim.getToolchainsToRegister())
-        .setDeps(ImmutableMap.copyOf(Maps.transformValues(interim.getDeps(), DepSpec::toModuleKey)))
-        .setRepoSpec(maybeAppendAdditionalPatches(remoteRepoSpec, override))
-        .setExtensionUsages(interim.getExtensionUsages())
-        .build();
   }
 
   private static ImmutableMap<ModuleKey, Module> computeFinalDepGraph(
@@ -317,7 +329,7 @@ public class BazelModuleResolutionFunction implements SkyFunction {
     for (Map.Entry<ModuleKey, InterimModule> entry : resolvedDepGraph.entrySet()) {
       finalDepGraph.put(
           entry.getKey(),
-          moduleFromInterimModule(
+          InterimModule.toModule(
               entry.getValue(),
               overrides.get(entry.getKey().getName()),
               remoteRepoSpecs.get(entry.getKey())));

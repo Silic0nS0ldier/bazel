@@ -48,6 +48,7 @@ def integrity(data):
 
 def scratchFile(path, lines=None):
   """Creates a file at the given path with the given content."""
+  os.makedirs(str(path.parent), exist_ok=True)
   with open(str(path), 'w') as f:
     if lines:
       for l in lines:
@@ -97,17 +98,28 @@ class BazelRegistry:
     self.archives = self.root.joinpath('archives')
     self.archives.mkdir(parents=True, exist_ok=True)
     self.registry_suffix = registry_suffix
+    self.http_server = StaticHTTPServer(self.root)
 
   def setModuleBasePath(self, module_base_path):
     bazel_registry = {
-        'module_base_path': module_base_path,
+        'module_base_path': (
+            self.root.joinpath(module_base_path).resolve().as_posix()
+        ),
     }
     with self.root.joinpath('bazel_registry.json').open('w') as f:
       json.dump(bazel_registry, f, indent=4, sort_keys=True)
 
+  def start(self):
+    """Start an HTTP server serving the registry."""
+    self.http_server.__enter__()
+
+  def stop(self):
+    """Stop the HTTP server."""
+    self.http_server.__exit__(None, None, None)
+
   def getURL(self):
     """Return the URL of this registry."""
-    return self.root.resolve().as_uri()
+    return self.http_server.getURL()
 
   def generateCcSource(
       self,

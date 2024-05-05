@@ -28,6 +28,7 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.TestSize;
 import com.google.devtools.build.lib.packages.TestTimeout;
 import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.TestAction;
 import com.google.devtools.build.lib.server.FailureDetails.TestAction.Code;
@@ -71,6 +72,7 @@ public class TestTargetProperties {
   private final boolean isExternal;
   private final String language;
   private final ImmutableMap<String, String> executionInfo;
+  private final TestConfiguration testConfiguration;
 
   /**
    * Creates test target properties instance. Constructor expects that it will be called only for
@@ -82,7 +84,7 @@ public class TestTargetProperties {
     Preconditions.checkState(TargetUtils.isTestRule(rule));
     size = TestSize.getTestSize(rule);
     timeout = TestTimeout.getTestTimeout(rule);
-    tags = ruleContext.attributes().get("tags", Type.STRING_LIST);
+    tags = ruleContext.attributes().get("tags", Types.STRING_LIST);
 
     // We need to use method on ruleConfiguredTarget to perform validation.
     isFlaky = ruleContext.attributes().get("flaky", Type.BOOLEAN);
@@ -93,7 +95,7 @@ public class TestTargetProperties {
 
     boolean incompatibleExclusiveTestSandboxed = false;
 
-    TestConfiguration testConfiguration = ruleContext.getFragment(TestConfiguration.class);
+    testConfiguration = ruleContext.getFragment(TestConfiguration.class);
     if (testConfiguration != null) {
       incompatibleExclusiveTestSandboxed = testConfiguration.incompatibleExclusiveTestSandboxed();
     }
@@ -201,11 +203,21 @@ public class TestTargetProperties {
       return LOCAL_TEST_JOBS_BASED_RESOURCES;
     }
 
-    Map<String, Double> resources = parseTags(label, executionInfo);
-    ResourceSet testResourcesFromSize = TestTargetProperties.getResourceSetFromSize(size);
-    testResourcesFromSize.getResources().forEach(resources::putIfAbsent);
+    ResourceSet defaultResources = getResourceSetFromSize(size);
+    Map<String, Double> resourcesFromTags = parseTags(label, executionInfo);
+    Map<String, Double> configResources =
+        testConfiguration == null ? ImmutableMap.of() : testConfiguration.getTestResources(size);
+    if (resourcesFromTags.isEmpty() && configResources.isEmpty()) {
+      return defaultResources;
+    }
+
     return ResourceSet.create(
-        ImmutableMap.copyOf(resources), testResourcesFromSize.getLocalTestCount());
+        ImmutableMap.<String, Double>builder()
+            .putAll(defaultResources.getResources())
+            .putAll(configResources)
+            .putAll(resourcesFromTags)
+            .buildKeepingLast(),
+        defaultResources.getLocalTestCount());
   }
 
   private static FailureDetail createFailureDetail(String message, Code detailedCode) {

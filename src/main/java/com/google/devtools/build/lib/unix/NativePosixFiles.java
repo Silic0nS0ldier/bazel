@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.unix;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.jni.JniLoader;
+import com.google.devtools.build.lib.util.Blocker;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.logging.LogManager;
@@ -198,8 +199,13 @@ public final class NativePosixFiles {
    * @throws IOException if the call to opendir failed for any reason.
    */
   public static Dirents readdir(String path, ReadTypes readTypes) throws IOException {
-    // Passing enums to native code is possible, but onerous; we use a char instead.
-    return readdir(path, readTypes.getCode());
+    long comp = Blocker.begin();
+    try {
+      // Passing enums to native code is possible, but onerous; we use a char instead.
+      return readdir(path, readTypes.getCode());
+    } finally {
+      Blocker.end(comp);
+    }
   }
 
   private static native Dirents readdir(String path, char typeCode) throws IOException;
@@ -255,15 +261,23 @@ public final class NativePosixFiles {
 
     /** The names of the entries in a directory. */
     private final String[] names;
+
     /**
-     * An optional (nullable) array of entry types, corresponding positionally
-     * to the "names" field.  The types are:
-     *   'd': a subdirectory
-     *   'f': a regular file
-     *   's': a symlink (only returned with {@code NOFOLLOW})
-     *   '?': anything else
-     * Note that unlike libc, this implementation of readdir() follows
-     * symlinks when determining these types.
+     * An optional (nullable) array of entry types, corresponding positionally to the "names" field.
+     * The possible types are:
+     *
+     * <ul>
+     *   <li>'d': a subdirectory
+     *   <li>'f': a regular file
+     *   <li>'s': a symlink, only returned for {@link ReadTypes.NOFOLLOW}
+     *   <li>'?': anything else, including:
+     *       <ul>
+     *         <li>a special file
+     *         <li>a nonexistent symlink target
+     *         <li>an error occurred while determining the file type, for example because of a
+     *             symlink loop
+     *       </ul>
+     * </ul>
      *
      * <p>This is intentionally a byte array rather than a array of enums to save memory.
      */

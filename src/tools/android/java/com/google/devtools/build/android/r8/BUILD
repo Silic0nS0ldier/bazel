@@ -28,18 +28,15 @@ filegroup(
 
 java_library(
     name = "r8",
-    srcs = select({
-        "//external:has_androidsdk": glob(
-            [
-                "*.java",
-                "desugar/*.java",
-            ],
-            exclude = [
-                "NoAndroidSdkStub.java",
-            ],
-        ),
-        "//conditions:default": ["NoAndroidSdkStub.java"],
-    }),
+    srcs = glob(
+        [
+            "*.java",
+            "desugar/*.java",
+        ],
+        exclude = [
+            "NoAndroidSdkStub.java",
+        ],
+    ),
     visibility = ["//src/test/java/com/google/devtools/build/android/r8:__pkg__"],
     runtime_deps = [
         "//src/tools/android/java/com/google/devtools/build/android/desugar/dependencies",
@@ -51,10 +48,8 @@ java_library(
         "//third_party:auto_value",
         "//third_party:guava",
         "//third_party:jsr305",
-    ] + select({
-        "//external:has_androidsdk": ["//external:android/d8_jar_import"],
-        "//conditions:default": [],
-    }),
+        "@android_gmaven_r8//jar",
+    ],
 )
 
 java_library(
@@ -103,7 +98,6 @@ java_binary(
         "-Dcom.android.tools.r8.allowAllDesugaredInput",
         "-Dcom.android.tools.r8.noCfMarkerForDesugaredCode",
         "-Dcom.android.tools.r8.lambdaClassFieldsNotFinal",
-        "-Dcom.android.tools.r8.createSingletonsForStatelessLambdas",
     ],
     main_class = "com.google.devtools.build.android.r8.Desugar",
     visibility = ["//src/test/java/com/google/devtools/build/android/r8:__pkg__"],

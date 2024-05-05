@@ -25,7 +25,6 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.exec.RunfilesTreeUpdater;
 import com.google.devtools.build.lib.exec.SpawnStrategyRegistry;
-import com.google.devtools.build.lib.exec.TreeDeleter;
 import com.google.devtools.build.lib.exec.local.LocalEnvProvider;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeWorkspace;
@@ -33,23 +32,27 @@ import com.google.devtools.build.lib.runtime.Command;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.commands.events.CleanStartingEvent;
 import com.google.devtools.build.lib.sandbox.AsynchronousTreeDeleter;
+import com.google.devtools.build.lib.sandbox.CgroupsInfo;
 import com.google.devtools.build.lib.sandbox.LinuxSandboxUtil;
 import com.google.devtools.build.lib.sandbox.SandboxHelpers;
 import com.google.devtools.build.lib.sandbox.SandboxOptions;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.worker.SandboxedWorker.WorkerSandboxOptions;
-import com.google.devtools.build.lib.worker.WorkerPoolImpl.WorkerPoolConfig;
 import com.google.devtools.common.options.OptionsBase;
 import java.io.IOException;
 import javax.annotation.Nullable;
 
 /** A module that adds the WorkerActionContextProvider to the available action context providers. */
 public class WorkerModule extends BlazeModule {
+
+  private static final String STALE_TRASH = "_stale_trash";
   private CommandEnvironment env;
 
-  private WorkerFactory workerFactory;
-  private TreeDeleter treeDeleter;
-  @VisibleForTesting WorkerPoolImpl workerPool;
+  @VisibleForTesting WorkerFactory workerFactory;
+  private AsynchronousTreeDeleter treeDeleter;
+
+  WorkerPoolConfig config;
+  @VisibleForTesting WorkerPool workerPool;
   @Nullable private WorkerLifecycleManager workerLifecycleManager;
 
   @Override
@@ -110,12 +113,15 @@ public class WorkerModule extends BlazeModule {
     } else {
       workerSandboxOptions = null;
     }
-    Path trashBase = workerDir.getRelative("_moved_trash_dir");
+    Path trashBase = workerDir.getRelative(AsynchronousTreeDeleter.MOVED_TRASH_DIR);
     if (treeDeleter == null) {
       treeDeleter = new AsynchronousTreeDeleter(trashBase);
+      if (trashBase.exists()) {
+        removeStaleTrash(workerDir, trashBase);
+      }
     }
     WorkerFactory newWorkerFactory =
-        new WorkerFactory(workerDir, workerSandboxOptions, treeDeleter);
+        new WorkerFactory(workerDir, options, workerSandboxOptions, treeDeleter);
     if (!newWorkerFactory.equals(workerFactory)) {
       if (workerDir.exists()) {
         try {
@@ -154,10 +160,12 @@ public class WorkerModule extends BlazeModule {
 
     WorkerPoolConfig newConfig =
         new WorkerPoolConfig(
-            workerFactory, options.workerMaxInstances, options.workerMaxMultiplexInstances);
+            options.useNewWorkerPool,
+            options.workerMaxInstances,
+            options.workerMaxMultiplexInstances);
 
     // If the config changed compared to the last run, we have to create a new pool.
-    if (workerPool == null || !newConfig.equals(workerPool.getWorkerPoolConfig())) {
+    if (!newConfig.equals(config)) {
       shutdownPool(
           "Worker pool configuration has changed, restarting worker pool...",
           /* alwaysLog= */ true,
@@ -165,10 +173,19 @@ public class WorkerModule extends BlazeModule {
     }
 
     if (workerPool == null) {
-      workerPool = new WorkerPoolImpl(newConfig);
+      if (options.useNewWorkerPool) {
+        workerPool = new WorkerPoolImpl(workerFactory, newConfig);
+      } else {
+        workerPool = new WorkerPoolImplLegacy(workerFactory, newConfig);
+      }
+      config = newConfig;
       // If workerPool is restarted then we should recreate metrics.
       WorkerProcessMetricsCollector.instance().clear();
     }
+
+    // Override the flag value if we can't actually use cgroups so that we at least fallback to ps.
+    boolean useCgroupsOnLinux = options.useCgroupsOnLinux && CgroupsInfo.isSupported();
+    WorkerProcessMetricsCollector.instance().setUseCgroupsOnLinux(useCgroupsOnLinux);
 
     // Start collecting after a pool is defined
     workerLifecycleManager = new WorkerLifecycleManager(workerPool, options);
@@ -178,6 +195,28 @@ public class WorkerModule extends BlazeModule {
 
     // Reset the pool at the beginning of each build.
     workerPool.reset();
+  }
+
+  private void removeStaleTrash(Path workerDir, Path trashBase) {
+    try {
+      // The AsynchronousTreeDeleter relies on a counter for naming directories that will be
+      // moved out of the way before being deleted asynchronously.
+      // If there is trash on disk from a previous bazel server instance, the dirs will have
+      // names not synced with the counter, therefore we may run the risk of moving a directory
+      // in this server instance to a path of an existing directory. To solve this we rename
+      // the trash directory that was on disk, create a new empty trash directory and delete
+      // the old trash via the AsynchronousTreeDeleter. Before deletion the stale trash will be
+      // moved to a directory named `0` under MOVED_TRASH_DIR.
+      Path staleTrash = trashBase.getParentDirectory().getChild(STALE_TRASH);
+      trashBase.renameTo(staleTrash);
+      trashBase.createDirectory();
+      treeDeleter.deleteTree(staleTrash);
+    } catch (IOException e) {
+      env.getReporter()
+          .handle(
+              Event.error(
+                  String.format("Could not trash dir in '%s': %s", workerDir, e.getMessage())));
+    }
   }
 
   @Override
@@ -243,5 +282,9 @@ public class WorkerModule extends BlazeModule {
       this.workerFactory.setReporter(null);
     }
     WorkerMultiplexerManager.afterCommand();
+  }
+
+  public WorkerPoolConfig getWorkerPoolConfig() {
+    return config;
   }
 }

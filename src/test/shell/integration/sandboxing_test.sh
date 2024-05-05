@@ -29,6 +29,9 @@ disable_bzlmod
 function set_up() {
   add_to_bazelrc "build --spawn_strategy=sandboxed"
   add_to_bazelrc "build --genrule_strategy=sandboxed"
+
+  # Enabled in testenv.sh.tmpl, but not in Bazel by default.
+  sed -i.bak '/sandbox_tmpfs_path/d' "$bazelrc"
 }
 
 function tear_down() {
@@ -37,9 +40,7 @@ function tear_down() {
   rm -rf pkg
 }
 
-function do_sandbox_base_wiped_only_on_startup_test {
-  local extra_args=( "${@}" )
-
+function test_sandbox_base_keeps_dirs_with_sandbox_debug {
   mkdir pkg
   cat >pkg/BUILD <<EOF
 genrule(name = "pkg", outs = ["pkg.out"], cmd = "echo >\$@")
@@ -47,39 +48,14 @@ EOF
 
   local output_base="$(bazel info output_base)"
 
-  do_build() {
-    bazel build --sandbox_debug "${extra_args[@]}" //pkg
-  }
-
-  do_build >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
+  bazel build --sandbox_debug //pkg >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
   find "${output_base}" >>"${TEST_log}" 2>&1 || true
 
   local sandbox_dir="$(echo "${output_base}/sandbox"/*-sandbox)"
   [[ -d "${sandbox_dir}" ]] \
     || fail "${sandbox_dir} is missing; prematurely deleted?"
 
-  local garbage="${output_base}/sandbox/garbage"
-  mkdir -p "${garbage}/some/nested/contents"
-  do_build >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
-  expect_not_log "Deleting stale sandbox"
-  [[ -d "${garbage}" ]] \
-    || fail "Spurious contents deleted from sandbox base too early"
-
   bazel shutdown
-  do_build >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
-  expect_log "Deleting stale sandbox"
-  [[ ! -d "${garbage}" ]] \
-    || fail "sandbox base was not cleaned on restart"
-}
-
-function test_sandbox_base_wiped_only_on_startup_with_sync_deletions() {
-  do_sandbox_base_wiped_only_on_startup_test \
-    --experimental_sandbox_async_tree_delete_idle_threads=0
-}
-
-function test_sandbox_base_wiped_only_on_startup_with_async_deletions() {
-  do_sandbox_base_wiped_only_on_startup_test \
-    --experimental_sandbox_async_tree_delete_idle_threads=HOST_CPUS
 }
 
 function do_succeed_when_executor_not_initialized_test() {
@@ -216,22 +192,26 @@ EOF
 
   local output_base="$(bazel info output_base)"
 
-  do_build() {
-    bazel build //pkg
-  }
-
-  do_build >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
+  bazel build //pkg >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
   find "${output_base}" >>"${TEST_log}" 2>&1 || true
 
   local sandbox_base="${output_base}/sandbox"
-  [[ ! -d "${sandbox_base}" ]] \
-    || fail "${sandbox_base} left behind unnecessarily"
+  [[ -d "${sandbox_base}/sandbox_stash" ]] \
+    || fail "${sandbox_base}/sandbox_stash directory not present"
+  [[ -d "${sandbox_base}/_moved_trash_dir" ]] \
+    || fail "${sandbox_base}/_moved_trash_dir directory not present"
 
-  # Restart Bazel and check we don't print spurious "Deleting stale sandbox"
-  # warnings.
+  [[ $(ls -1 ${sandbox_base} | wc -l | tr -d ' ') == 2 ]] \
+    || fail "${sandbox_base} contains stale dirs"
+
   bazel shutdown
-  do_build >"${TEST_log}" 2>&1 || fail "Expected build to succeed"
-  expect_not_log "Deleting stale sandbox"
+  [[ -d "${sandbox_base}/sandbox_stash" ]] \
+    || fail "${sandbox_base}/_moved_trash_dir directory not present"
+  bazel build
+  [[ ! -d "${sandbox_base}/sandbox_stash" ]] \
+    || fail "${sandbox_base}/_moved_trash_dir directory not present"
+  [[ $(ls -1 ${sandbox_base} | wc -l | tr -d ' ') == 1 ]] \
+    || fail "${sandbox_base} contains stale dirs"
 }
 
 function test_sandbox_old_contents_not_reused_in_consecutive_builds() {
@@ -716,7 +696,6 @@ EOF
 }
 
 function test_read_non_hermetic_tmp {
-  sed -i.bak '/sandbox_tmpfs_path/d' "$bazelrc"
   temp_dir=$(mktemp -d /tmp/test.XXXXXX)
   trap 'rm -rf ${temp_dir}' EXIT
 
@@ -771,7 +750,6 @@ function test_read_hermetic_tmp_user_override {
     echo "Skipping test: --incompatible_sandbox_hermetic_tmp is only supported in Linux" 1>&2
     return 0
   fi
-  sed -i.bak '/sandbox_tmpfs_path/d' "$bazelrc"
 
   temp_dir=$(mktemp -d /tmp/test.XXXXXX)
   trap 'rm -rf ${temp_dir}' EXIT
@@ -795,7 +773,6 @@ EOF
 }
 
 function test_write_non_hermetic_tmp {
-  sed -i.bak '/sandbox_tmpfs_path/d' "$bazelrc"
   temp_dir=$(mktemp -d /tmp/test.XXXXXX)
   trap 'rm -rf ${temp_dir}' EXIT
 
@@ -851,7 +828,6 @@ function test_write_hermetic_tmp_user_override {
     echo "Skipping test: --incompatible_sandbox_hermetic_tmp is only supported in Linux" 1>&2
     return 0
   fi
-  sed -i.bak '/sandbox_tmpfs_path/d' "$bazelrc"
 
   temp_dir=$(mktemp -d /tmp/test.XXXXXX)
   trap 'rm -rf ${temp_dir}' EXIT
@@ -899,7 +875,7 @@ EOF
   bazel build --reuse_sandbox_directories //pkg:a >"${TEST_log}" 2>&1 \
     || fail "Expected build to succeed"
 
-  local sandbox_stash="${output_base}/sandbox_stash"
+  local sandbox_stash="${output_base}/sandbox/sandbox_stash"
   [[ -d "${sandbox_stash}" ]] \
     || fail "${sandbox_stash} not present"
   [[ -d "${sandbox_stash}/Genrule/3" ]] \
@@ -923,7 +899,7 @@ EOF
     || fail "Expected build to succeed"
 }
 
-function test_sandbox_reuse_stashes_sandbox_with_changing_hermetic_tmp() {
+function test_sandbox_reuse_stashes_sandbox_with_changing_hermetic_tmp_and_clean() {
   mkdir pkg
   cat >pkg/BUILD <<'EOF'
 genrule(
@@ -945,11 +921,10 @@ EOF
   local execroot="$(bazel info execution_root)"
   local execroot_reldir="${execroot#$output_base}"
 
-  bazel build --reuse_sandbox_directories \
-    //pkg:a >"${TEST_log}" 2>&1 \
+  bazel build //pkg:a >"${TEST_log}" 2>&1 \
     || fail "Expected build to succeed"
 
-  local sandbox_stash="${output_base}/sandbox_stash"
+  local sandbox_stash="${output_base}/sandbox/sandbox_stash"
   [[ -d "${sandbox_stash}" ]] \
     || fail "${sandbox_stash} not present"
   [[ -d "${sandbox_stash}/Genrule/3" ]] \
@@ -957,8 +932,7 @@ EOF
   [[ -L "${sandbox_stash}/Genrule/3/$execroot_reldir/pkg/a.txt" ]] \
     || fail "${sandbox_stash} did not have a link to a.txt"
 
-  bazel build --reuse_sandbox_directories --incompatible_sandbox_hermetic_tmp \
-    //pkg:b >"${TEST_log}" 2>&1 \
+  bazel build //pkg:b >"${TEST_log}" 2>&1 \
     || fail "Expected build to succeed"
   ls -R "${sandbox_stash}/Genrule/"
   [[ ! -L "${sandbox_stash}/Genrule/6/$execroot_reldir/pkg/a.txt" ]] \
@@ -970,46 +944,148 @@ EOF
   [[ ! -d "${sandbox_stash}" ]] \
     || fail "${sandbox_stash} present after clean"
 
-  bazel build --reuse_sandbox_directories --incompatible_sandbox_hermetic_tmp \
-    //pkg:a >"${TEST_log}" 2>&1 \
+  bazel build //pkg:a >"${TEST_log}" 2>&1 \
+    || fail "Expected build to succeed"
+
+  bazel shutdown
+}
+
+function test_runfiles_from_tests_get_reused_and_tmp_clean() {
+  mkdir pkg
+  touch pkg/file.txt
+  cat >pkg/reusing_test.bzl <<'EOF'
+def _reused_runfiles_test_impl(ctx):
+    output = ctx.actions.declare_file(ctx.label.name + ".sh")
+
+    runfiles = ctx.runfiles(files = ctx.files.file)
+    runfiles = runfiles.merge(runfiles)
+
+    test_code = """
+    #!/bin/bash
+    dir_inode_number=$(ls -di $TEST_SRCDIR | cut -f1 -d" ")
+    echo "The directory inode is $dir_inode_number"
+    file_inode_number=$(ls -i $TEST_SRCDIR/_main/pkg/file.txt | cut -f1 -d" ")
+    echo "The file inode is $file_inode_number"
+    """
+
+    ctx.actions.run_shell(
+        outputs = [output],
+        mnemonic = "myexample",
+        command = """
+        output_path={}
+        echo '{}' > $output_path
+        chmod 777 $output_path
+        """.format(output.path, test_code)
+    )
+
+    return [DefaultInfo(executable = output, runfiles = runfiles)]
+
+reused_runfiles_test = rule(
+    implementation = _reused_runfiles_test_impl,
+    test = True,
+    attrs = {
+        "file" : attr.label(allow_files=True,default="//pkg:file.txt"),
+    }
+)
+EOF
+
+  cat >pkg/BUILD <<'EOF'
+load(":reusing_test.bzl", "reused_runfiles_test")
+reused_runfiles_test(
+    name = "a",
+)
+reused_runfiles_test(
+    name = "b",
+)
+EOF
+
+  test_output="reuse_test_output.txt"
+  local out_directory
+  if is_bazel; then
+    bazel coverage --test_output=streamed \
+      --experimental_split_coverage_postprocessing=1 \
+      --experimental_fetch_all_coverage_outputs //pkg:a > ${test_output} \
+      || fail "Expected build to succeed"
+    out_directory="bazel-out"
+  else
+    bazel test --test_output=streamed //pkg:a > ${test_output} \
+      || fail "Expected build to succeed"
+    out_directory="blaze-out"
+  fi
+  dir_inode_a=$(awk '/The directory inode is/ {print $5}' ${test_output})
+  file_inode_a=$(awk '/The file inode is/ {print $5}' ${test_output})
+
+  local output_base="$(bazel info output_base)"
+  local stashed_test_dir="${output_base}/sandbox/sandbox_stash/TestRunner/6/execroot/$WORKSPACE_NAME"
+  [[ -d "${stashed_test_dir}/$out_directory" ]] \
+    || fail "${stashed_test_dir}/$out_directory directory not present"
+  [[ -d "${stashed_test_dir}/_tmp" ]] \
+      && fail "${stashed_test_dir}/_tmp directory is present"
+
+  if is_bazel; then
+    bazel coverage --test_output=streamed //pkg:b \
+      --experimental_split_coverage_postprocessing=1 \
+      --experimental_fetch_all_coverage_outputs > ${test_output} \
+      || fail "Expected build to succeed"
+  else
+    bazel test --test_output=streamed //pkg:b > ${test_output} \
+      || fail "Expected build to succeed"
+  fi
+  dir_inode_b=$(awk '/The directory inode is/ {print $5}' ${test_output})
+  file_inode_b=$(awk '/The file inode is/ {print $5}' ${test_output})
+
+  [[ ${dir_inode_a} == ${dir_inode_b} ]] \
+    || fail "Test //pkg:b didn't reuse runfiles directory"
+  [[ ${file_inode_a} == ${file_inode_b} ]] \
+    || fail "Test //pkg:b didn't reuse runfiles file"
+}
+
+function test_changed_async_deleter_filesystem() {
+  if [ ! -d /dev/shm ]; then
+    return
+  fi
+
+  mkdir pkg
+  cat >pkg/BUILD <<'EOF'
+cc_library(
+  name = "a",
+  srcs = [ "a.cc" ],
+)
+EOF
+  touch pkg/a.cc
+
+  bazel build //pkg:a \
+    || fail "Expected build to succeed"
+  bazel clean
+  bazel build --sandbox_base=/dev/shm //pkg:a \
     || fail "Expected build to succeed"
 }
 
-function test_sandbox_reuse_clean() {
+function test_bad_state_linux_sandboxing() {
   mkdir pkg
-  cat >pkg/BUILD <<'EOF'
-genrule(
-  name = "a",
-  srcs = [ "a.txt" ],
-  outs = [ "aout.txt" ],
-  cmd = "wc $(location :a.txt) > $@",
-)
-EOF
-  echo A > pkg/a.txt
-  local output_base="$(bazel info output_base)"
 
-  bazel build --reuse_sandbox_directories //pkg:a >"${TEST_log}" 2>&1 \
+  # This test is meant to catch a bad state being left over by an unfinished
+  # linux-sandboxing initialization. Since it's difficult to replicate the same
+  # conditions that end up in that state, this instead runs a null build
+  # where linux-sandboxing is unsupported by passing -1 grace seconds.
+  # Then we create inaccessibleHelperFile/Dir (the bad state) artificially and
+  # run a null build again making sure there is no crash.
+  bazel build --local_termination_grace_seconds=-1 \
     || fail "Expected build to succeed"
+  file_path="$(bazel info output_base)/sandbox/inaccessibleHelperFile"
+  dir_path="$(bazel info output_base)/sandbox/inaccessibleHelperDir"
 
-  local sandbox_stash="${output_base}/sandbox_stash"
-  [[ -d "${sandbox_stash}" ]] \
-    || fail "${sandbox_stash} not present"
-  [[ -d "${sandbox_stash}/Genrule/3" ]] \
-    || fail "${sandbox_stash} did not stash anything"
+  touch $file_path
+  mkdir $dir_path
+  chmod 000 $file_path
+  chmod 000 $dir_path
 
-  bazel clean --reuse_sandbox_directories
-  [[ ! -d "${sandbox_stash}" ]] \
-    || fail "${sandbox_stash} present after clean"
-
-  bazel build --experimental_sandbox_async_tree_delete_idle_threads=2 \
-    --reuse_sandbox_directories //pkg:a >"${TEST_log}" 2>&1 \
+  bazel build --local_termination_grace_seconds=-1 \
     || fail "Expected build to succeed"
-  [[ -d "${sandbox_stash}/Genrule/6" ]] \
-    || fail "${sandbox_stash} did not stash anything"
+}
 
-  bazel clean
-  [[ ! -d "${sandbox_stash}" ]] \
-    || fail "${sandbox_stash} present after non-reusing clean"
+function is_bazel() {
+  [ $TEST_WORKSPACE == "_main" ]
 }
 
 run_suite "sandboxing"

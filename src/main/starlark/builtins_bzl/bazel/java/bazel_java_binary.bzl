@@ -13,9 +13,9 @@
 # limitations under the License.
 
 load(":common/cc/cc_helper.bzl", "cc_helper")
-load(":common/cc/semantics.bzl", cc_semantics = "semantics")
 load(":common/java/android_lint.bzl", "android_lint_subrule")
 load(":common/java/java_binary.bzl", "BASE_TEST_ATTRIBUTES", "BASIC_JAVA_BINARY_ATTRIBUTES", "basic_java_binary")
+load(":common/java/java_binary_deploy_jar.bzl", "create_deploy_archives")
 load(":common/java/java_helper.bzl", "helper")
 load(":common/java/java_info.bzl", "JavaInfo")
 load(":common/java/java_semantics.bzl", "semantics")
@@ -96,6 +96,18 @@ def _bazel_base_binary_impl(ctx, is_test_rule_class):
         files = default_info.files,
         runfiles = runfiles,
         executable = default_info.executable,
+    )
+
+    info = providers.pop("InternalDeployJarInfo")
+    create_deploy_archives(
+        ctx,
+        info.java_attrs,
+        launcher_info,
+        main_class,
+        coverage_main_class,
+        info.strip_as_default,
+        add_exports = info.add_exports,
+        add_opens = info.add_opens,
     )
 
     return providers.values()
@@ -251,8 +263,7 @@ def _create_windows_exe_launcher(ctx, java_executable, classpath, main_class, jv
     launch_info.add(main_class, format = "java_start_class=%s")
     launch_info.add_joined(classpath, map_each = _short_path, join_with = ";", format_joined = "classpath=%s", omit_if_empty = False)
     launch_info.add_joined(jvm_flags_for_launcher, join_with = "\t", format_joined = "jvm_flags=%s", omit_if_empty = False)
-    jar_bin_path = semantics.find_java_runtime_toolchain(ctx).java_home + "/bin/jar.exe"
-    launch_info.add(jar_bin_path, format = "jar_bin_path=%s")
+    launch_info.add(semantics.find_java_runtime_toolchain(ctx).java_home_runfiles_path, format = "jar_bin_path=%s/bin/jar.exe")
 
     # TODO(b/295221112): Change to use the "launcher" attribute (only windows use a fixed _launcher attribute)
     launcher_artifact = ctx.executable._launcher
@@ -270,9 +281,6 @@ def _short_path(file):
 
 def _compute_test_support(use_testrunner):
     return Label(semantics.JAVA_TEST_RUNNER_LABEL) if use_testrunner else None
-
-def _compute_launcher_attr(launcher):
-    return launcher
 
 def _make_binary_rule(implementation, *, doc, attrs, executable = False, test = False, initializer = None):
     return rule(
@@ -292,6 +300,8 @@ def _make_binary_rule(implementation, *, doc, attrs, executable = False, test = 
             "classjar": "%{name}.jar",
             "sourcejar": "%{name}-src.jar",
             "deploysrcjar": "%{name}_deploy-src.jar",
+            "deployjar": "%{name}_deploy.jar",
+            "unstrippeddeployjar": "%{name}_deploy.jar.unstripped",
         },
         exec_groups = {
             "cpp_link": exec_group(toolchains = cc_helper.use_cpp_toolchain()),
@@ -325,7 +335,6 @@ logic as the Java package of source files. For example, a source file at
             cfg = "exec",
             executable = True,
         ),
-        "_cc_toolchain": attr.label(default = "@" + cc_semantics.get_repo() + "//tools/cpp:optional_current_cc_toolchain"),
     },
 )
 

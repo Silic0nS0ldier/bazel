@@ -115,6 +115,7 @@ class TestBase(absltest.TestCase):
     self._test_cwd = tempfile.mkdtemp(dir=self._tests_root)
     self._test_bazelrc = os.path.join(self._temp, 'test_bazelrc')
     with open(self._test_bazelrc, 'wt') as f:
+      f.write('common --nolegacy_external_runfiles\n')
       shared_repo_home = os.environ.get('TEST_REPOSITORY_HOME')
       if shared_repo_home and os.path.exists(shared_repo_home):
         for repo in self._SHARED_REPOS:
@@ -140,6 +141,9 @@ class TestBase(absltest.TestCase):
         # Prefer ipv6 network on macOS
         f.write('startup --host_jvm_args=-Djava.net.preferIPv6Addresses=true\n')
         f.write('build --jvmopt=-Djava.net.preferIPv6Addresses\n')
+    # An empty MODULE.bazel and a corresponding MODULE.bazel.lock will prevent
+    # tests from accessing BCR
+    self.ScratchFile('MODULE.bazel')
     self.CopyFile(
         self.Rlocation('io_bazel/src/test/tools/bzlmod/MODULE.bazel.lock'),
         'MODULE.bazel.lock',
@@ -611,6 +615,14 @@ class TestBase(absltest.TestCase):
     # that by checking for TEST_TMPDIR.
     env['TEST_TMPDIR'] = TestBase.GetEnv('TEST_TMPDIR')
     env['TMP'] = self._temp
+
+    if TestBase.IsDarwin():
+      # Make sure rules_jvm_external works in ipv6 only environment
+      # https://github.com/bazelbuild/rules_jvm_external?tab=readme-ov-file#ipv6-support
+      env['COURSIER_OPTS'] = TestBase.GetEnv(
+          'COURSIER_OPTS', '-Djava.net.preferIPv6Addresses=true'
+      )
+
     if env_remove:
       for e in env_remove:
         if e in env:

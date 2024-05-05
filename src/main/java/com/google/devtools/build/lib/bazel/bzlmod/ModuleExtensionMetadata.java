@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.bazel.bzlmod;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static java.util.stream.Collectors.joining;
 
 import com.google.auto.value.AutoValue;
 import com.google.common.base.Preconditions;
@@ -54,6 +53,14 @@ import net.starlark.java.syntax.Location;
 @AutoValue
 @GenerateTypeAdapter
 public abstract class ModuleExtensionMetadata implements StarlarkValue {
+
+  static final ModuleExtensionMetadata REPRODUCIBLE =
+      create(
+          /* explicitRootModuleDirectDeps= */ null,
+          /* explicitRootModuleDirectDevDeps= */ null,
+          UseAllRepos.NO,
+          /* reproducible= */ true);
+
   @Nullable
   abstract ImmutableSet<String> getExplicitRootModuleDirectDeps();
 
@@ -62,10 +69,13 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
 
   abstract UseAllRepos getUseAllRepos();
 
+  abstract boolean getReproducible();
+
   private static ModuleExtensionMetadata create(
       @Nullable Set<String> explicitRootModuleDirectDeps,
       @Nullable Set<String> explicitRootModuleDirectDevDeps,
-      UseAllRepos useAllRepos) {
+      UseAllRepos useAllRepos,
+      boolean reproducible) {
     return new AutoValue_ModuleExtensionMetadata(
         explicitRootModuleDirectDeps != null
             ? ImmutableSet.copyOf(explicitRootModuleDirectDeps)
@@ -73,29 +83,30 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
         explicitRootModuleDirectDevDeps != null
             ? ImmutableSet.copyOf(explicitRootModuleDirectDevDeps)
             : null,
-        useAllRepos);
+        useAllRepos,
+        reproducible);
   }
 
   static ModuleExtensionMetadata create(
       Object rootModuleDirectDepsUnchecked,
       Object rootModuleDirectDevDepsUnchecked,
-      ModuleExtensionId extensionId)
+      boolean reproducible)
       throws EvalException {
     if (rootModuleDirectDepsUnchecked == Starlark.NONE
         && rootModuleDirectDevDepsUnchecked == Starlark.NONE) {
-      return create(null, null, UseAllRepos.NO);
+      return create(null, null, UseAllRepos.NO, reproducible);
     }
 
     // When root_module_direct_deps = "all", accept both root_module_direct_dev_deps = None and
     // root_module_direct_dev_deps = [], but not root_module_direct_dev_deps = ["some_repo"].
     if (rootModuleDirectDepsUnchecked.equals("all")
         && rootModuleDirectDevDepsUnchecked.equals(StarlarkList.immutableOf())) {
-      return create(null, null, UseAllRepos.REGULAR);
+      return create(null, null, UseAllRepos.REGULAR, reproducible);
     }
 
     if (rootModuleDirectDevDepsUnchecked.equals("all")
         && rootModuleDirectDepsUnchecked.equals(StarlarkList.immutableOf())) {
-      return create(null, null, UseAllRepos.DEV);
+      return create(null, null, UseAllRepos.DEV, reproducible);
     }
 
     if (rootModuleDirectDepsUnchecked.equals("all")
@@ -153,17 +164,16 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
       }
     }
 
-    return create(explicitRootModuleDirectDeps, explicitRootModuleDirectDevDeps, UseAllRepos.NO);
+    return create(
+        explicitRootModuleDirectDeps,
+        explicitRootModuleDirectDevDeps,
+        UseAllRepos.NO,
+        reproducible);
   }
 
-  public void evaluate(
-      Collection<ModuleExtensionUsage> usages, Set<String> allRepos, EventHandler handler)
+  public Optional<RootModuleFileFixup> generateFixup(
+      Collection<ModuleExtensionUsage> usages, Set<String> allRepos, EventHandler eventHandler)
       throws EvalException {
-    generateFixupMessage(usages, allRepos).ifPresent(handler::handle);
-  }
-
-  Optional<Event> generateFixupMessage(
-      Collection<ModuleExtensionUsage> usages, Set<String> allRepos) throws EvalException {
     var rootUsages =
         usages.stream()
             .filter(usage -> usage.getUsingModule().equals(ModuleKey.ROOT))
@@ -195,15 +205,20 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
               + "usages with dev_dependency = True");
     }
 
-    return generateFixupMessage(
-        rootUsage, allRepos, rootModuleDirectDeps.get(), rootModuleDirectDevDeps.get());
+    return generateFixup(
+        rootUsage,
+        allRepos,
+        rootModuleDirectDeps.get(),
+        rootModuleDirectDevDeps.get(),
+        eventHandler);
   }
 
-  private static Optional<Event> generateFixupMessage(
+  private static Optional<RootModuleFileFixup> generateFixup(
       ModuleExtensionUsage rootUsage,
       Set<String> allRepos,
       Set<String> expectedImports,
-      Set<String> expectedDevImports) {
+      Set<String> expectedDevImports,
+      EventHandler eventHandler) {
     var actualDevImports = ImmutableSet.copyOf(rootUsage.getDevImports());
     var actualImports =
         rootUsage.getImports().values().stream()
@@ -291,7 +306,9 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
               String.join(", ", indirectDepImports));
     }
 
-    var fixupCommand =
+    message += "Fix the use_repo calls by running 'bazel mod tidy'.";
+
+    var buildozerCommands =
         Stream.of(
                 makeUseRepoCommand(
                     "use_repo_add",
@@ -322,17 +339,10 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
                     extensionName,
                     rootUsage.getIsolationKey()))
             .flatMap(Optional::stream)
-            .collect(joining(" ", "buildozer ", " //MODULE.bazel:all"));
+            .collect(toImmutableList());
 
-    return Optional.of(
-        Event.warn(
-            location,
-            message
-                + String.format(
-                    "%s ** You can use the following buildozer command to fix these"
-                        + " issues:%s\n\n"
-                        + "%s",
-                    "\033[35m\033[1m", "\033[0m", fixupCommand)));
+    eventHandler.handle(Event.warn(location, message));
+    return Optional.of(new RootModuleFileFixup(buildozerCommands, rootUsage));
   }
 
   private static Optional<String> makeUseRepoCommand(
@@ -342,7 +352,6 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
       String extensionBzlFile,
       String extensionName,
       Optional<ModuleExtensionId.IsolationKey> isolationKey) {
-
     if (repos.isEmpty()) {
       return Optional.empty();
     }
@@ -359,7 +368,7 @@ public abstract class ModuleExtensionMetadata implements StarlarkValue {
       commandParts.add(extensionName);
     }
     commandParts.addAll(repos);
-    return Optional.of(commandParts.stream().collect(joining(" ", "'", "'")));
+    return Optional.of(String.join(" ", commandParts));
   }
 
   private Optional<ImmutableSet<String>> getRootModuleDirectDeps(Set<String> allRepos)

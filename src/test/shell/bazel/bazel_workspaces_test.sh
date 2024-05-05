@@ -38,6 +38,7 @@ genrule(
    outs=["out.txt"],
    cmd="echo Result > $(location out.txt)"
 )
+filegroup(name="noop")
 EOF
   cat >> repos.bzl <<EOF
 def _executeMe(repository_ctx):
@@ -59,6 +60,8 @@ EOF
 }
 
 function build_and_process_log() {
+  # build the no-op target first to get irrelevant workspace events out of the way
+  bazel build :noop 2>&1 >> $TEST_log || fail "could not build //:noop"
   bazel build //:test --experimental_workspace_rules_log_file=output 2>&1 >> $TEST_log || fail "could not build //:test"
   ${BAZEL_RUNFILES}/src/tools/workspacelog/parser --log_path=output > output.log.txt "$@" || fail "error parsing output"
 }
@@ -95,54 +98,6 @@ function test_execute() {
   build_and_process_log
   ensure_contains_exactly "location: .*repos.bzl:2:25" 0
 }
-
-# The workspace is set up so that the function is interrupted and re-executed.
-# The log should contain both instances.
-function test_reexecute() {
-  create_new_workspace
-  cat > BUILD <<'EOF'
-genrule(
-   name="test",
-   srcs=["@repo//:t.txt"],
-   outs=["out.txt"],
-   cmd="echo Result > $(location out.txt)"
-)
-EOF
-  cat >> repos.bzl <<EOF
-def _executeMe(repository_ctx):
-  repository_ctx.execute(["echo", "testing!"])
-  build_contents = "package(default_visibility = ['//visibility:public'])\n\n"
-  build_contents += "exports_files([\"t.txt\"])\n"
-  repository_ctx.file("BUILD", build_contents, False)
-  repository_ctx.symlink(Label("@another//:dummy.txt"), "t.txt")
-
-ex_repo = repository_rule(
-  implementation = _executeMe,
-  local = True,
-)
-
-def _another(repository_ctx):
-  build_contents = "exports_files([\"dummy.txt\"])\n"
-  repository_ctx.file("BUILD", build_contents, False)
-  repository_ctx.file("dummy.txt", "dummy\n", False)
-
-a_repo = repository_rule(
-  implementation = _another,
-  local = True,
-)
-EOF
-  cat >> WORKSPACE <<EOF
-load("//:repos.bzl", "ex_repo")
-load("//:repos.bzl", "a_repo")
-ex_repo(name = "repo")
-a_repo(name = "another")
-EOF
-
-  build_and_process_log
-
-  ensure_contains_atleast "location: .*repos.bzl:2:" 2
-}
-
 
 # Ensure details of the specific functions are present
 function test_execute2() {

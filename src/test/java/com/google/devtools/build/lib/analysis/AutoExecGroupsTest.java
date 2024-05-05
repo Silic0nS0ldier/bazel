@@ -36,7 +36,6 @@ import com.google.devtools.build.lib.packages.ExecGroup;
 import com.google.devtools.build.lib.packages.util.Crosstool.CcToolchainConfig;
 import com.google.devtools.build.lib.packages.util.MockCcSupport;
 import com.google.devtools.build.lib.rules.cpp.CppCompileAction;
-import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import com.google.devtools.build.lib.rules.cpp.CppRuleClasses;
 import com.google.devtools.build.lib.rules.java.JavaGenJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
@@ -58,90 +57,126 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
    * baz_toolchain -> exec_compatible_with platform_2; toolchain_type_2 -> bar_toolchain ->
    * exec_compatible_with platform_2
    */
-  @Before
   public void createToolchainsAndPlatforms() throws Exception {
-    scratch.file(
+    scratch.overwriteFile(
         "rule/test_toolchain.bzl",
-        "def _impl(ctx):",
-        "    return [platform_common.ToolchainInfo(",
-        "      tool = ctx.executable._tool,",
-        "      files_to_run = ctx.attr._tool[DefaultInfo].files_to_run,",
-        "    )]",
-        "test_toolchain = rule(",
-        "    implementation = _impl,",
-        "    attrs = {",
-        "       '_tool': attr.label(default='//toolchain:b_tool', executable=True, cfg='exec'),",
-        "    },",
-        ")");
-    scratch.file(
-        "rule/BUILD",
-        "exports_files(['test_toolchain/bzl'])",
-        "toolchain_type(name = 'toolchain_type_1')",
-        "toolchain_type(name = 'toolchain_type_2')",
-        "java_runtime(",
-        "    name = 'jvm-k8',",
-        "    srcs = [",
-        "        'k8/a', ",
-        "        'k8/b',",
-        "    ], ",
-        "    java_home = 'k8',",
-        ")");
-    scratch.file(
-        "toolchain/BUILD",
-        "load('//rule:test_toolchain.bzl', 'test_toolchain')",
-        "genrule(name = 'a_tool', outs = ['atool'], cmd = '', executable = True)",
-        "genrule(name = 'b_tool', outs = ['btool'], cmd = '', executable = True)",
-        "test_toolchain(",
-        "    name = 'foo',",
-        ")",
-        "toolchain(",
-        "    name = 'foo_toolchain',",
-        "    toolchain_type = '//rule:toolchain_type_1',",
-        "    target_compatible_with = ['//platforms:constraint_1'],",
-        "    exec_compatible_with = ['//platforms:constraint_1'],",
-        "    toolchain = ':foo',",
-        ")",
-        "toolchain(",
-        "    name = 'baz_toolchain',",
-        "    toolchain_type = '//rule:toolchain_type_1',",
-        "    target_compatible_with = ['//platforms:constraint_1'],",
-        "    exec_compatible_with = ['//platforms:constraint_2'],",
-        "    toolchain = ':foo',",
-        ")",
-        "test_toolchain(",
-        "    name = 'bar',",
-        ")",
-        "toolchain(",
-        "    name = 'bar_toolchain',",
-        "    toolchain_type = '//rule:toolchain_type_2',",
-        "    target_compatible_with = ['//platforms:constraint_1'],",
-        "    exec_compatible_with = ['//platforms:constraint_2'],",
-        "    toolchain = ':bar',",
-        ")");
+        """
+        def _impl(ctx):
+            return [platform_common.ToolchainInfo(
+                tool = ctx.executable._tool,
+                files_to_run = ctx.attr._tool[DefaultInfo].files_to_run,
+            )]
 
-    scratch.file(
+        test_toolchain = rule(
+            implementation = _impl,
+            attrs = {
+                "_tool": attr.label(
+                    default = "//toolchain:b_tool",
+                    executable = True,
+                    cfg = "exec",
+                ),
+            },
+        )
+        """);
+    scratch.overwriteFile(
+        "rule/BUILD",
+        """
+        exports_files(["test_toolchain/bzl"])
+
+        toolchain_type(name = "toolchain_type_1")
+
+        toolchain_type(name = "toolchain_type_2")
+
+        java_runtime(
+            name = "jvm-k8",
+            srcs = [
+                "k8/a",
+                "k8/b",
+            ],
+            java_home = "k8",
+        )
+        """);
+    scratch.overwriteFile(
+        "toolchain/BUILD",
+        """
+        load("//rule:test_toolchain.bzl", "test_toolchain")
+
+        genrule(
+            name = "a_tool",
+            outs = ["atool"],
+            cmd = "",
+            executable = True,
+        )
+
+        genrule(
+            name = "b_tool",
+            outs = ["btool"],
+            cmd = "",
+            executable = True,
+        )
+
+        test_toolchain(
+            name = "foo",
+        )
+
+        toolchain(
+            name = "foo_toolchain",
+            exec_compatible_with = ["//platforms:constraint_1"],
+            target_compatible_with = ["//platforms:constraint_1"],
+            toolchain = ":foo",
+            toolchain_type = "//rule:toolchain_type_1",
+        )
+
+        toolchain(
+            name = "baz_toolchain",
+            exec_compatible_with = ["//platforms:constraint_2"],
+            target_compatible_with = ["//platforms:constraint_1"],
+            toolchain = ":foo",
+            toolchain_type = "//rule:toolchain_type_1",
+        )
+
+        test_toolchain(
+            name = "bar",
+        )
+
+        toolchain(
+            name = "bar_toolchain",
+            exec_compatible_with = ["//platforms:constraint_2"],
+            target_compatible_with = ["//platforms:constraint_1"],
+            toolchain = ":bar",
+            toolchain_type = "//rule:toolchain_type_2",
+        )
+        """);
+
+    scratch.overwriteFile(
         "platforms/BUILD",
-        "constraint_setting(name = 'setting')",
-        "constraint_value(",
-        "    name = 'constraint_1',",
-        "    constraint_setting = ':setting',",
-        ")",
-        "constraint_value(",
-        "    name = 'constraint_2',",
-        "    constraint_setting = ':setting',",
-        ")",
-        "platform(",
-        "    name = 'platform_1',",
-        "    constraint_values = [':constraint_1'],",
-        ")",
-        "platform(",
-        "    name = 'platform_2',",
-        "    constraint_values = [':constraint_2'],",
-        "    exec_properties = {",
-        "        'watermelon.ripeness': 'unripe',",
-        "        'watermelon.color': 'red',",
-        "    },",
-        ")");
+        """
+        constraint_setting(name = "setting")
+
+        constraint_value(
+            name = "constraint_1",
+            constraint_setting = ":setting",
+        )
+
+        constraint_value(
+            name = "constraint_2",
+            constraint_setting = ":setting",
+        )
+
+        platform(
+            name = "platform_1",
+            constraint_values = [":constraint_1"],
+        )
+
+        platform(
+            name = "platform_2",
+            constraint_values = [":constraint_2"],
+            exec_properties = {
+                "watermelon.ripeness": "unripe",
+                "watermelon.color": "red",
+            },
+        )
+        """);
 
     getAnalysisMock()
         .ccSupport()
@@ -160,6 +195,8 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
 
   @Override
   public void useConfiguration(String... args) throws Exception {
+    // These need to be defined before the configuration is parsed.
+    createToolchainsAndPlatforms();
     String[] flags = {
       "--extra_toolchains=//toolchain:foo_toolchain,//toolchain:bar_toolchain,//toolchain:baz_toolchain",
       "--platforms=//platforms:platform_1",
@@ -212,8 +249,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
   }
 
   @Test
@@ -460,6 +500,23 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   }
 
   @Test
+  public void toolWithFilesToRunExecutable_noToolchains_noError() throws Exception {
+    createCustomRule(
+        /* action= */ "ctx.actions.run",
+        /* actionParameters= */ " executable ="
+            + " ctx.attr._nonexecutable_tool[DefaultInfo].files_to_run.executable,",
+        /* extraAttributes= */ "",
+        /* toolchains= */ "[]",
+        /* execGroups= */ "",
+        /* execCompatibleWith= */ "");
+    useConfiguration("--incompatible_auto_exec_groups");
+
+    getConfiguredTarget("//test:custom_rule_name");
+
+    assertNoEvents();
+  }
+
+  @Test
   public void toolInExecutableUnidentified_noToolchainParameter_reportsError() throws Exception {
     createCustomRule(
         /* action= */ "ctx.actions.run",
@@ -613,25 +670,31 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   public void execGroupSetOnAction_noToolchainParameter_noError() throws Exception {
     scratch.file(
         "test/defs.bzl",
-        "def _impl(ctx):",
-        "  output_jar = ctx.actions.declare_file('test_' + ctx.label.name + '.jar')",
-        "  ctx.actions.run(",
-        "    outputs = [output_jar],",
-        "    executable = ctx.toolchains['//rule:toolchain_type_2'].tool,",
-        "    exec_group = 'custom_exec_group',",
-        "  )",
-        "  return []",
-        "custom_rule = rule(",
-        "  implementation = _impl,",
-        "  exec_groups = { ",
-        "    'custom_exec_group': exec_group(toolchains = ['//rule:toolchain_type_2']),",
-        "  },",
-        "  toolchains = ['//rule:toolchain_type_2'],",
-        ")");
+        """
+        def _impl(ctx):
+            output_jar = ctx.actions.declare_file("test_" + ctx.label.name + ".jar")
+            ctx.actions.run(
+                outputs = [output_jar],
+                executable = ctx.toolchains["//rule:toolchain_type_2"].tool,
+                exec_group = "custom_exec_group",
+            )
+            return []
+
+        custom_rule = rule(
+            implementation = _impl,
+            exec_groups = {
+                "custom_exec_group": exec_group(toolchains = ["//rule:toolchain_type_2"]),
+            },
+            toolchains = ["//rule:toolchain_type_2"],
+        )
+        """);
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     reporter.removeHandler(failFastHandler);
@@ -860,22 +923,28 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   public void ctxToolchains_automaticExecGroupsEnabled() throws Exception {
     scratch.file(
         "test/defs.bzl",
-        "def _impl(ctx):",
-        "  toolchain_info = ctx.toolchains['//rule:toolchain_type_1']",
-        "  if toolchain_info == None:",
-        "    fail('Toolchain info is None.')",
-        "  return []",
-        "custom_rule = rule(",
-        "  implementation = _impl,",
-        "  attrs = {",
-        "    'dep': attr.label(cfg = 'exec'),",
-        "  },",
-        "  toolchains = ['//rule:toolchain_type_1'],",
-        ")");
+        """
+        def _impl(ctx):
+            toolchain_info = ctx.toolchains["//rule:toolchain_type_1"]
+            if toolchain_info == None:
+                fail("Toolchain info is None.")
+            return []
+
+        custom_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "dep": attr.label(cfg = "exec"),
+            },
+            toolchains = ["//rule:toolchain_type_1"],
+        )
+        """);
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     getConfiguredTarget("//test:custom_rule_name");
@@ -887,22 +956,28 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   public void ctxToolchains_automaticExecGroupsEnabled_wrongToolchainError() throws Exception {
     scratch.file(
         "test/defs.bzl",
-        "def _impl(ctx):",
-        "  toolchain_info = ctx.toolchains['//rule:wrong_toolchain_type']",
-        "  if toolchain_info == None:",
-        "    fail('Toolchain info is None.')",
-        "  return []",
-        "custom_rule = rule(",
-        "  implementation = _impl,",
-        "  attrs = {",
-        "    'dep': attr.label(cfg = 'exec'),",
-        "  },",
-        "  toolchains = ['//rule:toolchain_type_1'],",
-        ")");
+        """
+        def _impl(ctx):
+            toolchain_info = ctx.toolchains["//rule:wrong_toolchain_type"]
+            if toolchain_info == None:
+                fail("Toolchain info is None.")
+            return []
+
+        custom_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "dep": attr.label(cfg = "exec"),
+            },
+            toolchains = ["//rule:toolchain_type_1"],
+        )
+        """);
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     reporter.removeHandler(failFastHandler);
@@ -917,20 +992,26 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   public void ctxToolchainsPrint_automaticExecGroupsEnabled() throws Exception {
     scratch.file(
         "test/defs.bzl",
-        "def _impl(ctx):",
-        "  print(ctx.toolchains)",
-        "  return []",
-        "custom_rule = rule(",
-        "  implementation = _impl,",
-        "  attrs = {",
-        "    'dep': attr.label(cfg = 'exec'),",
-        "  },",
-        "  toolchains = ['//rule:toolchain_type_1'],",
-        ")");
+        """
+        def _impl(ctx):
+            print(ctx.toolchains)
+            return []
+
+        custom_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "dep": attr.label(cfg = "exec"),
+            },
+            toolchains = ["//rule:toolchain_type_1"],
+        )
+        """);
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     getConfiguredTarget("//test:custom_rule_name");
@@ -1016,11 +1097,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         /* execCompatibleWith= */ execCompatibleWith);
     scratch.overwriteFile(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  exec_properties = {'custom_exec_group.mem': '64'}",
-        ")");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            exec_properties = {"custom_exec_group.mem": "64"},
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1052,11 +1136,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         /* execCompatibleWith= */ "");
     scratch.overwriteFile(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  exec_compatible_with = ['//platforms:constraint_2']",
-        ")");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            exec_compatible_with = ["//platforms:constraint_2"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1106,11 +1193,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
     scratch.file("java/com/google/optimizationtest/config.txt");
     scratch.file(
         "java/com/google/optimizationtest/BUILD",
-        "java_binary(",
-        "    name = 'optimizer',",
-        "    srcs = ['Foo.java'],",
-        ")",
-        "exports_files(['config.txt'])");
+        """
+        java_binary(
+            name = "optimizer",
+            srcs = ["Foo.java"],
+        )
+
+        exports_files(["config.txt"])
+        """);
     scratch.file(
         "test/defs.bzl",
         "def _impl(ctx):",
@@ -1131,8 +1221,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration(
         "--experimental_local_java_optimizations",
         "--experimental_bytecode_optimizers=Optimizer=//java/com/google/optimizationtest:optimizer",
@@ -1153,11 +1246,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
     scratch.file("java/com/google/optimizationtest/config.txt");
     scratch.file(
         "java/com/google/optimizationtest/BUILD",
-        "java_binary(",
-        "    name = 'optimizer',",
-        "    srcs = ['Foo.java'],",
-        ")",
-        "exports_files(['config.txt'])");
+        """
+        java_binary(
+            name = "optimizer",
+            srcs = ["Foo.java"],
+        )
+
+        exports_files(["config.txt"])
+        """);
     scratch.file(
         "test/defs.bzl",
         "def _impl(ctx):",
@@ -1176,8 +1272,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration(
         "--experimental_local_java_optimizations",
         "--experimental_bytecode_optimizers=Optimizer=//java/com/google/optimizationtest:optimizer",
@@ -1212,8 +1311,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1244,8 +1346,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups=False");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1283,12 +1388,16 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "java_plugin(",
-        "  name = 'test_plugin',",
-        "  processor_class = 'GeneratedProcessor',",
-        ")",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        java_plugin(
+            name = "test_plugin",
+            processor_class = "GeneratedProcessor",
+        )
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1334,12 +1443,16 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "java_plugin(",
-        "  name = 'test_plugin',",
-        "  processor_class = 'GeneratedProcessor',",
-        ")",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        java_plugin(
+            name = "test_plugin",
+            processor_class = "GeneratedProcessor",
+        )
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups=False");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");
@@ -1383,8 +1496,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name', srcs = ['Main.java'])");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["Main.java"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups", "--collect_code_coverage");
 
     ImmutableList<Action> actions =
@@ -1420,8 +1539,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name', srcs = ['Main.java'])");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["Main.java"],
+        )
+        """);
     useConfiguration("--collect_code_coverage", "--incompatible_auto_exec_groups=False");
 
     ImmutableList<Action> actions =
@@ -1458,8 +1583,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/BUILD",
-        "load('//bazel_internal/test_rules:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name', resources = ['Resources.java'])");
+        """
+        load("//bazel_internal/test_rules:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            resources = ["Resources.java"],
+        )
+        """);
     useConfiguration(
         "--incompatible_auto_exec_groups", "--experimental_turbine_annotation_processing");
 
@@ -1500,8 +1631,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/BUILD",
-        "load('//bazel_internal/test_rules:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name', resources = ['Resources.java'])");
+        """
+        load("//bazel_internal/test_rules:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            resources = ["Resources.java"],
+        )
+        """);
     useConfiguration(
         "--experimental_turbine_annotation_processing", "--incompatible_auto_exec_groups=False");
 
@@ -1541,8 +1678,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<Action> actions =
@@ -1575,8 +1715,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<Action> actions =
@@ -1615,8 +1758,11 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<Action> actions =
@@ -1668,14 +1814,16 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
-    ImmutableList<Action> actions = getActions("//test:custom_rule_name", CppLinkAction.class);
+    ImmutableList<Action> actions = getActions("//test:custom_rule_name", "CppLink");
 
     assertThat(actions).hasSize(1);
-    assertThat(actions.get(0).getMnemonic()).isEqualTo("CppLink");
     assertThat(actions.get(0).getOwner().getExecutionPlatform().label())
         .isEqualTo(Label.parseCanonical("//platforms:platform_1"));
   }
@@ -1716,14 +1864,16 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(name = 'custom_rule_name')");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        custom_rule(name = "custom_rule_name")
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
-    ImmutableList<Action> actions = getActions("//test:custom_rule_name", CppLinkAction.class);
+    ImmutableList<Action> actions = getActions("//test:custom_rule_name", "CppLink");
 
     assertThat(actions).hasSize(1);
-    assertThat(actions.get(0).getMnemonic()).isEqualTo("CppLink");
     assertThat(actions.get(0).getOwner().getExecutionPlatform().label())
         .isEqualTo(Label.parseCanonical("//platforms:platform_1"));
   }
@@ -1766,16 +1916,20 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "cc_library(",
-        "  name = 'dep',",
-        "  srcs = ['dep.cc'],",
-        ")",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['custom.cc'],",
-        "  deps = ['dep'],",
-        ")");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        cc_library(
+            name = "dep",
+            srcs = ["dep.cc"],
+        )
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["custom.cc"],
+            deps = ["dep"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups", "--features=thin_lto");
     AnalysisMock.get()
         .ccSupport()
@@ -1786,14 +1940,10 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
                 .withToolchainTargetConstraints("@@//platforms:constraint_1")
                 .withToolchainExecConstraints("@@//platforms:constraint_1"));
 
-    ImmutableList<Action> actions = getActions("//test:custom_rule_name", CppLinkAction.class);
-    ImmutableList<Action> cppLTOActions =
-        actions.stream()
-            .filter(action -> action.getMnemonic().equals("CppLTOIndexing"))
-            .collect(toImmutableList());
+    ImmutableList<Action> cppLtoActions = getActions("//test:custom_rule_name", "CppLTOIndexing");
 
-    assertThat(cppLTOActions).hasSize(1);
-    assertThat(cppLTOActions.get(0).getOwner().getExecutionPlatform().label())
+    assertThat(cppLtoActions).hasSize(1);
+    assertThat(cppLtoActions.get(0).getOwner().getExecutionPlatform().label())
         .isEqualTo(Label.parseCanonical("//platforms:platform_1"));
   }
 
@@ -1834,22 +1984,25 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/cc/BUILD",
-        "load('//bazel_internal/test_rules/cc:defs.bzl', 'custom_rule')",
-        "cc_library(",
-        "  name = 'dep',",
-        "  linkstamp = 'stamp.cc',",
-        ")",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  deps = ['dep'],",
-        ")");
+        """
+        load("//bazel_internal/test_rules/cc:defs.bzl", "custom_rule")
+
+        cc_library(
+            name = "dep",
+            linkstamp = "stamp.cc",
+        )
+
+        custom_rule(
+            name = "custom_rule_name",
+            deps = ["dep"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<Action> cppCompileActions =
-        getActions("//bazel_internal/test_rules/cc:custom_rule_name", CppCompileAction.class);
+        getActions("//bazel_internal/test_rules/cc:custom_rule_name", "CppLinkstampCompile");
 
     assertThat(cppCompileActions).hasSize(1);
-    assertThat(cppCompileActions.get(0).getMnemonic()).isEqualTo("CppLinkstampCompile");
     assertThat(cppCompileActions.get(0).getOwner().getExecutionPlatform().label())
         .isEqualTo(Label.parseCanonical("//platforms:platform_1"));
   }
@@ -1890,11 +2043,14 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/cc/BUILD",
-        "load('//bazel_internal/test_rules/cc:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['custom.cc'],",
-        ")");
+        """
+        load("//bazel_internal/test_rules/cc:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["custom.cc"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<Action> cppCompileActions =
@@ -1946,12 +2102,15 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/cc/BUILD",
-        "load('//bazel_internal/test_rules/cc:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['custom.cc'],",
-        "  hdrs = ['custom.h'],",
-        ")");
+        """
+        load("//bazel_internal/test_rules/cc:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["custom.cc"],
+            hdrs = ["custom.h"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups", "--features=header_modules");
     AnalysisMock.get()
         .ccSupport()
@@ -2014,12 +2173,15 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/cc/BUILD",
-        "load('//bazel_internal/test_rules/cc:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['custom.cc'],",
-        "  hdrs = ['custom.h'],",
-        ")");
+        """
+        load("//bazel_internal/test_rules/cc:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["custom.cc"],
+            hdrs = ["custom.h"],
+        )
+        """);
     useConfiguration(
         "--incompatible_auto_exec_groups",
         "--features=header_modules",
@@ -2083,12 +2245,15 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "bazel_internal/test_rules/cc/BUILD",
-        "load('//bazel_internal/test_rules/cc:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['custom.cc'],",
-        "  hdrs = ['custom.h'],",
-        ")");
+        """
+        load("//bazel_internal/test_rules/cc:defs.bzl", "custom_rule")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["custom.cc"],
+            hdrs = ["custom.h"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups", "--features=parse_headers");
     AnalysisMock.get()
         .ccSupport()
@@ -2161,13 +2326,18 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
         ")");
     scratch.file(
         "test/BUILD",
-        "package(default_visibility = ['//visibility:public'])",
-        "load('//test:defs.bzl', 'custom_rule', 'create_tree_artifact')",
-        "create_tree_artifact(name = 'tree_artifact')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        "  srcs = ['tree_artifact'],",
-        ")");
+        """
+        load("//test:defs.bzl", "create_tree_artifact", "custom_rule")
+
+        package(default_visibility = ["//visibility:public"])
+
+        create_tree_artifact(name = "tree_artifact")
+
+        custom_rule(
+            name = "custom_rule_name",
+            srcs = ["tree_artifact"],
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ImmutableList<ActionAnalysisMetadata> actions =
@@ -2182,30 +2352,39 @@ public class AutoExecGroupsTest extends BuildViewTestCase {
   public void testToolchainAsAlias() throws Exception {
     scratch.file(
         "test/alias/BUILD",
-        "alias(",
-        "    name = 'alias_toolchain_type',",
-        "    actual = '//rule:toolchain_type_1',",
-        ")");
+        """
+        alias(
+            name = "alias_toolchain_type",
+            actual = "//rule:toolchain_type_1",
+        )
+        """);
     scratch.file(
         "test/defs.bzl",
-        "def _impl(ctx):",
-        "  return []",
-        "custom_rule = rule(",
-        "  implementation = _impl,",
-        "  toolchains = ['//test/alias:alias_toolchain_type'],",
-        "  exec_groups = { ",
-        "    'custom_exec_group': exec_group(",
-        "         toolchains = ['//rule:toolchain_type_1']",
-        "    ),",
-        "  }",
-        ")");
+        """
+        def _impl(ctx):
+            return []
+
+        custom_rule = rule(
+            implementation = _impl,
+            toolchains = ["//test/alias:alias_toolchain_type"],
+            exec_groups = {
+                "custom_exec_group": exec_group(
+                    toolchains = ["//rule:toolchain_type_1"],
+                ),
+            },
+        )
+        """);
     scratch.file(
         "test/BUILD",
-        "package(default_visibility = ['//visibility:public'])",
-        "load('//test:defs.bzl', 'custom_rule')",
-        "custom_rule(",
-        "  name = 'custom_rule_name',",
-        ")");
+        """
+        load("//test:defs.bzl", "custom_rule")
+
+        package(default_visibility = ["//visibility:public"])
+
+        custom_rule(
+            name = "custom_rule_name",
+        )
+        """);
     useConfiguration("--incompatible_auto_exec_groups");
 
     ConfiguredTarget target = getConfiguredTarget("//test:custom_rule_name");

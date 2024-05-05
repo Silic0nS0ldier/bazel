@@ -55,7 +55,6 @@ import com.google.devtools.common.options.OptionsParsingResult;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -64,7 +63,6 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 
 /**
@@ -73,11 +71,14 @@ import javax.annotation.Nullable;
  * <p>All sandboxed strategies within a build should share the same instance of this object.
  */
 public final class SandboxHelpers {
+
+  public static final String INACCESSIBLE_HELPER_DIR = "inaccessibleHelperDir";
+  public static final String INACCESSIBLE_HELPER_FILE = "inaccessibleHelperFile";
+
   private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
 
   private static final AtomicBoolean warnedAboutMovesBeingCopies = new AtomicBoolean(false);
 
-  private static final AtomicInteger tempFileUniquifierForVirtualInputWrites = new AtomicInteger();
   /**
    * Moves all given outputs from a root to another.
    *
@@ -148,7 +149,7 @@ public final class SandboxHelpers {
       Path workDir,
       @Nullable TreeDeleter treeDeleter)
       throws IOException, InterruptedException {
-    Path inaccessibleHelperDir = workDir.getRelative("inaccessibleHelperDir");
+    Path inaccessibleHelperDir = workDir.getRelative(INACCESSIBLE_HELPER_DIR);
     // Setting the permissions is necessary when we are using an asynchronous tree deleter in order
     // to move the directory first. This is not necessary for a synchronous tree deleter because the
     // permissions are only needed in the parent directory in that case.
@@ -258,7 +259,7 @@ public final class SandboxHelpers {
   public static void populateInputsAndDirsToCreate(
       Set<PathFragment> writableDirs,
       Set<PathFragment> inputsToCreate,
-      LinkedHashSet<PathFragment> dirsToCreate,
+      Set<PathFragment> dirsToCreate,
       Iterable<PathFragment> inputFiles,
       SandboxOutputs outputs) {
     // Add all worker files, input files, and the parent directories.
@@ -554,18 +555,8 @@ public final class SandboxHelpers {
       }
       PathFragment pathFragment = e.getKey();
       ActionInput actionInput = e.getValue();
-      if (actionInput instanceof VirtualActionInput) {
-        // TODO(larsrc): Figure out which VAIs actually require atomicity, maybe avoid it.
-        VirtualActionInput input = (VirtualActionInput) actionInput;
-        byte[] digest =
-            input.atomicallyWriteRelativeTo(
-                execRootPath,
-                // When 2 actions try to atomically create the same virtual input, they need to have
-                // a different suffix for the temporary file in order to avoid racy write to the
-                // same one.
-                "_sandbox"
-                    + tempFileUniquifierForVirtualInputWrites.incrementAndGet()
-                    + ".virtualinputlock");
+      if (actionInput instanceof VirtualActionInput input) {
+        byte[] digest = input.atomicallyWriteRelativeTo(execRootPath);
         virtualInputs.put(input, digest);
       }
 
@@ -579,8 +570,7 @@ public final class SandboxHelpers {
           inputPath = null;
         } else if (actionInput instanceof VirtualActionInput) {
           inputPath = RootedPath.toRootedPath(withinSandboxExecRoot, actionInput.getExecPath());
-        } else if (actionInput instanceof Artifact) {
-          Artifact inputArtifact = (Artifact) actionInput;
+        } else if (actionInput instanceof Artifact inputArtifact) {
           if (sandboxSourceRoots == null) {
             inputPath = RootedPath.toRootedPath(withinSandboxExecRoot, inputArtifact.getExecPath());
           } else {

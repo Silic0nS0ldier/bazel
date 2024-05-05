@@ -17,6 +17,8 @@ java_library(
         "BaselineOptionsFunction.java",
         "BuildConfigurationFunction.java",
         "BuildConfigurationKeyFunction.java",
+        "FlagSetFunction.java",
+        "ParsedFlagsFunction.java",
         "PlatformMappingFunction.java",
     ],
     deps = [
@@ -42,6 +44,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/analysis:platform_options",
         "//src/main/java/com/google/devtools/build/lib/analysis/producers:build_configuration_key_producer",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/events",
         "//src/main/java/com/google/devtools/build/lib/packages",
         "//src/main/java/com/google/devtools/build/lib/packages/semantics",
         "//src/main/java/com/google/devtools/build/lib/pkgcache",
@@ -51,6 +54,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/skyframe:precomputed_value",
         "//src/main/java/com/google/devtools/build/lib/skyframe:repository_mapping_value",
         "//src/main/java/com/google/devtools/build/lib/skyframe:workspace_name_value",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/toolchains:platform_lookup_util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/java/com/google/devtools/build/skyframe",
@@ -72,7 +76,7 @@ java_library(
     ],
     deps = [
         "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/skyframe",
+        "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//src/main/java/com/google/devtools/common/options",
     ],
 )
@@ -82,6 +86,9 @@ java_library(
     srcs = [
         "BuildConfigurationKey.java",
         "BuildConfigurationKeyValue.java",
+        "FlagSetValue.java",
+        "NativeAndStarlarkFlags.java",
+        "ParsedFlagsValue.java",
         "PlatformMappingValue.java",
     ],
     deps = [

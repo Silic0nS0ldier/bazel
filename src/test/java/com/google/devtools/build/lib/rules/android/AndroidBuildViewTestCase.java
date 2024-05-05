@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.android;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.getFirstArtifactEndingWith;
+import static com.google.devtools.build.lib.testutil.TestConstants.ANDROID_DEFAULT_SDK;
 import static org.junit.Assert.fail;
 
 import com.google.common.base.Ascii;
@@ -74,33 +75,13 @@ public abstract class AndroidBuildViewTestCase extends BuildViewTestCase {
   }
 
   @Override
-  protected void useConfiguration(ImmutableMap<String, Object> starlarkOptions, String... args)
-      throws Exception {
+  protected void useConfiguration(String... args) throws Exception {
 
     // Platform-based toolchain resolution:
     ImmutableList.Builder<String> fullArgs = ImmutableList.builder();
-    fullArgs.add("--incompatible_enable_android_toolchain_resolution");
-    // Uncomment the below to get more info when tests fail because of toolchain resolution.
-    // fullArgs.add("--toolchain_resolution_debug=tools/android:.*toolchain_type");
     boolean hasPlatform = false;
     for (String arg : args) {
-      if (arg.startsWith("--android_sdk=")) {
-        // --android_sdk is a legacy toolchain resolution flag. Remap it to the platform-equivalent:
-        // wrap a toolchain definition around the SDK with no constraint requirements and register
-        // it with --extra_toolchains. --extra_toolchains guarantees this SDK will be chosen before
-        // anything registered in the WORKSPACE.
-        String sdkLabel = arg.substring("--android_sdk=".length());
-        scratch.file(
-            "legacy_to_platform_sdk/BUILD",
-            "toolchain(",
-            "    name = 'custom_sdk_toolchain',",
-            String.format("    toolchain_type = '%s',", TestConstants.ANDROID_TOOLCHAIN_TYPE_LABEL),
-            String.format("    toolchain = '%s',", sdkLabel),
-            ")");
-        fullArgs.add("--extra_toolchains=//legacy_to_platform_sdk:custom_sdk_toolchain");
-      }
       fullArgs.add(arg);
-
       if (arg.startsWith("--platforms=") || arg.startsWith("--android_platforms=")) {
         hasPlatform = true;
       }
@@ -111,8 +92,7 @@ public abstract class AndroidBuildViewTestCase extends BuildViewTestCase {
               "--platforms=%sandroid:armeabi-v7a", TestConstants.CONSTRAINTS_PACKAGE_ROOT));
       fullArgs.add(defaultPlatformFlag());
     }
-    fullArgs.add("--incompatible_enable_cc_toolchain_resolution");
-    super.useConfiguration(starlarkOptions, fullArgs.build().toArray(new String[0]));
+    super.useConfiguration(fullArgs.build().toArray(new String[0]));
   }
 
   protected Iterable<Artifact> getNativeLibrariesInApk(ConfiguredTarget target) {
@@ -291,8 +271,7 @@ public abstract class AndroidBuildViewTestCase extends BuildViewTestCase {
   @Nullable
   protected AndroidDeployInfo getAndroidDeployInfo(Artifact artifact) throws IOException {
     Action generatingAction = getGeneratingAction(artifact);
-    if (generatingAction instanceof AndroidDeployInfoAction) {
-      AndroidDeployInfoAction writeAction = (AndroidDeployInfoAction) generatingAction;
+    if (generatingAction instanceof AndroidDeployInfoAction writeAction) {
       return writeAction.getDeployInfo();
     }
     return null;
@@ -376,29 +355,28 @@ public abstract class AndroidBuildViewTestCase extends BuildViewTestCase {
     return Sets.difference(action.getInputs().toSet(), action.getTools().toSet());
   }
 
-  protected String getAndroidJarPath() throws Exception {
+  protected String getAndroidJarPath() {
     return getAndroidSdk().getAndroidJar().getExecPathString();
   }
 
-  protected String getAndroidJarFilename() throws Exception {
+  protected String getAndroidJarFilename() {
     return getAndroidSdk().getAndroidJar().getFilename();
   }
 
-  protected Artifact getProguardBinary() throws Exception {
+  protected Artifact getProguardBinary() {
     return getAndroidSdk().getProguard().getExecutable();
   }
 
-  protected String getMainDexClassesPath() throws Exception {
+  protected String getMainDexClassesPath() {
     return getAndroidSdk().getMainDexClasses().getExecPathString();
   }
 
-  protected String getMainDexClassesFilename() throws Exception {
+  protected String getMainDexClassesFilename() {
     return getAndroidSdk().getMainDexClasses().getFilename();
   }
 
-  private AndroidSdkProvider getAndroidSdk() throws Exception {
-    Label sdk = targetConfig.getFragment(AndroidConfiguration.class).getSdk();
-    return getConfiguredTarget(sdk, targetConfig).get(AndroidSdkProvider.PROVIDER);
+  private AndroidSdkProvider getAndroidSdk() {
+    return getConfiguredTarget(ANDROID_DEFAULT_SDK, targetConfig).get(AndroidSdkProvider.PROVIDER);
   }
 
   /**

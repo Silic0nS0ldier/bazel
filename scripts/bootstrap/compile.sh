@@ -139,7 +139,8 @@ function java_compilation() {
   # additional arguments to be passed to javac.
   run "${JAVAC}" -classpath "${classpath}" -sourcepath "${sourcepath}" \
       -d "${output}/classes" -source "$JAVA_VERSION" -target "$JAVA_VERSION" \
-      -encoding UTF-8 ${BAZEL_JAVAC_OPTS} "@${paramfile}"
+      -encoding UTF-8 --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
+      ${BAZEL_JAVAC_OPTS} "@${paramfile}"
 
   log "Extracting helper classes for $name..."
   for f in ${library_jars} ; do
@@ -250,11 +251,8 @@ if [ -z "${BAZEL_SKIP_JAVA_COMPILATION}" ]; then
 workspace(name = 'bazel_tools')
 EOF
 
-  # Set up the MODULE.bazel file for `bazel_tools` and update the hash in the lockfile.
+  # Set up the MODULE.bazel file for `bazel_tools`
   link_file "${PWD}/src/MODULE.tools" "${BAZEL_TOOLS_REPO}/MODULE.bazel"
-  new_hash=$(shasum -a 256 "${BAZEL_TOOLS_REPO}/MODULE.bazel" | awk '{print $1}')
-  sed -i.bak "/\"bazel_tools\":/s/\"[a-f0-9]*\"/\"$new_hash\"/" MODULE.bazel.lock
-  rm MODULE.bazel.lock.bak
 
   mkdir -p "${BAZEL_TOOLS_REPO}/src/conditions"
   link_file "${PWD}/src/conditions/BUILD.tools" \

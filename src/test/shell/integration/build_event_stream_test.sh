@@ -716,7 +716,7 @@ function test_bep_output_groups() {
   #    2. bar_outputs (6/0)
   #    3. baz_outputs (0/1)
   #    4. skip_outputs (1/0)
-  #    5. _validation implicit with --experimental_run_validations (1/0)
+  #    5. _validation implicit with --run_validations (1/0)
   #
   # We request the first three output groups and expect foo_outputs and
   # bar_outputs to appear in BEP, because both groups have at least one
@@ -726,7 +726,7 @@ function test_bep_output_groups() {
    --build_event_text_file=bep_output \
    --build_event_json_file="$TEST_log" \
    --build_event_max_named_set_of_file_entries=1 \
-   --experimental_run_validations \
+   --run_validations \
    --output_groups=foo_outputs,bar_outputs,baz_outputs \
     && fail "expected failure" || true
 
@@ -852,7 +852,7 @@ function test_failing_aspect_bep_output_groups() {
   #    2. bar_outputs (6/0)
   #    3. baz_outputs (0/1)
   #    4. skip_outputs (1/0)
-  #    5. _validation implicit with --experimental_run_validations (1/0)
+  #    5. _validation implicit with --run_validations (1/0)
   #
   # We request the first two output groups and expect only bar_outputs to
   # appear in BEP, because all actions contributing to bar_outputs succeeded.
@@ -865,7 +865,7 @@ function test_failing_aspect_bep_output_groups() {
    --build_event_text_file=bep_output \
    --build_event_json_file="$TEST_log" \
    --build_event_max_named_set_of_file_entries=1 \
-   --experimental_run_validations \
+   --run_validations \
    --experimental_use_validation_aspect \
    --aspects=semifailingaspect.bzl%semifailing_aspect \
    --output_groups=foo_outputs,bar_outputs,good-aspect-out,bad-aspect-out,mixed-aspect-out \
@@ -1259,12 +1259,12 @@ EOF
   [ `grep unconfigured_label event_id_types | wc -l` -eq 1 ] \
       || fail "not precisely one unconfigured_label event id"
 
-  (bazel build --noenable_bzlmod --build_event_text_file="${TEST_log}" :badfilegroup :doesnotexist \
+  (bazel build -k --noenable_bzlmod --build_event_text_file="${TEST_log}" :badfilegroup :doesnotexist \
     && fail "Expected failure") || :
   # There should be precisely two events with target_completed as event id type
   (echo 'g/^id/+1p'; echo 'q') | ed "${TEST_log}" 2>&1 | tail -n +2 > event_id_types
   [ `grep target_completed event_id_types | wc -l` -eq 2 ] \
-      || fail "not precisely one target_completed event id"
+      || fail "not precisely two target_completed event ids"
   # Moreover, we expect precisely one event identified by an unconfigured label
   [ `grep unconfigured_label event_id_types | wc -l` -eq 1 ] \
       || fail "not precisely one unconfigured_label event id"
@@ -1445,6 +1445,23 @@ function test_memory_profile() {
   cp bep.txt "$TEST_log" || fail "cp failed"
   # Non-zero used heap size.
   expect_log 'used_heap_size_post_build: [1-9]'
+}
+
+function test_skyframe_stats() {
+  mkdir -p a
+  echo 'filegroup(name="a")' > a/BUILD
+
+  bazel build --build_event_json_file=bep.json //a >& "$TEST_log" || fail "build failed"
+  cp bep.json "$TEST_log" || fail "cp failed"
+  expect_log '"skyfunctionName":"PACKAGE","count":'
+
+  bazel build --build_event_json_file=bep.json //a >& "$TEST_log" || fail "build failed"
+  cp bep.json "$TEST_log" || fail "cp failed"
+
+  # Check that nodes that were requested at the top level but were clean are
+  # not reported as having been evaluated (BUILD_INFO is requested at the top
+  # level)
+  expect_not_log '"skyfunctionName":"BUILD_INFO","count":'
 }
 
 function test_packages_loaded_contains_only_successfully_loaded_packages() {

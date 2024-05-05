@@ -13,20 +13,29 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
+import com.google.devtools.build.lib.actions.ActionInput;
+import com.google.devtools.build.lib.actions.ActionInputDepOwners;
 import com.google.devtools.build.lib.actions.ActionInputMap;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.Artifact.ArchivedTreeArtifact;
-import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.CompletionContext;
 import com.google.devtools.build.lib.actions.CompletionContext.PathResolverFactory;
 import com.google.devtools.build.lib.actions.EventReportingArtifacts;
 import com.google.devtools.build.lib.actions.FilesetOutputSymlink;
+import com.google.devtools.build.lib.actions.ImportantOutputHandler;
+import com.google.devtools.build.lib.actions.ImportantOutputHandler.ImportantOutputException;
 import com.google.devtools.build.lib.actions.InputFileErrorException;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
+import com.google.devtools.build.lib.actions.TopLevelOutputException;
 import com.google.devtools.build.lib.analysis.ConfiguredObjectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
@@ -41,10 +50,13 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.ExtendedEventHandler;
+import com.google.devtools.build.lib.events.ExtendedEventHandler.Postable;
+import com.google.devtools.build.lib.profiler.GoogleAutoProfilerUtils;
 import com.google.devtools.build.lib.skyframe.ArtifactFunction.MissingArtifactValue;
 import com.google.devtools.build.lib.skyframe.ArtifactFunction.SourceArtifactException;
 import com.google.devtools.build.lib.skyframe.MetadataConsumerForMetrics.FilesMetricConsumer;
+import com.google.devtools.build.lib.skyframe.rewinding.ActionRewindException;
+import com.google.devtools.build.lib.skyframe.rewinding.ActionRewindStrategy;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.skyframe.SkyFunction;
@@ -52,6 +64,7 @@ import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.SkyframeLookupResult;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -63,43 +76,48 @@ import net.starlark.java.syntax.Location;
 public final class CompletionFunction<
         ValueT extends ConfiguredObjectValue,
         ResultT extends SkyValue,
-        KeyT extends TopLevelActionLookupKeyWrapper,
-        FailureT>
+        KeyT extends TopLevelActionLookupKeyWrapper>
     implements SkyFunction {
 
-  /** A strategy for completing the build. */
+  /**
+   * A strategy for completing the build.
+   *
+   * <p>Any Skyframe lookups in methods passed an {@link Environment} must return an already-done
+   * value. For example, it is acceptable to call {@link
+   * ConfiguredTargetAndData#fromExistingConfiguredTargetInSkyframe}.
+   */
   interface Completor<
-      ValueT, ResultT extends SkyValue, KeyT extends TopLevelActionLookupKeyWrapper, FailureT> {
+      ValueT, ResultT extends SkyValue, KeyT extends TopLevelActionLookupKeyWrapper> {
 
     /** Creates an event reporting an absent input artifact. */
-    Event getRootCauseError(ValueT value, KeyT key, LabelCause rootCause, Environment env)
+    Event getRootCauseError(KeyT key, ValueT value, LabelCause rootCause, Environment env)
         throws InterruptedException;
 
-    @Nullable
-    Object getLocationIdentifier(ValueT value, KeyT key, Environment env)
+    Object getLocationIdentifier(KeyT key, ValueT value, Environment env)
         throws InterruptedException;
 
     /** Provides a successful completion value. */
     ResultT getResult();
 
     /**
-     * Creates supplementary data needed to call {@link #createFailed(Object, NestedSet,
-     * CompletionContext, ImmutableMap, Object)}; returns null if skyframe found missing values.
+     * Creates a failed completion event.
+     *
+     * <p>The event must be {@linkplain Postable#storeForReplay stored}.
      */
-    @Nullable
-    FailureT getFailureData(KeyT key, ValueT value, Environment env) throws InterruptedException;
-
-    /** Creates a failed completion value. */
-    ExtendedEventHandler.Postable createFailed(
+    Postable createFailed(
         KeyT skyKey,
+        ValueT value,
         NestedSet<Cause> rootCauses,
         CompletionContext ctx,
         ImmutableMap<String, ArtifactsInOutputGroup> outputs,
-        FailureT failureData)
+        Environment env)
         throws InterruptedException;
 
-    /** Creates a succeeded completion value; returns null if skyframe found missing values. */
-    @Nullable
+    /**
+     * Creates a succeeded completion event.
+     *
+     * <p>The event must be {@linkplain Postable#storeForReplay stored}.
+     */
     EventReportingArtifacts createSucceeded(
         KeyT skyKey,
         ValueT value,
@@ -109,23 +127,28 @@ public final class CompletionFunction<
         throws InterruptedException;
   }
 
+  private static final Duration IMPORTANT_OUTPUT_HANDLER_LOGGING_THRESHOLD = Duration.ofMillis(100);
+
   private final PathResolverFactory pathResolverFactory;
-  private final Completor<ValueT, ResultT, KeyT, FailureT> completor;
+  private final Completor<ValueT, ResultT, KeyT> completor;
   private final SkyframeActionExecutor skyframeActionExecutor;
   private final FilesMetricConsumer topLevelArtifactsMetric;
+  private final ActionRewindStrategy actionRewindStrategy;
   private final BugReporter bugReporter;
 
   CompletionFunction(
       PathResolverFactory pathResolverFactory,
-      Completor<ValueT, ResultT, KeyT, FailureT> completor,
+      Completor<ValueT, ResultT, KeyT> completor,
       SkyframeActionExecutor skyframeActionExecutor,
       FilesMetricConsumer topLevelArtifactsMetric,
+      ActionRewindStrategy actionRewindStrategy,
       BugReporter bugReporter) {
-    this.pathResolverFactory = pathResolverFactory;
-    this.completor = completor;
-    this.skyframeActionExecutor = skyframeActionExecutor;
-    this.topLevelArtifactsMetric = topLevelArtifactsMetric;
-    this.bugReporter = bugReporter;
+    this.pathResolverFactory = checkNotNull(pathResolverFactory);
+    this.completor = checkNotNull(completor);
+    this.skyframeActionExecutor = checkNotNull(skyframeActionExecutor);
+    this.topLevelArtifactsMetric = checkNotNull(topLevelArtifactsMetric);
+    this.actionRewindStrategy = checkNotNull(actionRewindStrategy);
+    this.bugReporter = checkNotNull(bugReporter);
   }
 
   @SuppressWarnings("unchecked") // Cast to KeyT
@@ -159,25 +182,24 @@ public final class CompletionFunction<
     // event is delivered to transports. If the BEP events reference *all* artifacts it can increase
     // heap high-watermark by multiple GB.
     ActionInputMap importantInputMap;
-    Set<Artifact> importantArtifactSet;
+    ImmutableCollection<Artifact> importantArtifacts;
     if (allArtifactsAreImportant) {
-      importantArtifactSet = ImmutableSet.of();
+      importantArtifacts = allArtifacts;
       importantInputMap = inputMap;
     } else {
-      ImmutableList<Artifact> importantArtifacts =
-          artifactsToBuild.getImportantArtifacts().toList();
-      importantArtifactSet = new HashSet<>(importantArtifacts);
+      importantArtifacts = artifactsToBuild.getImportantArtifacts().toSet();
       importantInputMap = new ActionInputMap(bugReporter, importantArtifacts.size());
     }
 
-    Map<Artifact, ImmutableCollection<? extends Artifact>> expandedArtifacts = new HashMap<>();
+    // TODO: b/239184359 - Can we just get the tree artifacts from the ActionInputMap?
+    Map<Artifact, TreeArtifactValue> treeArtifacts = new HashMap<>();
+
     Map<Artifact, ImmutableList<FilesetOutputSymlink>> expandedFilesets = new HashMap<>();
-    Map<SpecialArtifact, ArchivedTreeArtifact> archivedTreeArtifacts = new HashMap<>();
     Map<Artifact, ImmutableList<FilesetOutputSymlink>> topLevelFilesets = new HashMap<>();
 
     ActionExecutionException firstActionExecutionException = null;
     NestedSetBuilder<Cause> rootCausesBuilder = NestedSetBuilder.stableOrder();
-    ImmutableSet.Builder<Artifact> builtArtifactsBuilder = ImmutableSet.builder();
+    Set<Artifact> builtArtifacts = new HashSet<>();
     // Don't double-count files due to Skyframe restarts.
     FilesMetricConsumer currentConsumer = new FilesMetricConsumer();
     for (Artifact input : allArtifacts) {
@@ -195,26 +217,24 @@ public final class CompletionFunction<
                 value,
                 key);
           } else {
-            builtArtifactsBuilder.add(input);
+            builtArtifacts.add(input);
             ActionInputMapHelper.addToMap(
                 inputMap,
-                expandedArtifacts,
-                archivedTreeArtifacts,
+                treeArtifacts::put,
                 expandedFilesets,
                 topLevelFilesets,
                 input,
                 artifactValue,
                 env,
                 currentConsumer);
-            if (!allArtifactsAreImportant && importantArtifactSet.contains(input)) {
+            if (!allArtifactsAreImportant && importantArtifacts.contains(input)) {
               // Calling #addToMap a second time with `input` and `artifactValue` will perform no-op
               // updates to the secondary collections passed in (eg. expandedArtifacts,
               // topLevelFilesets). MetadataConsumerForMetrics.NO_OP is used to avoid
               // double-counting.
               ActionInputMapHelper.addToMap(
                   importantInputMap,
-                  expandedArtifacts,
-                  archivedTreeArtifacts,
+                  treeArtifacts::put,
                   expandedFilesets,
                   topLevelFilesets,
                   input,
@@ -240,18 +260,9 @@ public final class CompletionFunction<
     }
     expandedFilesets.putAll(topLevelFilesets);
 
-    NestedSet<Cause> rootCauses = rootCausesBuilder.build();
-    @Nullable FailureT failureData = null;
-    if (!rootCauses.isEmpty()) {
-      failureData = completor.getFailureData(key, value, env);
-      if (failureData == null) {
-        return null;
-      }
-    }
-
     CompletionContext ctx =
         CompletionContext.create(
-            expandedArtifacts,
+            Maps.transformValues(treeArtifacts, TreeArtifactValue::getChildren),
             expandedFilesets,
             key.topLevelArtifactContext().expandFilesets(),
             key.topLevelArtifactContext().fullyResolveFilesetSymlinks(),
@@ -261,18 +272,37 @@ public final class CompletionFunction<
             skyframeActionExecutor.getExecRoot(),
             workspaceNameValue.getName());
 
+    NestedSet<Cause> rootCauses = rootCausesBuilder.build();
     if (!rootCauses.isEmpty()) {
-      ImmutableMap<String, ArtifactsInOutputGroup> builtOutputs =
-          new SuccessfulArtifactFilter(builtArtifactsBuilder.build())
-              .filterArtifactsInOutputGroup(artifactsToBuild.getAllArtifactsByOutputGroup());
-      env.getListener()
-          .post(completor.createFailed(key, rootCauses, ctx, builtOutputs, failureData));
+      Reset reset = null;
+      if (!builtArtifacts.isEmpty()) {
+        reset =
+            informImportantOutputHandler(
+                key,
+                value,
+                env,
+                ImmutableList.copyOf(
+                    allArtifactsAreImportant
+                        ? builtArtifacts
+                        : Iterables.filter(builtArtifacts, importantArtifacts::contains)),
+                rootCauses,
+                ctx,
+                artifactsToBuild,
+                builtArtifacts);
+      }
+      postFailedEvent(key, value, rootCauses, ctx, artifactsToBuild, builtArtifacts, env);
+      if (reset != null) {
+        // Only return a reset after posting the failed event. If we're in --nokeep_going mode, the
+        // attempt to rewind will be ignored, so this is our only opportunity to post the event. If
+        // we're in --keep_going mode, rewinding will take place, the event won't actually get
+        // emitted (per the spec of SkyFunction.Environment#getListener for stored events), and
+        // we'll get another opportunity to post an event after rewinding.
+        return reset;
+      }
       if (firstActionExecutionException != null) {
         throw new CompletionFunctionException(firstActionExecutionException);
       }
-      // locationPrefix theoretically *could* be null because of missing deps, but not in reality,
-      // and we're not allowed to wait for deps to be ready if we're failing anyway.
-      @Nullable Object locationPrefix = completor.getLocationIdentifier(value, key, env);
+      Object locationPrefix = completor.getLocationIdentifier(key, value, env);
       Pair<DetailedExitCode, String> codeAndMessage =
           ActionExecutionFunction.createSourceErrorCodeAndMessage(rootCauses.toList(), key);
       String message;
@@ -280,7 +310,7 @@ public final class CompletionFunction<
         message = codeAndMessage.getSecond();
         env.getListener().handle(Event.error((Location) locationPrefix, message));
       } else {
-        message = (locationPrefix == null ? "" : locationPrefix + " ") + codeAndMessage.getSecond();
+        message = locationPrefix + " " + codeAndMessage.getSecond();
         env.getListener().handle(Event.error(message));
       }
       throw new CompletionFunctionException(
@@ -294,15 +324,36 @@ public final class CompletionFunction<
       return null;
     }
 
-    ExtendedEventHandler.Postable postable =
-        completor.createSucceeded(key, value, ctx, artifactsToBuild, env);
-    if (postable == null) {
-      return null;
+    Reset reset =
+        informImportantOutputHandler(
+            key, value, env, importantArtifacts, rootCauses, ctx, artifactsToBuild, builtArtifacts);
+    if (reset != null) {
+      return reset; // Initiate action rewinding to regenerate lost outputs.
     }
-    env.getListener().post(postable);
+
+    Postable event = completor.createSucceeded(key, value, ctx, artifactsToBuild, env);
+    checkStored(event, key);
+    env.getListener().post(event);
     topLevelArtifactsMetric.mergeIn(currentConsumer);
 
     return completor.getResult();
+  }
+
+  private void postFailedEvent(
+      KeyT key,
+      ValueT value,
+      NestedSet<Cause> rootCauses,
+      CompletionContext ctx,
+      ArtifactsToBuild artifactsToBuild,
+      Set<Artifact> builtArtifacts,
+      Environment env)
+      throws InterruptedException {
+    ImmutableMap<String, ArtifactsInOutputGroup> builtOutputs =
+        new SuccessfulArtifactFilter(ImmutableSet.copyOf(builtArtifacts))
+            .filterArtifactsInOutputGroup(artifactsToBuild.getAllArtifactsByOutputGroup());
+    Postable event = completor.createFailed(key, value, rootCauses, ctx, builtOutputs, env);
+    checkStored(event, key);
+    env.getListener().post(event);
   }
 
   private void handleSourceFileError(
@@ -317,7 +368,7 @@ public final class CompletionFunction<
         ActionExecutionFunction.createLabelCause(
             input, detailedExitCode, key.actionLookupKey().getLabel(), bugReporter);
     rootCausesBuilder.add(cause);
-    env.getListener().handle(completor.getRootCauseError(value, key, cause, env));
+    env.getListener().handle(completor.getRootCauseError(key, value, cause, env));
     skyframeActionExecutor.recordExecutionError();
   }
 
@@ -337,6 +388,76 @@ public final class CompletionFunction<
     return Pair.of(value, artifactsToBuild);
   }
 
+  /**
+   * Calls {@link ImportantOutputHandler#processAndGetLostArtifacts}.
+   *
+   * <p>If any outputs are lost, returns a {@link Reset} which can be used to initiate action
+   * rewinding and regenerate the lost outputs. Otherwise, returns {@code null}.
+   */
+  @Nullable
+  private Reset informImportantOutputHandler(
+      KeyT key,
+      ValueT value,
+      Environment env,
+      ImmutableCollection<Artifact> importantArtifacts,
+      NestedSet<Cause> rootCauses,
+      CompletionContext ctx,
+      ArtifactsToBuild artifactsToBuild,
+      Set<Artifact> builtArtifacts)
+      throws CompletionFunctionException, InterruptedException {
+    var importantOutputHandler =
+        skyframeActionExecutor.getActionContextRegistry().getContext(ImportantOutputHandler.class);
+    if (importantOutputHandler == ImportantOutputHandler.NO_OP) {
+      return null; // Avoid expanding artifacts if the default no-op handler is installed.
+    }
+
+    Label label = key.actionLookupKey().getLabel();
+    ImmutableList<ActionInput> expandedArtifacts = ctx.expand(importantArtifacts);
+    InputMetadataProvider metadataProvider =
+        new ActionInputMetadataProvider(
+            skyframeActionExecutor.getExecRoot().asFragment(),
+            ctx.getImportantInputMap(),
+            ctx.getExpandedFilesets());
+    try {
+      ImmutableMap<String, ActionInput> lostOutputs;
+      try (var ignored =
+          GoogleAutoProfilerUtils.logged(
+              "Informing important output handler of top-level outputs for " + label,
+              IMPORTANT_OUTPUT_HANDLER_LOGGING_THRESHOLD)) {
+        lostOutputs =
+            importantOutputHandler.processAndGetLostArtifacts(expandedArtifacts, metadataProvider);
+      }
+      if (lostOutputs.isEmpty()) {
+        return null;
+      }
+
+      ActionInputDepOwners owners = ctx.getDepOwners(lostOutputs.values());
+
+      // Filter out lost outputs from the set of built artifacts so that they are not reported. If
+      // rewinding is successful, we'll report them later on.
+      for (ActionInput lostOutput : lostOutputs.values()) {
+        builtArtifacts.remove(lostOutput);
+        builtArtifacts.removeAll(owners.getDepOwners(lostOutput));
+      }
+
+      return actionRewindStrategy.prepareRewindPlanForLostTopLevelOutputs(
+          key, ImmutableSet.copyOf(Artifact.keys(importantArtifacts)), lostOutputs, owners, env);
+    } catch (ActionRewindException | ImportantOutputException e) {
+      LabelCause cause = new LabelCause(label, e.getDetailedExitCode());
+      rootCauses = NestedSetBuilder.fromNestedSet(rootCauses).add(cause).build();
+      env.getListener().handle(completor.getRootCauseError(key, value, cause, env));
+      skyframeActionExecutor.recordExecutionError();
+      postFailedEvent(key, value, rootCauses, ctx, artifactsToBuild, builtArtifacts, env);
+      throw new CompletionFunctionException(
+          new TopLevelOutputException(e.getMessage(), e.getDetailedExitCode()));
+    }
+  }
+
+  private static void checkStored(Postable event, TopLevelActionLookupKeyWrapper key) {
+    checkState(
+        event.storeForReplay(), "Completion events must be stored, got %s for %s", event, key);
+  }
+
   @Override
   public String extractTag(SkyKey skyKey) {
     return Label.print(((TopLevelActionLookupKeyWrapper) skyKey).actionLookupKey().getLabel());
@@ -353,6 +474,11 @@ public final class CompletionFunction<
     CompletionFunctionException(InputFileErrorException e) {
       // Not transient from the point of view of this SkyFunction.
       super(e, Transience.PERSISTENT);
+      this.actionException = null;
+    }
+
+    CompletionFunctionException(TopLevelOutputException e) {
+      super(e, Transience.TRANSIENT);
       this.actionException = null;
     }
 

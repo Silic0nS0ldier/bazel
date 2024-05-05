@@ -36,12 +36,14 @@ import com.google.devtools.build.lib.actions.BuildFailedException;
 import com.google.devtools.build.lib.actions.DynamicStrategyRegistry;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.ImportantOutputHandler;
+import com.google.devtools.build.lib.actions.MachineLoadProvider;
 import com.google.devtools.build.lib.actions.PackageRoots;
 import com.google.devtools.build.lib.actions.RemoteArtifactChecker;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.TestExecException;
 import com.google.devtools.build.lib.actions.cache.ActionCache;
+import com.google.devtools.build.lib.actions.cache.PostableActionCacheStats;
 import com.google.devtools.build.lib.actions.cache.Protos.ActionCacheStatistics;
 import com.google.devtools.build.lib.analysis.AnalysisResult;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
@@ -1030,6 +1032,12 @@ public class ExecutionTool {
     resourceMgr.setAvailableResources(
         ResourceSet.create(
             resources, options.usingLocalTestJobs() ? options.localTestJobs : Integer.MAX_VALUE));
+
+    resourceMgr.initializeCpuLoadFunctionality(
+        MachineLoadProvider.instance(),
+        options.experimentalCpuLoadScheduling,
+        options.experimentalCpuLoadSchedulingWindowSize);
+    resourceMgr.scheduleCpuLoadWindowUpdate();
   }
 
   /**
@@ -1057,8 +1065,7 @@ public class ExecutionTool {
         builder.setSaveTimeInMs(Duration.ofNanos(p.completeAndGetElapsedTimeNanos()).toMillis());
       }
     }
-
-    env.getEventBus().post(builder.build());
+    env.getReporter().post(new PostableActionCacheStats(builder.build()));
   }
 
   private Reporter getReporter() {
@@ -1093,7 +1100,7 @@ public class ExecutionTool {
     private final CommandEnvironment env;
 
     private final Stopwatch executionUnstartedTimer;
-    private final AtomicBoolean activated = new AtomicBoolean(false);
+    private final AtomicBoolean progressReceiverStarted = new AtomicBoolean(false);
 
     private final int progressReportInterval;
 
@@ -1109,11 +1116,8 @@ public class ExecutionTool {
     }
 
     @Subscribe
-    public void setupExecutionProgressReceiver(SomeExecutionStartedEvent unused) {
-      if (activated.compareAndSet(false, true)) {
-        // Note that executionProgressReceiver accesses builtTargets concurrently (after wrapping in
-        // a synchronized collection), so unsynchronized access to this variable is unsafe while it
-        // runs.
+    public void setupExecutionProgressReceiver(SomeExecutionStartedEvent event) {
+      if (progressReceiverStarted.compareAndSet(false, true)) {
         // TODO(leba): count test actions
         ExecutionProgressReceiver executionProgressReceiver =
             new ExecutionProgressReceiver(
@@ -1127,7 +1131,6 @@ public class ExecutionTool {
         skyframeExecutor.setActionExecutionProgressReportingObjects(
             executionProgressReceiver, executionProgressReceiver, statusReporter);
         skyframeExecutor.setExecutionProgressReceiver(executionProgressReceiver);
-        executionUnstartedTimer.start();
 
         skyframeExecutor.setAndStartWatchdog(
             new ActionExecutionInactivityWatchdog(
@@ -1135,7 +1138,10 @@ public class ExecutionTool {
                 executionProgressReceiver.createInactivityReporter(
                     statusReporter, skyframeExecutor.getIsBuildingExclusiveArtifacts()),
                 progressReportInterval));
-
+      }
+      // no lock necessary since this method is thread-safe.
+      if (event.countedInExecutionTime() && !executionUnstartedTimer.isRunning()) {
+        executionUnstartedTimer.start();
         env.getEventBus().unregister(this);
       }
     }

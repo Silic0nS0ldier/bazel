@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.remote;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.remote.util.Utils.getFromFuture;
 import static com.google.devtools.build.lib.remote.util.Utils.waitForBulkTransfer;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -29,6 +30,9 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Maps;
+import com.google.common.eventbus.AllowConcurrentEvents;
+import com.google.common.eventbus.EventBus;
+import com.google.common.eventbus.Subscribe;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
@@ -43,7 +47,10 @@ import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.clock.JavaClock;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
+import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionContext;
 import com.google.devtools.build.lib.exec.util.FakeOwner;
+import com.google.devtools.build.lib.remote.common.LostInputsEvent;
 import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTree;
@@ -72,6 +79,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -79,7 +87,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -92,7 +99,7 @@ import org.mockito.MockitoAnnotations;
 public class RemoteCacheTest {
   @Rule public final RxNoGlobalErrorsRule rxNoGlobalErrorsRule = new RxNoGlobalErrorsRule();
 
-  private RemoteActionExecutionContext context;
+  private RemoteActionExecutionContext remoteActionExecutionContext;
   private FileSystem fs;
   private Path execRoot;
   ArtifactRoot artifactRoot;
@@ -101,6 +108,8 @@ public class RemoteCacheTest {
   private FakeActionInputFileCache fakeFileCache;
 
   private ListeningScheduledExecutorService retryService;
+  private EventBus eventBus;
+  private Reporter reporter;
 
   @Before
   public void setUp() throws Exception {
@@ -116,7 +125,9 @@ public class RemoteCacheTest {
             /* inputs= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
             /* outputs= */ ImmutableSet.of(),
             ResourceSet.ZERO);
-    context = RemoteActionExecutionContext.create(spawn, metadata);
+    SpawnExecutionContext spawnExecutionContext = mock(SpawnExecutionContext.class);
+    remoteActionExecutionContext =
+        RemoteActionExecutionContext.create(spawn, spawnExecutionContext, metadata);
     fs = new InMemoryFileSystem(new JavaClock(), DigestHashFunction.SHA256);
     execRoot = fs.getPath("/execroot/main");
     execRoot.createDirectoryAndParents();
@@ -124,6 +135,8 @@ public class RemoteCacheTest {
     artifactRoot = ArtifactRoot.asDerivedRoot(execRoot, RootType.Output, "outputs");
     artifactRoot.getRoot().asPath().createDirectoryAndParents();
     retryService = MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(1));
+    eventBus = new EventBus();
+    reporter = new Reporter(eventBus);
   }
 
   @After
@@ -142,10 +155,11 @@ public class RemoteCacheTest {
     Digest emptyDigest = digestUtil.compute(new byte[0]);
 
     // act and assert
-    assertThat(getFromFuture(remoteCache.downloadBlob(context, emptyDigest))).isEmpty();
+    assertThat(getFromFuture(remoteCache.downloadBlob(remoteActionExecutionContext, emptyDigest)))
+        .isEmpty();
 
     try (OutputStream out = file.getOutputStream()) {
-      getFromFuture(remoteCache.downloadFile(context, file, emptyDigest));
+      getFromFuture(remoteCache.downloadFile(remoteActionExecutionContext, file, emptyDigest));
     }
     assertThat(file.exists()).isTrue();
     assertThat(file.getFileSize()).isEqualTo(0);
@@ -165,7 +179,8 @@ public class RemoteCacheTest {
     Path file = execRoot.getRelative("file");
 
     // act
-    ListenableFuture<Void> download = remoteCache.downloadFile(context, file, digest);
+    ListenableFuture<Void> download =
+        remoteCache.downloadFile(remoteActionExecutionContext, file, digest);
     download.cancel(/* mayInterruptIfRunning= */ true);
 
     // assert
@@ -184,7 +199,7 @@ public class RemoteCacheTest {
 
     waitForBulkTransfer(
         remoteCache.downloadOutErr(
-            context,
+            remoteActionExecutionContext,
             result.build(),
             new FileOutErr(execRoot.getRelative("stdout"), execRoot.getRelative("stderr"))),
         true);
@@ -212,7 +227,7 @@ public class RemoteCacheTest {
     RemoteCache remoteCache = new InMemoryRemoteCache(cas, options, digestUtil);
 
     // act
-    getFromFuture(remoteCache.downloadFile(context, file, helloDigest));
+    getFromFuture(remoteCache.downloadFile(remoteActionExecutionContext, file, helloDigest));
 
     // assert
     assertThat(file.isSymbolicLink()).isTrue();
@@ -229,12 +244,19 @@ public class RemoteCacheTest {
     Digest emptyDigest = fakeFileCache.createScratchInput(ActionInputHelper.fromPath("file"), "");
     Path file = execRoot.getRelative("file");
 
-    getFromFuture(remoteCache.uploadBlob(context, emptyDigest, ByteString.EMPTY));
-    assertThat(getFromFuture(remoteCache.findMissingDigests(context, ImmutableSet.of(emptyDigest))))
+    getFromFuture(
+        remoteCache.uploadBlob(remoteActionExecutionContext, emptyDigest, ByteString.EMPTY));
+    assertThat(
+            getFromFuture(
+                remoteCache.findMissingDigests(
+                    remoteActionExecutionContext, ImmutableSet.of(emptyDigest))))
         .containsExactly(emptyDigest);
 
-    getFromFuture(remoteCache.uploadFile(context, emptyDigest, file));
-    assertThat(getFromFuture(remoteCache.findMissingDigests(context, ImmutableSet.of(emptyDigest))))
+    getFromFuture(remoteCache.uploadFile(remoteActionExecutionContext, emptyDigest, file));
+    assertThat(
+            getFromFuture(
+                remoteCache.findMissingDigests(
+                    remoteActionExecutionContext, ImmutableSet.of(emptyDigest))))
         .containsExactly(emptyDigest);
   }
 
@@ -254,8 +276,8 @@ public class RemoteCacheTest {
     Digest digest = fakeFileCache.createScratchInput(ActionInputHelper.fromPath("file"), "content");
     Path file = execRoot.getRelative("file");
 
-    remoteCache.uploadFile(context, digest, file);
-    remoteCache.uploadFile(context, digest, file);
+    remoteCache.uploadFile(remoteActionExecutionContext, digest, file);
+    remoteCache.uploadFile(remoteActionExecutionContext, digest, file);
 
     assertThat(times.get()).isEqualTo(1);
   }
@@ -286,21 +308,60 @@ public class RemoteCacheTest {
     RemoteCache remoteCache = newRemoteCache(remoteCacheClient);
     Digest digest = fakeFileCache.createScratchInput(ActionInputHelper.fromPath("file"), "content");
     Path file = execRoot.getRelative("file");
-    assertThat(getFromFuture(remoteCache.findMissingDigests(context, ImmutableList.of(digest))))
+    assertThat(
+            getFromFuture(
+                remoteCache.findMissingDigests(
+                    remoteActionExecutionContext, ImmutableList.of(digest))))
         .containsExactly(digest);
 
     Exception thrown = null;
     try {
-      getFromFuture(remoteCache.uploadFile(context, digest, file));
+      getFromFuture(remoteCache.uploadFile(remoteActionExecutionContext, digest, file));
     } catch (IOException e) {
       thrown = e;
     }
     assertThat(thrown).isNotNull();
     assertThat(thrown).isInstanceOf(IOException.class);
-    getFromFuture(remoteCache.uploadFile(context, digest, file));
+    getFromFuture(remoteCache.uploadFile(remoteActionExecutionContext, digest, file));
 
-    assertThat(getFromFuture(remoteCache.findMissingDigests(context, ImmutableList.of(digest))))
+    assertThat(
+            getFromFuture(
+                remoteCache.findMissingDigests(
+                    remoteActionExecutionContext, ImmutableList.of(digest))))
         .isEmpty();
+  }
+
+  @Test
+  public void ensureInputsPresent_missingInputs_sendLostInputsEvent() throws Exception {
+    RemoteCacheClient cacheProtocol = spy(new InMemoryCacheClient());
+    RemoteExecutionCache remoteCache = spy(newRemoteExecutionCache(cacheProtocol));
+    remoteCache.setRemotePathChecker(
+        (context, path) -> path.relativeTo(execRoot).equals(PathFragment.create("foo")));
+    var lostInputsEvents = new ConcurrentLinkedQueue<LostInputsEvent>();
+    eventBus.register(
+        new Object() {
+          @Subscribe
+          @AllowConcurrentEvents
+          public void onLostInputs(LostInputsEvent event) {
+            lostInputsEvents.add(event);
+          }
+        });
+
+    Path path = execRoot.getRelative("foo");
+    FileSystemUtils.writeContentAsLatin1(path, "bar");
+    SortedMap<PathFragment, Path> inputs = new TreeMap<>();
+    inputs.put(PathFragment.create("foo"), path);
+    MerkleTree merkleTree = MerkleTree.build(inputs, digestUtil);
+    path.delete();
+
+    assertThrows(
+        IOException.class,
+        () -> {
+          remoteCache.ensureInputsPresent(
+              remoteActionExecutionContext, merkleTree, ImmutableMap.of(), false, reporter);
+        });
+
+    assertThat(lostInputsEvents).hasSize(1);
   }
 
   @Test
@@ -331,7 +392,7 @@ public class RemoteCacheTest {
         .when(cacheProtocol)
         .uploadFile(any(), any(), any());
 
-    Path path = fs.getPath("/execroot/foo");
+    Path path = execRoot.getRelative("foo");
     FileSystemUtils.writeContentAsLatin1(path, "bar");
     SortedMap<PathFragment, Path> inputs = new TreeMap<>();
     inputs.put(PathFragment.create("foo"), path);
@@ -342,7 +403,8 @@ public class RemoteCacheTest {
         new Thread(
             () -> {
               try {
-                remoteCache.ensureInputsPresent(context, merkleTree, ImmutableMap.of(), false);
+                remoteCache.ensureInputsPresent(
+                    remoteActionExecutionContext, merkleTree, ImmutableMap.of(), false, reporter);
               } catch (IOException | InterruptedException ignored) {
                 // ignored
               } finally {
@@ -405,7 +467,7 @@ public class RemoteCacheTest {
         .when(cacheProtocol)
         .uploadFile(any(), any(), any());
 
-    Path path = fs.getPath("/execroot/foo");
+    Path path = execRoot.getRelative("foo");
     FileSystemUtils.writeContentAsLatin1(path, "bar");
     SortedMap<PathFragment, Path> inputs = new TreeMap<>();
     inputs.put(PathFragment.create("foo"), path);
@@ -416,7 +478,8 @@ public class RemoteCacheTest {
     Runnable work =
         () -> {
           try {
-            remoteCache.ensureInputsPresent(context, merkleTree, ImmutableMap.of(), false);
+            remoteCache.ensureInputsPresent(
+                remoteActionExecutionContext, merkleTree, ImmutableMap.of(), false, reporter);
           } catch (IOException ignored) {
             // ignored
           } catch (InterruptedException e) {
@@ -486,11 +549,11 @@ public class RemoteCacheTest {
         .when(cacheProtocol)
         .uploadFile(any(), any(), any());
 
-    Path foo = fs.getPath("/execroot/foo");
+    Path foo = execRoot.getRelative("foo");
     FileSystemUtils.writeContentAsLatin1(foo, "foo");
-    Path bar = fs.getPath("/execroot/bar");
+    Path bar = execRoot.getRelative("bar");
     FileSystemUtils.writeContentAsLatin1(bar, "bar");
-    Path qux = fs.getPath("/execroot/qux");
+    Path qux = execRoot.getRelative("qux");
     FileSystemUtils.writeContentAsLatin1(qux, "qux");
 
     SortedMap<PathFragment, Path> input1 = new TreeMap<>();
@@ -509,7 +572,8 @@ public class RemoteCacheTest {
         new Thread(
             () -> {
               try {
-                remoteCache.ensureInputsPresent(context, merkleTree1, ImmutableMap.of(), false);
+                remoteCache.ensureInputsPresent(
+                    remoteActionExecutionContext, merkleTree1, ImmutableMap.of(), false, reporter);
               } catch (IOException ignored) {
                 // ignored
               } catch (InterruptedException e) {
@@ -522,7 +586,8 @@ public class RemoteCacheTest {
         new Thread(
             () -> {
               try {
-                remoteCache.ensureInputsPresent(context, merkleTree2, ImmutableMap.of(), false);
+                remoteCache.ensureInputsPresent(
+                    remoteActionExecutionContext, merkleTree2, ImmutableMap.of(), false, reporter);
               } catch (InterruptedException | IOException ignored) {
                 // ignored
               } finally {
@@ -576,15 +641,17 @@ public class RemoteCacheTest {
         .when(cacheProtocol)
         .uploadFile(any(), any(), any());
     RemoteExecutionCache remoteCache = spy(newRemoteExecutionCache(cacheProtocol));
-    Path path = fs.getPath("/execroot/foo");
+    Path path = execRoot.getRelative("foo");
     FileSystemUtils.writeContentAsLatin1(path, "bar");
     SortedMap<PathFragment, Path> inputs = ImmutableSortedMap.of(PathFragment.create("foo"), path);
     MerkleTree merkleTree = MerkleTree.build(inputs, digestUtil);
 
     IOException e =
-        Assert.assertThrows(
+        assertThrows(
             IOException.class,
-            () -> remoteCache.ensureInputsPresent(context, merkleTree, ImmutableMap.of(), false));
+            () ->
+                remoteCache.ensureInputsPresent(
+                    remoteActionExecutionContext, merkleTree, ImmutableMap.of(), false, reporter));
 
     assertThat(e).hasMessageThat().contains("upload failed");
   }
@@ -600,7 +667,8 @@ public class RemoteCacheTest {
     Digest digest = fakeFileCache.createScratchInput(ActionInputHelper.fromPath("file"), "content");
     Path file = execRoot.getRelative("file");
 
-    ListenableFuture<Void> upload = remoteCache.uploadFile(context, digest, file);
+    ListenableFuture<Void> upload =
+        remoteCache.uploadFile(remoteActionExecutionContext, digest, file);
     assertThat(remoteCache.casUploadCache.getInProgressTasks()).contains(digest);
     remoteCache.shutdownNow();
 

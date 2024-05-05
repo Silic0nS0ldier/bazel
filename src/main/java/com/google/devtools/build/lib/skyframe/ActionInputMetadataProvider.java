@@ -27,7 +27,7 @@ import com.google.devtools.build.lib.actions.FilesetManifest.RelativeSymlinkBeha
 import com.google.devtools.build.lib.actions.FilesetOutputSymlink;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.RunfilesArtifactValue;
-import com.google.devtools.build.lib.actions.RunfilesSupplier.RunfilesTree;
+import com.google.devtools.build.lib.actions.RunfilesTree;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -75,14 +75,13 @@ final class ActionInputMetadataProvider implements InputMetadataProvider {
   @Nullable
   @Override
   public FileArtifactValue getInputMetadata(ActionInput actionInput) throws IOException {
-    if (!(actionInput instanceof Artifact)) {
+    if (!(actionInput instanceof Artifact artifact)) {
       PathFragment inputPath = actionInput.getExecPath();
       PathFragment filesetKeyPath =
           inputPath.startsWith(execRoot) ? inputPath.relativeTo(execRoot) : inputPath;
       return filesetMapping.get(filesetKeyPath);
     }
 
-    Artifact artifact = (Artifact) actionInput;
     FileArtifactValue value;
 
     value = inputArtifactData.getInputMetadata(artifact);

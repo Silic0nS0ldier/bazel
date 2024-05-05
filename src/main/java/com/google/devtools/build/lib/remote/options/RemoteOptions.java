@@ -407,9 +407,9 @@ public final class RemoteOptions extends CommonRemoteOptions {
       effectTags = {OptionEffectTag.EXECUTION},
       metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       help =
-          "If set to true, Bazel will represent symlinks in action outputs in the remote"
-              + " caching/execution protocol as such. Otherwise, symlinks will be followed and"
-              + " represented as files or directories. See #6631 for details.")
+          "If set to true, Bazel will always upload symlinks as such to a remote or disk cache."
+              + " Otherwise, non-dangling relative symlinks (and only those) will be uploaded as"
+              + " the file or directory they point to.")
   public boolean incompatibleRemoteSymlinks;
 
   @Option(
@@ -419,9 +419,7 @@ public final class RemoteOptions extends CommonRemoteOptions {
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
       metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
-      help =
-          "If set to true and --incompatible_remote_symlinks is also true, symlinks in action"
-              + " outputs are allowed to dangle.")
+      help = "If set to true, symlinks uploaded to a remote or disk cache are allowed to dangle.")
   public boolean incompatibleRemoteDanglingSymlinks;
 
   @Option(
@@ -430,8 +428,20 @@ public final class RemoteOptions extends CommonRemoteOptions {
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.REMOTE,
       effectTags = {OptionEffectTag.UNKNOWN},
-      help = "If enabled, compress/decompress cache blobs with zstd.")
+      help =
+          "If enabled, compress/decompress cache blobs with zstd when their size is at least"
+              + " --experimental_remote_cache_compression_threshold.")
   public boolean cacheCompression;
+
+  @Option(
+      name = "experimental_remote_cache_compression_threshold",
+      defaultValue = "0",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "The minimum blob size required to compress/decompress with zstd. Ineffectual unless"
+              + " --remote_cache_compression is set.")
+  public int cacheCompressionThreshold;
 
   @Option(
       name = "build_event_upload_max_threads",
@@ -718,9 +728,11 @@ public final class RemoteOptions extends CommonRemoteOptions {
               + " cache entries and result in incorrect builds.\n\n"
               + "Scrubbing does not affect how an action is executed, only how its remote/disk"
               + " cache key is computed for the purpose of retrieving or storing an action result."
-              + " It cannot be used in conjunction with remote execution. Modifying the scrubbing"
-              + " configuration does not invalidate outputs present in the local filesystem or"
-              + " internal caches; a clean build is required to reexecute affected actions.\n\n"
+              + " Scrubbed actions are incompatible with remote execution, and will always be"
+              + " executed locally instead.\n\n"
+              + "Modifying the scrubbing configuration does not invalidate outputs present in the"
+              + " local filesystem or internal caches; a clean build is required to reexecute"
+              + " affected actions.\n\n"
               + "In order to successfully use this feature, you likely want to set a custom"
               + " --host_platform together with --experimental_platform_in_output_dir (to normalize"
               + " output prefixes) and --incompatible_strict_action_env (to normalize environment"
@@ -739,6 +751,30 @@ public final class RemoteOptions extends CommonRemoteOptions {
               + "This is a temporary flag to allow users switch off the behaviour. Once Bazel is"
               + " smart enough about the RAM/CPU usages, this flag will be removed.")
   public boolean throttleRemoteActionBuilding;
+
+  @Option(
+      name = "experimental_remote_output_service",
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "HOST or HOST:PORT of a remote output service endpoint. The supported schemas are grpc, "
+              + "grpcs (grpc with TLS enabled) and unix (local UNIX sockets). If no schema is "
+              + "provided Bazel will default to grpcs. Specify grpc:// or unix: schema to "
+              + "disable TLS.")
+  public String remoteOutputService;
+
+  @Option(
+      name = "experimental_remote_output_service_output_path_prefix",
+      defaultValue = "",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "The path under which the contents of output directories managed by the"
+              + " --experimental_remote_output_service are placed. The actual output directory used"
+              + " by a build will be a descendant of this path and determined by the output"
+              + " service.")
+  public String remoteOutputServiceOutputPathPrefix;
 
   private static final class ScrubberConverter extends Converter.Contextless<Scrubber> {
 

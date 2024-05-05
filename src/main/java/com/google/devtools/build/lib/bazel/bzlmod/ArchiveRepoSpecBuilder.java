@@ -27,18 +27,12 @@ import net.starlark.java.eval.StarlarkInt;
  */
 public class ArchiveRepoSpecBuilder {
 
-  public static final String HTTP_ARCHIVE_PATH = "@bazel_tools//tools/build_defs/repo:http.bzl";
+  public static final String HTTP_ARCHIVE_PATH = "@@bazel_tools//tools/build_defs/repo:http.bzl";
 
   private final ImmutableMap.Builder<String, Object> attrBuilder;
 
   public ArchiveRepoSpecBuilder() {
     attrBuilder = new ImmutableMap.Builder<>();
-  }
-
-  @CanIgnoreReturnValue
-  public ArchiveRepoSpecBuilder setRepoName(String repoName) {
-    attrBuilder.put("name", repoName);
-    return this;
   }
 
   @CanIgnoreReturnValue
@@ -60,7 +54,7 @@ public class ArchiveRepoSpecBuilder {
   }
 
   @CanIgnoreReturnValue
-  public ArchiveRepoSpecBuilder setPatches(ImmutableList<String> patches) {
+  public ArchiveRepoSpecBuilder setPatches(ImmutableList<Object> patches) {
     attrBuilder.put("patches", patches);
     return this;
   }

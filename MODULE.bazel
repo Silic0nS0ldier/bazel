@@ -16,20 +16,22 @@ bazel_dep(name = "rules_license", version = "0.0.7")
 bazel_dep(name = "bazel_skylib", version = "1.5.0")
 bazel_dep(name = "protobuf", version = "21.7", repo_name = "com_google_protobuf")
 bazel_dep(name = "grpc", version = "1.48.1.bcr.1", repo_name = "com_github_grpc_grpc")
-bazel_dep(name = "platforms", version = "0.0.8")
+bazel_dep(name = "platforms", version = "0.0.9")
 bazel_dep(name = "rules_pkg", version = "0.9.1")
-bazel_dep(name = "stardoc", version = "0.5.3", repo_name = "io_bazel_skydoc")
+bazel_dep(name = "stardoc", version = "0.5.6", repo_name = "io_bazel_skydoc")
 bazel_dep(name = "zstd-jni", version = "1.5.2-3.bcr.1")
-bazel_dep(name = "blake3", version = "1.3.3.bcr.1")
+bazel_dep(name = "blake3", version = "1.5.1.bcr.1")
+bazel_dep(name = "sqlite3", version = "3.42.0.bcr.1")
 bazel_dep(name = "zlib", version = "1.3")
 bazel_dep(name = "rules_cc", version = "0.0.9")
-bazel_dep(name = "rules_java", version = "7.3.2")
-bazel_dep(name = "rules_graalvm", version = "0.10.3")
+bazel_dep(name = "rules_java", version = "7.5.0")
+bazel_dep(name = "rules_graalvm", version = "0.11.1")
 bazel_dep(name = "rules_proto", version = "5.3.0-21.7")
-bazel_dep(name = "rules_jvm_external", version = "5.2")
-bazel_dep(name = "rules_python", version = "0.26.0")
-bazel_dep(name = "rules_testing", version = "0.0.4")
+bazel_dep(name = "rules_jvm_external", version = "6.0")
+bazel_dep(name = "rules_python", version = "0.28.0")
+bazel_dep(name = "rules_testing", version = "0.6.0")
 bazel_dep(name = "googletest", version = "1.14.0", repo_name = "com_google_googletest")
+bazel_dep(name = "with_cfg.bzl", version = "0.2.4")
 
 # TODO(pcloudy): Add remoteapis and googleapis as Bazel modules in the BCR.
 bazel_dep(name = "remoteapis", version = "")
@@ -38,7 +40,7 @@ bazel_dep(name = "googleapis", version = "")
 single_version_override(
     module_name = "rules_jvm_external",
     patch_strip = 1,
-    patches = ["//third_party:rules_jvm_external_5.2.patch"],
+    patches = ["//third_party:rules_jvm_external_6.0.patch"],
 )
 
 local_path_override(
@@ -57,7 +59,15 @@ bazel_dep(name = "apple_support", version = "1.8.1")
 bazel_dep(name = "abseil-cpp", version = "20230125.1")
 bazel_dep(name = "c-ares", version = "1.15.0")
 bazel_dep(name = "rules_go", version = "0.39.1")
+bazel_dep(name = "rules_kotlin", version = "1.9.0")
 bazel_dep(name = "upb", version = "0.0.0-20220923-a547704")
+single_version_override(
+    module_name = "upb",
+    patch_strip = 1,
+    patches = [
+        "//third_party/upb:00_remove_toolchain_transition.patch",
+    ],
+)
 
 # =========================================
 # Java dependencies
@@ -66,19 +76,20 @@ bazel_dep(name = "upb", version = "0.0.0-20220923-a547704")
 maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
 maven.install(
     artifacts = [
+        # keep sorted
         "com.beust:jcommander:1.82",
         "com.github.ben-manes.caffeine:caffeine:3.0.5",
         "com.github.kevinstern:software-and-algorithms:1.0",
         "com.github.stephenc.jcip:jcip-annotations:1.0-1",
-        "com.google.api-client:google-api-client-gson:1.35.2",
         "com.google.api-client:google-api-client:1.35.2",
+        "com.google.api-client:google-api-client-gson:1.35.2",
         "com.google.auth:google-auth-library-credentials:1.6.0",
         "com.google.auth:google-auth-library-oauth2-http:1.6.0",
-        "com.google.auto.service:auto-service-annotations:1.0.1",
-        "com.google.auto.service:auto-service:1.0",
-        "com.google.auto.value:auto-value-annotations:1.9",
-        "com.google.auto.value:auto-value:1.8.2",
         "com.google.auto:auto-common:1.2.1",
+        "com.google.auto.service:auto-service:1.0",
+        "com.google.auto.service:auto-service-annotations:1.0.1",
+        "com.google.auto.value:auto-value:1.8.2",
+        "com.google.auto.value:auto-value-annotations:1.9",
         "com.google.code.findbugs:jsr305:3.0.2",
         "com.google.code.gson:gson:2.9.0",
         "com.google.code.java-allocation-instrumenter:java-allocation-instrumenter:3.3.0",
@@ -87,18 +98,18 @@ maven.install(
         "com.google.errorprone:error_prone_check_api:2.23.0",
         "com.google.errorprone:error_prone_core:2.23.0",
         "com.google.errorprone:error_prone_type_annotations:2.23.0",
-        "com.google.flogger:flogger-system-backend:0.5.1",
         "com.google.flogger:flogger:0.5.1",
+        "com.google.flogger:flogger-system-backend:0.5.1",
         "com.google.flogger:google-extensions:0.5.1",
         "com.google.guava:failureaccess:1.0.1",
-        "com.google.guava:guava:31.1-jre",
-        "com.google.http-client:google-http-client-gson:1.42.0",
+        "com.google.guava:guava:33.0.0-jre",
         "com.google.http-client:google-http-client:1.42.0",
+        "com.google.http-client:google-http-client-gson:1.42.0",
         "com.google.j2objc:j2objc-annotations:1.3",
-        "com.google.turbine:turbine:0.3.1",
+        "com.google.turbine:turbine:0.5.0",
         "com.ryanharter.auto.value:auto-value-gson-extension:1.3.1",
-        "com.ryanharter.auto.value:auto-value-gson-runtime:1.3.1",
         "com.ryanharter.auto.value:auto-value-gson-factory:1.3.1",
+        "com.ryanharter.auto.value:auto-value-gson-runtime:1.3.1",
         "com.squareup:javapoet:1.12.0",
         "commons-collections:commons-collections:3.2.2",
         "commons-lang:commons-lang:2.6",
@@ -108,24 +119,25 @@ maven.install(
         "io.grpc:grpc-context:1.48.1",
         "io.grpc:grpc-core:1.48.1",
         "io.grpc:grpc-netty:1.48.1",
-        "io.grpc:grpc-protobuf-lite:1.48.1",
         "io.grpc:grpc-protobuf:1.48.1",
+        "io.grpc:grpc-protobuf-lite:1.48.1",
         "io.grpc:grpc-stub:1.48.1",
         "io.netty:netty-buffer:4.1.93.Final",
-        "io.netty:netty-codec-http2:4.1.93.Final",
-        "io.netty:netty-codec-http:4.1.93.Final",
         "io.netty:netty-codec:4.1.93.Final",
+        "io.netty:netty-codec-http:4.1.93.Final",
+        "io.netty:netty-codec-http2:4.1.93.Final",
         "io.netty:netty-common:4.1.93.Final",
-        "io.netty:netty-handler-proxy:4.1.93.Final",
         "io.netty:netty-handler:4.1.93.Final",
-        "io.netty:netty-resolver-dns:4.1.93.Final",
+        "io.netty:netty-handler-proxy:4.1.93.Final",
         "io.netty:netty-resolver:4.1.93.Final",
+        "io.netty:netty-resolver-dns:4.1.93.Final",
         "io.netty:netty-tcnative-boringssl-static:jar:linux-aarch_64:2.0.56.Final",
         "io.netty:netty-tcnative-boringssl-static:jar:linux-x86_64:2.0.56.Final",
         "io.netty:netty-tcnative-boringssl-static:jar:osx-aarch_64:2.0.56.Final",
         "io.netty:netty-tcnative-boringssl-static:jar:osx-x86_64:2.0.56.Final",
         "io.netty:netty-tcnative-boringssl-static:jar:windows-x86_64:2.0.56.Final",
         "io.netty:netty-tcnative-classes:2.0.56.Final",
+        "io.netty:netty-transport:4.1.93.Final",
         "io.netty:netty-transport-classes-epoll:4.1.93.Final",
         "io.netty:netty-transport-classes-kqueue:4.1.93.Final",
         "io.netty:netty-transport-native-epoll:jar:linux-aarch_64:4.1.93.Final",
@@ -137,29 +149,30 @@ maven.install(
         "io.netty:netty-transport-native-unix-common:jar:linux-x86_64:4.1.93.Final",
         "io.netty:netty-transport-native-unix-common:jar:osx-aarch_64:4.1.93.Final",
         "io.netty:netty-transport-native-unix-common:jar:osx-x86_64:4.1.93.Final",
-        "io.netty:netty-transport:4.1.93.Final",
         "io.reactivex.rxjava3:rxjava:3.1.2",
         "it.unimi.dsi:fastutil:7.2.1",
         "javax.activation:javax.activation-api:1.2.0",
         "javax.annotation:javax.annotation-api:1.3.2",
         "javax.inject:javax.inject:1",
-        "net.bytebuddy:byte-buddy-agent:1.14.5",
         "net.bytebuddy:byte-buddy:1.14.5",
+        "net.bytebuddy:byte-buddy-agent:1.14.5",
         "org.apache.commons:commons-compress:1.20",
         "org.apache.commons:commons-pool2:2.8.0",
         "org.apache.tomcat:tomcat-annotations-api:8.0.5",
         "org.apache.velocity:velocity:1.7",
         "org.checkerframework:checker-qual:3.19.0",
+        "org.openjdk.jmh:jmh-core:1.37",
+        "org.openjdk.jmh:jmh-generator-annprocess:1.37",
+        "org.ow2.asm:asm:9.2",
         "org.ow2.asm:asm-analysis:9.2",
         "org.ow2.asm:asm-commons:9.2",
         "org.ow2.asm:asm-tree:9.2",
         "org.ow2.asm:asm-util:9.2",
-        "org.ow2.asm:asm:9.2",
         "org.pcollections:pcollections:3.1.4",
         "org.threeten:threeten-extra:1.5.0",
         "org.tukaani:xz:1.9",
         "org.yaml:snakeyaml:1.28",
-        "tools.profiler:async-profiler:2.9",
+        "tools.profiler:async-profiler:3.0",
         # The following jars are for testing.
         # junit is not test only due to //src/java_tools/junitrunner/java/com/google/testing/junit/junit4:runner,
         # and hamcrest is a dependency of junit.
@@ -194,14 +207,14 @@ maven.install(
         version = version,
     )
     for group, artifact, version in [coord.split(":") for coord in [
-        "com.google.guava:guava-testlib:31.1-jre",
+        "com.google.guava:guava-testlib:33.0.0-jre",
         "com.google.jimfs:jimfs:1.2",
         "com.google.testing.compile:compile-testing:0.18",
-        "com.google.testparameterinjector:test-parameter-injector:1.0",
-        "com.google.truth:truth:1.1.3",
-        "com.google.truth.extensions:truth-java8-extension:1.1.3",
-        "com.google.truth.extensions:truth-liteproto-extension:1.1.3",
-        "com.google.truth.extensions:truth-proto-extension:1.1.3",
+        "com.google.testparameterinjector:test-parameter-injector:1.15",
+        "com.google.truth:truth:1.4.0",
+        "com.google.truth.extensions:truth-java8-extension:1.4.0",
+        "com.google.truth.extensions:truth-liteproto-extension:1.4.0",
+        "com.google.truth.extensions:truth-proto-extension:1.4.0",
         "org.mockito:mockito-core:5.4.0",
     ]]
 ]
@@ -285,8 +298,8 @@ gvm = use_extension("@rules_graalvm//:extensions.bzl", "graalvm")
 gvm.graalvm(
     name = "graalvm",
     distribution = "ce",
-    java_version = "20",
-    version = "20.0.2",
+    java_version = "21",
+    version = "21.0.2",
 )
 use_repo(gvm, "graalvm_toolchains")
 
@@ -303,7 +316,7 @@ use_repo(
 )
 
 bazel_rbe_deps = use_extension("//:rbe_extension.bzl", "bazel_rbe_deps")
-use_repo(bazel_rbe_deps, "rbe_ubuntu2004_java11")
+use_repo(bazel_rbe_deps, "rbe_ubuntu2004")
 
 remote_coverage_tools_extension = use_extension("//tools/test:extensions.bzl", "remote_coverage_tools_extension")
 use_repo(remote_coverage_tools_extension, "remote_coverage_tools")
@@ -354,3 +367,6 @@ use_repo(bazel_android_deps, "desugar_jdk_libs")
 
 remote_android_extensions = use_extension("//tools/android:android_extensions.bzl", "remote_android_tools_extensions")
 use_repo(remote_android_extensions, "android_gmaven_r8", "android_tools")
+
+android_sdk_proxy_extensions = use_extension("//tools/android:android_extensions.bzl", "android_sdk_proxy_extensions")
+use_repo(android_sdk_proxy_extensions, "android_external")

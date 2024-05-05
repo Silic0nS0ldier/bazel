@@ -43,9 +43,13 @@ public class LocalRepositoryFunction extends RepositoryFunction {
       Path outputDirectory,
       BlazeDirectories directories,
       Environment env,
-      Map<String, String> markerData,
+      Map<RepoRecordedInput, String> recordedInputValues,
       SkyKey key)
       throws InterruptedException, RepositoryFunctionException {
+    ensureNativeRepoRuleEnabled(
+        rule, env, "load(\"@bazel_tools//tools/build_defs/repo:local.bzl\", \"local_repository\")");
+    // DO NOT MODIFY THIS! It's being deprecated in favor of Starlark counterparts.
+    // See https://github.com/bazelbuild/bazel/issues/18285
     String userDefinedPath = RepositoryFunction.getPathAttr(rule);
     Path targetPath = directories.getWorkspace().getRelative(userDefinedPath);
     RepositoryDirectoryValue.Builder result =
@@ -66,8 +70,8 @@ public class LocalRepositoryFunction extends RepositoryFunction {
     String name = rule.getName();
     Object pathObj = rule.getAttr("path");
     String path;
-    if (pathObj instanceof String) {
-      path = (String) pathObj;
+    if (pathObj instanceof String string) {
+      path = string;
     } else {
       path = "";
     }

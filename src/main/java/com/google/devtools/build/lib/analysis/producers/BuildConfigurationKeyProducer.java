@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.skyframe.config.BuildConfigurationKey;
 import com.google.devtools.build.lib.skyframe.config.PlatformMappingException;
 import com.google.devtools.build.lib.skyframe.config.PlatformMappingValue;
+import com.google.devtools.build.lib.skyframe.toolchains.PlatformLookupUtil.InvalidPlatformException;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.skyframe.SkyValue;
 import com.google.devtools.build.skyframe.state.StateMachine;
@@ -44,6 +45,8 @@ public class BuildConfigurationKeyProducer
     void acceptTransitionError(OptionsParsingException e);
 
     void acceptPlatformMappingError(PlatformMappingException e);
+
+    void acceptPlatformFlagsError(InvalidPlatformException error);
 
     void acceptTransitionedConfigurations(
         ImmutableMap<String, BuildConfigurationKey> transitionedOptions);
@@ -88,8 +91,8 @@ public class BuildConfigurationKeyProducer
       sink.acceptPlatformMappingError(exception);
       return;
     }
-    if (value instanceof PlatformMappingValue) {
-      this.platformMappingValue = (PlatformMappingValue) value;
+    if (value instanceof PlatformMappingValue platformMappingValue) {
+      this.platformMappingValue = platformMappingValue;
       return;
     }
 
@@ -97,6 +100,10 @@ public class BuildConfigurationKeyProducer
   }
 
   private StateMachine applyMappings(Tasks tasks) {
+    if (this.platformMappingValue == null) {
+      return DONE; // There was an error.
+    }
+
     var result =
         ImmutableMap.<String, BuildConfigurationKey>builderWithExpectedSize(options.size());
     for (Map.Entry<String, BuildOptions> entry : options.entrySet()) {

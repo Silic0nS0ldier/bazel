@@ -134,14 +134,19 @@ public class JavaStarlarkCommon
       Object injectingRuleKind,
       boolean enableDirectClasspath,
       Sequence<?> additionalInputs)
-      throws EvalException, TypeException, RuleErrorException, LabelSyntaxException {
+      throws EvalException,
+          TypeException,
+          RuleErrorException,
+          LabelSyntaxException,
+          InterruptedException {
     checkJavaToolchainIsDeclaredOnRule(ctx.getRuleContext());
     JavaTargetAttributes.Builder attributesBuilder =
         new JavaTargetAttributes.Builder(javaSemantics)
             .addSourceJars(Sequence.cast(sourceJars, Artifact.class, "source_jars"))
             .addSourceFiles(sourceFiles.toList(Artifact.class))
             .addDirectJars(directJars.getSet(Artifact.class))
-            .addCompileTimeClassPathEntries(compileTimeClasspath.getSet(Artifact.class))
+            .setCompileTimeClassPathEntriesWithPrependedDirectJars(
+                compileTimeClasspath.getSet(Artifact.class))
             .setStrictJavaDeps(getStrictDepsMode(Ascii.toUpperCase(strictDepsMode)))
             .setTargetLabel(targetLabel)
             .setInjectingRuleKind(
@@ -198,7 +203,11 @@ public class JavaStarlarkCommon
       boolean enableDirectClasspath,
       Sequence<?> additionalInputs,
       Sequence<?> additionalOutputs)
-      throws EvalException, TypeException, RuleErrorException, LabelSyntaxException {
+      throws EvalException,
+          TypeException,
+          RuleErrorException,
+          LabelSyntaxException,
+          InterruptedException {
     checkJavaToolchainIsDeclaredOnRule(ctx.getRuleContext());
     JavaCompileOutputs<Artifact> outputs =
         JavaCompileOutputs.builder()
@@ -214,7 +223,8 @@ public class JavaStarlarkCommon
             .addSourceJars(Sequence.cast(sourceJars, Artifact.class, "source_jars"))
             .addSourceFiles(Depset.noneableCast(sourceFiles, Artifact.class, "sources").toList())
             .addDirectJars(directJars.getSet(Artifact.class))
-            .addCompileTimeClassPathEntries(compileTimeClasspath.getSet(Artifact.class))
+            .setCompileTimeClassPathEntriesWithPrependedDirectJars(
+                compileTimeClasspath.getSet(Artifact.class))
             .addClassPathResources(
                 Sequence.cast(classpathResources, Artifact.class, "classpath_resources"))
             .setStrictJavaDeps(getStrictDepsMode(Ascii.toUpperCase(strictDepsMode)))
@@ -259,14 +269,14 @@ public class JavaStarlarkCommon
   @Override
   public String getTargetKind(Object target, StarlarkThread thread) throws EvalException {
     checkPrivateAccess(thread);
-    if (target instanceof MergedConfiguredTarget) {
-      target = ((MergedConfiguredTarget) target).getBaseConfiguredTarget();
+    if (target instanceof MergedConfiguredTarget mergedConfiguredTarget) {
+      target = mergedConfiguredTarget.getBaseConfiguredTarget();
     }
-    if (target instanceof ConfiguredTarget) {
-      target = ((ConfiguredTarget) target).getActual();
+    if (target instanceof ConfiguredTarget configuredTarget) {
+      target = configuredTarget.getActual();
     }
-    if (target instanceof AbstractConfiguredTarget) {
-      return ((AbstractConfiguredTarget) target).getRuleClassString();
+    if (target instanceof AbstractConfiguredTarget abstractConfiguredTarget) {
+      return abstractConfiguredTarget.getRuleClassString();
     }
     return "";
   }
@@ -341,10 +351,10 @@ public class JavaStarlarkCommon
 
   @VisibleForTesting
   static String printableType(Object elem) {
-    if (elem instanceof StarlarkInfoWithSchema) {
-      return ((StarlarkInfoWithSchema) elem).getProvider().getPrintableName();
-    } else if (elem instanceof NativeInfo) {
-      return ((NativeInfo) elem).getProvider().getPrintableName();
+    if (elem instanceof StarlarkInfoWithSchema starlarkInfoWithSchema) {
+      return starlarkInfoWithSchema.getProvider().getPrintableName();
+    } else if (elem instanceof NativeInfo nativeInfo) {
+      return nativeInfo.getProvider().getPrintableName();
     }
     return Starlark.type(elem);
   }
@@ -402,12 +412,12 @@ public class JavaStarlarkCommon
   }
 
   static boolean isInstanceOfProvider(Object obj, Provider provider) {
-    if (obj instanceof NativeInfo) {
-      return ((NativeInfo) obj).getProvider().getKey().equals(provider.getKey());
-    } else if (obj instanceof StarlarkInfoWithSchema) {
-      return ((StarlarkInfoWithSchema) obj).getProvider().getKey().equals(provider.getKey());
-    } else if (obj instanceof StarlarkInfoNoSchema) {
-      return ((StarlarkInfoNoSchema) obj).getProvider().getKey().equals(provider.getKey());
+    if (obj instanceof NativeInfo nativeInfo) {
+      return nativeInfo.getProvider().getKey().equals(provider.getKey());
+    } else if (obj instanceof StarlarkInfoWithSchema starlarkInfoWithSchema) {
+      return starlarkInfoWithSchema.getProvider().getKey().equals(provider.getKey());
+    } else if (obj instanceof StarlarkInfoNoSchema starlarkInfoNoSchema) {
+      return starlarkInfoNoSchema.getProvider().getKey().equals(provider.getKey());
     }
     return false;
   }

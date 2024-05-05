@@ -23,7 +23,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.RuleErrorConsumer;
 import com.google.devtools.build.lib.packages.AttributeMap;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
-import com.google.devtools.build.lib.packages.Type;
+import com.google.devtools.build.lib.packages.Types;
 import java.util.List;
 
 /**
@@ -65,7 +65,7 @@ public class ResourceFilterFactory {
 
   private static List<String> rawFiltersFromAttrs(AttributeMap attrs, String attrName) {
     if (attrs.isAttributeValueExplicitlySpecified(attrName)) {
-      List<String> rawValue = attrs.get(attrName, Type.STRING_LIST);
+      List<String> rawValue = attrs.get(attrName, Types.STRING_LIST);
       if (rawValue != null) {
         return rawValue;
       }
@@ -198,11 +198,10 @@ public class ResourceFilterFactory {
    */
   @Override
   public boolean equals(Object object) {
-    if (!(object instanceof ResourceFilterFactory)) {
+    if (!(object instanceof ResourceFilterFactory other)) {
       return false;
     }
 
-    ResourceFilterFactory other = (ResourceFilterFactory) object;
     return configFilters.equals(other.configFilters) && densities.equals(other.densities);
   }
 

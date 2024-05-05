@@ -20,6 +20,7 @@ import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicies;
 import com.google.devtools.build.lib.pkgcache.FilteringPolicy;
+import com.google.devtools.build.lib.skyframe.serialization.VisibleForSerialization;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -86,11 +87,16 @@ public final class PrepareDepsOfTargetsUnderDirectoryValue implements SkyValue {
       this.filteringPolicy = Preconditions.checkNotNull(filteringPolicy);
     }
 
-    @AutoCodec.Instantiator
     public static PrepareDepsOfTargetsUnderDirectoryKey create(
         RecursivePkgKey recursivePkgKey, FilteringPolicy filteringPolicy) {
       return interner.intern(
           new PrepareDepsOfTargetsUnderDirectoryKey(recursivePkgKey, filteringPolicy));
+    }
+
+    @VisibleForSerialization
+    @AutoCodec.Interner
+    static PrepareDepsOfTargetsUnderDirectoryKey intern(PrepareDepsOfTargetsUnderDirectoryKey key) {
+      return interner.intern(key);
     }
 
     public RecursivePkgKey getRecursivePkgKey() {
@@ -111,11 +117,10 @@ public final class PrepareDepsOfTargetsUnderDirectoryValue implements SkyValue {
       if (this == o) {
         return true;
       }
-      if (!(o instanceof PrepareDepsOfTargetsUnderDirectoryKey)) {
+      if (!(o instanceof PrepareDepsOfTargetsUnderDirectoryKey that)) {
         return false;
       }
 
-      PrepareDepsOfTargetsUnderDirectoryKey that = (PrepareDepsOfTargetsUnderDirectoryKey) o;
       return Objects.equals(recursivePkgKey, that.recursivePkgKey)
           && Objects.equals(filteringPolicy, that.filteringPolicy);
     }

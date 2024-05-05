@@ -29,6 +29,7 @@ import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Sequence;
+import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkValue;
 
 /** Common utilities for Starlark rules related to Android. */
@@ -46,12 +47,6 @@ public interface AndroidStarlarkCommonApi<
         ConstraintValueT extends ConstraintValueInfoApi,
         StarlarkRuleContextT extends StarlarkRuleContextApi<ConstraintValueT>>
     extends StarlarkValue {
-
-  @StarlarkMethod(
-      name = "create_device_broker_info",
-      documented = false,
-      parameters = {@Param(name = "type")})
-  AndroidDeviceBrokerInfoApi createDeviceBrokerInfo(String deviceBrokerType);
 
   @StarlarkMethod(
       name = "resource_source_directory",
@@ -76,7 +71,7 @@ public interface AndroidStarlarkCommonApi<
       name = "multi_cpu_configuration",
       doc =
           "A configuration for rule attributes that compiles native code according to "
-              + "the --fat_apk_cpu and --android_crosstool_top flags.",
+              + "the --android_platforms flag.",
       documented = false,
       structField = true)
   AndroidSplitTransitionApi getAndroidSplitTransition();
@@ -147,13 +142,23 @@ public interface AndroidStarlarkCommonApi<
             doc = "A FilesToRunProvider to be used for dex merging.",
             positional = false,
             named = true,
-            allowedTypes = {@ParamType(type = FilesToRunProviderApi.class)})
+            allowedTypes = {@ParamType(type = FilesToRunProviderApi.class)}),
+        @Param(
+            name = "min_sdk_version",
+            doc = "The minSdkVersion the dexes were built for.",
+            positional = false,
+            named = true,
+            defaultValue = "0",
+            allowedTypes = {
+              @ParamType(type = StarlarkInt.class),
+            })
       })
   void createDexMergerActions(
       StarlarkRuleContextT starlarkRuleContext,
       FileT output,
       FileT input,
       Sequence<?> dexopts, // <String> expected.
-      FilesToRunProviderT dexmerger)
+      FilesToRunProviderT dexmerger,
+      StarlarkInt minSdkVersion)
       throws EvalException, RuleErrorException;
 }

@@ -185,26 +185,29 @@ def _impl(ctx):
     ]
     action_configs = []
 
-    llvm_cov_action = action_config(
-        action_name = ACTION_NAMES.llvm_cov,
-        tools = [
-            tool(
-                path = ctx.attr.tool_paths["llvm-cov"],
-            ),
-        ],
-    )
+    llvm_cov = ctx.attr.tool_paths.get("llvm-cov")
+    if llvm_cov:
+        llvm_cov_action = action_config(
+            action_name = ACTION_NAMES.llvm_cov,
+            tools = [
+                tool(
+                    path = llvm_cov,
+                ),
+            ],
+        )
+        action_configs.append(llvm_cov_action)
 
-    objcopy_action = action_config(
-        action_name = ACTION_NAMES.objcopy_embed_data,
-        tools = [
-            tool(
-                path = ctx.attr.tool_paths["objcopy"],
-            ),
-        ],
-    )
-
-    action_configs.append(llvm_cov_action)
-    action_configs.append(objcopy_action)
+    objcopy = ctx.attr.tool_paths.get("objcopy")
+    if objcopy:
+        objcopy_action = action_config(
+            action_name = ACTION_NAMES.objcopy_embed_data,
+            tools = [
+                tool(
+                    path = objcopy,
+                ),
+            ],
+        )
+        action_configs.append(objcopy_action)
 
     supports_pic_feature = feature(
         name = "supports_pic",
@@ -212,6 +215,11 @@ def _impl(ctx):
     )
     supports_start_end_lib_feature = feature(
         name = "supports_start_end_lib",
+        enabled = True,
+    )
+
+    gcc_quoting_for_param_files_feature = feature(
+        name = "gcc_quoting_for_param_files",
         enabled = True,
     )
 
@@ -1171,6 +1179,25 @@ def _impl(ctx):
         ],
     )
 
+    generate_linkmap_feature = feature(
+        name = "generate_linkmap",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_executable,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-Wl,-Map=%{output_execpath}.map" if is_linux else "-Wl,-map,%{output_execpath}.map",
+                        ],
+                        expand_if_available = "output_execpath",
+                    ),
+                ],
+            ),
+        ],
+    )
+
     output_execpath_flags_feature = feature(
         name = "output_execpath_flags",
         flag_sets = [
@@ -1337,7 +1364,7 @@ def _impl(ctx):
         flag_sets = [
             flag_set(
                 actions = all_compile_actions + all_link_actions,
-                flag_groups = [flag_group(flags = ["-mmacos-version-min={}".format(_target_os_version(ctx))])],
+                flag_groups = [flag_group(flags = ["-mmacosx-version-min={}".format(_target_os_version(ctx))])],
             ),
         ],
     )
@@ -1381,6 +1408,7 @@ def _impl(ctx):
             autofdo_feature,
             build_interface_libraries_feature,
             dynamic_library_linker_tool_feature,
+            generate_linkmap_feature,
             shared_flag_feature,
             linkstamps_feature,
             output_execpath_flags_feature,
@@ -1396,6 +1424,7 @@ def _impl(ctx):
             asan_feature,
             tsan_feature,
             ubsan_feature,
+            gcc_quoting_for_param_files_feature,
             static_link_cpp_runtimes_feature,
         ] + (
             [
@@ -1436,6 +1465,7 @@ def _impl(ctx):
             asan_feature,
             tsan_feature,
             ubsan_feature,
+            gcc_quoting_for_param_files_feature,
             static_link_cpp_runtimes_feature,
         ] + (
             [
@@ -1455,6 +1485,7 @@ def _impl(ctx):
             unfiltered_compile_flags_feature,
             treat_warnings_as_errors_feature,
             archive_param_file_feature,
+            generate_linkmap_feature,
         ]
 
     return cc_common.create_cc_toolchain_config_info(

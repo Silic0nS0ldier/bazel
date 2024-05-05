@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Test the local_repository binding
-#
 
 # --- begin runfiles.bash initialization ---
 # Copy-pasted from Bazel's Bash runfiles library (tools/bash/runfiles/runfiles.bash).
@@ -100,41 +98,29 @@ EOF
 
   # Our macro
   cat >test.bzl <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 def macro(path):
   print('bleh')
-  native.local_repository(name='endangered', path=path)
-  native.bind(name='mongoose', actual='@endangered//carnivore:mongoose')
+  local_repository(name='endangered', path=path)
 EOF
   mkdir -p zoo
   cat > zoo/BUILD <<'EOF'
 genrule(
-    name = "ball-pit1",
+    name = "ball-pit",
     srcs = ["@endangered//carnivore:mongoose"],
-    outs = ["ball-pit1.txt"],
-    cmd = "cat $< >$@",
-)
-
-genrule(
-    name = "ball-pit2",
-    srcs = ["//external:mongoose"],
-    outs = ["ball-pit2.txt"],
+    outs = ["ball-pit.txt"],
     cmd = "cat $< >$@",
 )
 EOF
 
-  bazel build //zoo:ball-pit1 >& $TEST_log || fail "Failed to build"
+  bazel build //zoo:ball-pit >& $TEST_log || fail "Failed to build"
   expect_log "bleh"
   expect_log "Tra-la!"  # Invalidation
-  cat bazel-bin/zoo/ball-pit1.txt >$TEST_log
+  cat bazel-bin/zoo/ball-pit.txt >$TEST_log
   expect_log "Tra-la!"
 
-  bazel build //zoo:ball-pit1 >& $TEST_log || fail "Failed to build"
+  bazel build //zoo:ball-pit >& $TEST_log || fail "Failed to build"
   expect_not_log "Tra-la!"  # No invalidation
-
-  bazel build //zoo:ball-pit2 >& $TEST_log || fail "Failed to build"
-  expect_not_log "Tra-la!"  # No invalidation
-  cat bazel-bin/zoo/ball-pit2.txt >$TEST_log
-  expect_log "Tra-la!"
 
   # Test invalidation of the WORKSPACE file
   create_new_workspace
@@ -151,24 +137,19 @@ genrule(
 EOF
   cd ${WORKSPACE_DIR}
   cat >test.bzl <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 def macro(path):
   print('blah')
-  native.local_repository(name='endangered', path='$repo2')
-  native.bind(name='mongoose', actual='@endangered//carnivore:mongoose')
+  local_repository(name='endangered', path='$repo2')
 EOF
-  bazel build //zoo:ball-pit1 >& $TEST_log || fail "Failed to build"
+  bazel build //zoo:ball-pit >& $TEST_log || fail "Failed to build"
   expect_log "blah"
   expect_log "Tra-la-la!"  # Invalidation
-  cat bazel-bin/zoo/ball-pit1.txt >$TEST_log
+  cat bazel-bin/zoo/ball-pit.txt >$TEST_log
   expect_log "Tra-la-la!"
 
-  bazel build //zoo:ball-pit1 >& $TEST_log || fail "Failed to build"
+  bazel build //zoo:ball-pit >& $TEST_log || fail "Failed to build"
   expect_not_log "Tra-la-la!"  # No invalidation
-
-  bazel build //zoo:ball-pit2 >& $TEST_log || fail "Failed to build"
-  expect_not_log "Tra-la-la!"  # No invalidation
-  cat bazel-bin/zoo/ball-pit2.txt >$TEST_log
-  expect_log "Tra-la-la!"
 }
 
 function test_load_from_symlink_to_outside_of_workspace() {
@@ -211,9 +192,10 @@ EOF
   # Our macro
   cat >WORKSPACE
   cat >test.bzl <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 def macro(path):
   print('bleh')
-  native.local_repository(name='endangered', path=path)
+  local_repository(name='endangered', path=path)
 EOF
   cat >BUILD <<'EOF'
 exports_files(["test.bzl"])
@@ -221,6 +203,7 @@ EOF
 
   cd ${WORKSPACE_DIR}
   cat >> $(create_workspace_with_default_repos WORKSPACE) <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 local_repository(name='proxy', path='$repo3')
 load('@proxy//:test.bzl', 'macro')
 macro('$repo2')
@@ -254,6 +237,7 @@ EOF
 
   cd ${WORKSPACE_DIR}
   cat >> $(create_workspace_with_default_repos WORKSPACE) <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 local_repository(name='foo', path='$repo2')
 load("@foo//:ext.bzl", "macro")
 macro()
@@ -289,6 +273,7 @@ EOF
   cd ${WORKSPACE_DIR}
   cat >> $(create_workspace_with_default_repos WORKSPACE) <<EOF
 load("@foo//:ext.bzl", "macro")
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 macro()
 local_repository(name='foo', path='$repo2')
 EOF
@@ -359,7 +344,6 @@ EOF
 
   bazel build @foo//:bar >& $TEST_log || fail "Failed to build"
   expect_log "foo"
-  expect_not_log "Workspace name in .*/WORKSPACE (.*) does not match the name given in the repository's definition (@foo)"
   cat bazel-bin/external/foo/bar.txt >$TEST_log
   expect_log "foo"
 }
@@ -782,6 +766,39 @@ function test_starlark_repository_bzl_invalidation() {
 # Same test as previous but with server restart between each invocation
 function test_starlark_repository_bzl_invalidation_batch() {
   bzl_invalidation_test_template --batch
+}
+
+function test_starlark_repo_bzl_invalidation_wrong_digest() {
+  # regression test for https://github.com/bazelbuild/bazel/pull/21131#discussion_r1471924084
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+ext = use_extension("//:r.bzl", "ext")
+use_repo(ext, "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+load(":make_repo_rule.bzl", "make_repo_rule")
+def _r(rctx):
+  print("I'm here")
+  rctx.file("BUILD", "filegroup(name='r')")
+r=make_repo_rule(_r)
+ext=module_extension(lambda mctx: r(name='r'))
+EOF
+  cat > make_repo_rule.bzl << EOF
+def make_repo_rule(impl):
+  return repository_rule(impl)
+EOF
+
+  bazel build @r >& $TEST_log || fail "Failed to build"
+  expect_log "I'm here"
+
+  cat <<EOF >>r.bzl
+
+# Just add a comment
+EOF
+  # the above SHOULD trigger a refetch.
+  bazel build @r >& $TEST_log || fail "failed to build"
+  expect_log "I'm here"
 }
 
 # Test invalidation based on change to the bzl files
@@ -1356,9 +1373,10 @@ EOF
 
   # Our macro
   cat >test.bzl <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 def macro(path):
   print(native.bazel_version)
-  native.local_repository(name='test', path=path)
+  local_repository(name='test', path=path)
 EOF
 
   local version="$(bazel info release)"
@@ -1382,6 +1400,7 @@ function test_existing_rule() {
   cat > BUILD
 
   cat >> WORKSPACE <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 local_repository(name = 'existing', path='$repo2')
 load('//:test.bzl', 'macro')
 
@@ -1944,6 +1963,7 @@ EOF
   cat > def.bzl <<'EOF'
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "read_netrc", "use_netrc")
 def _impl(ctx):
+  print("authrepo is being evaluated")
   rc = read_netrc(ctx, ctx.attr.path)
   auth = use_netrc(rc, ctx.attr.urls, {"oauthlife.com": "Bearer <password>",})
   ctx.file("data.bzl", "auth = %s" % (auth,))
@@ -2025,9 +2045,16 @@ genrule(
   cmd = "echo %s > $@" % (check_equal_expected(),)
 )
 EOF
-  bazel build //:check_expected
+  bazel build //:check_expected &> $TEST_log || fail "Expected success"
   grep 'OK' `bazel info bazel-bin`/check_expected.txt \
        || fail "Authentication merged incorrectly"
+  expect_log "authrepo is being evaluated"
+
+  echo "modified" > .netrc
+  bazel build //:check_expected &> $TEST_log || fail "Expected success"
+  grep 'OK' `bazel info bazel-bin`/check_expected.txt \
+       || fail "Authentication information should not have been reevaluated"
+  expect_not_log "authrepo is being evaluated"
 }
 
 function test_disallow_unverified_http() {
@@ -2345,6 +2372,7 @@ function test_disable_download_should_allow_local_repository() {
   mkdir main
   cd main
   cat > WORKSPACE <<EOF
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 local_repository(
   name="ext",
   path="../x",
@@ -2613,6 +2641,632 @@ EOF
   bazel query --enable_workspace --output=build @r > output || fail "expected bazel to succeed"
   assert_contains 'REPO.bazel' output
   assert_contains 'WORKSPACE' output
+}
+
+function test_repo_mapping_change_in_rule_impl() {
+  # regression test for #20722
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+bazel_dep(name="foo", repo_name="data")
+local_path_override(module_name="foo", path="foo")
+bazel_dep(name="bar")
+local_path_override(module_name="bar", path="bar")
+EOF
+  touch BUILD
+  echo 'load("@r//:r.bzl", "pi"); print(pi)' > WORKSPACE.bzlmod
+  cat > r.bzl <<EOF
+def _r(rctx):
+  print("I see: " + str(Label("@data")))
+  rctx.file("BUILD", "filegroup(name='r')")
+  rctx.file("r.bzl", "pi=3.14")
+r=repository_rule(_r)
+EOF
+  mkdir foo
+  cat > foo/MODULE.bazel <<EOF
+module(name="foo")
+EOF
+  mkdir bar
+  cat > bar/MODULE.bazel <<EOF
+module(name="bar")
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: @@foo~//:data"
+
+  # So far, so good. Now we make `@data` point to bar instead!
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+bazel_dep(name="foo")
+local_path_override(module_name="foo", path="foo")
+bazel_dep(name="bar", repo_name="data")
+local_path_override(module_name="bar", path="bar")
+EOF
+  # for the repo `r`, nothing except the repo mapping has changed.
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: @@bar~//:data"
+}
+
+function test_repo_mapping_change_in_bzl_init() {
+  # same as above, but tests .bzl init time repo mapping usages
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+bazel_dep(name="foo", repo_name="data")
+local_path_override(module_name="foo", path="foo")
+bazel_dep(name="bar")
+local_path_override(module_name="bar", path="bar")
+EOF
+  touch BUILD
+  echo 'load("@r//:r.bzl", "pi"); print(pi)' > WORKSPACE.bzlmod
+  cat > r.bzl <<EOF
+CONSTANT = Label("@data")
+def _r(rctx):
+  print("I see: " + str(CONSTANT))
+  rctx.file("BUILD", "filegroup(name='r')")
+  rctx.file("r.bzl", "pi=3.14")
+r=repository_rule(_r)
+EOF
+  mkdir foo
+  cat > foo/MODULE.bazel <<EOF
+module(name="foo")
+EOF
+  mkdir bar
+  cat > bar/MODULE.bazel <<EOF
+module(name="bar")
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: @@foo~//:data"
+
+  # So far, so good. Now we make `@data` point to bar instead!
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+bazel_dep(name="foo")
+local_path_override(module_name="foo", path="foo")
+bazel_dep(name="bar", repo_name="data")
+local_path_override(module_name="bar", path="bar")
+EOF
+  # for the repo `r`, nothing except the repo mapping has changed.
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: @@bar~//:data"
+}
+
+function test_file_watching_inside_working_dir() {
+  # when reading a file inside the working directory (where the repo
+  # is to be fetched), we shouldn't watch it.
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  rctx.file("data.txt", "nothing")
+  print("I see: " + rctx.read("data.txt"))
+  rctx.file("data.txt", "something")
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: nothing"
+
+  # Running Bazel again shouldn't cause a refetch, despite "data.txt"
+  # having been written to after the read.
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+}
+
+function test_file_watching_inside_working_dir_forcing_error() {
+  # when reading a file inside the working directory (where the repo
+  # is to be fetched), we shouldn't watch it. Forcing the watch should
+  # result in an error.
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  rctx.file("data.txt", "nothing")
+  print("I see: " + rctx.read("data.txt", watch="yes"))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log && fail "expected bazel to fail"
+  expect_log "attempted to watch path under working directory"
+}
+
+function test_file_watching_outside_workspace() {
+  # when reading a file outside the Bazel workspace, we should watch it.
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  mkdir -p "${outside_dir}"
+  echo nothing > ${outside_dir}/data.txt
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  print("I see: " + rctx.read("${outside_dir}/data.txt"))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: nothing"
+
+  # Running Bazel again shouldn't cause a refetch.
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+
+  # But changing the outside file should cause a refetch.
+  echo something > ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: something"
+}
+
+function test_file_watching_in_other_repo() {
+  # when reading a file in another repo, we should watch it.
+  local outside_dir="${TEST_TMPDIR}/outside_dir"
+  mkdir -p "${outside_dir}"
+  echo nothing > ${outside_dir}/data.txt
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+foo = use_repo_rule("//:r.bzl", "foo")
+foo(name = "foo")
+bar = use_repo_rule("//:r.bzl", "bar")
+bar(name = "bar", data = "nothing")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _foo(rctx):
+  rctx.file("BUILD", "filegroup(name='foo')")
+  # intentionally grab a file that's not directly addressable by a label
+  otherfile = rctx.path(Label("@bar//subpkg:BUILD")).dirname.dirname.get_child("data.txt")
+  print("I see: " + rctx.read(otherfile))
+foo=repository_rule(_foo)
+def _bar(rctx):
+  rctx.file("subpkg/BUILD")
+  rctx.file("data.txt", rctx.attr.data)
+bar=repository_rule(_bar, attrs={"data":attr.string()})
+EOF
+
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: nothing"
+
+  # Running Bazel again shouldn't cause a refetch.
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+
+  # But changing the file inside @bar should cause @foo to refetch.
+  cat > MODULE.bazel <<EOF
+foo = use_repo_rule("//:r.bzl", "foo")
+foo(name = "foo")
+bar = use_repo_rule("//:r.bzl", "bar")
+bar(name = "bar", data = "something")
+EOF
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: something"
+}
+
+function test_file_watching_in_undefined_repo() {
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+foo = use_repo_rule("//:foo.bzl", "foo")
+foo(name = "foo")
+EOF
+  touch BUILD
+  cat > foo.bzl <<EOF
+def _foo(rctx):
+  rctx.file("BUILD", "filegroup(name='foo')")
+  # this repo might not have been defined yet
+  rctx.watch("../_main~_repo_rules~bar/BUILD")
+  print("I see something!")
+foo=repository_rule(_foo)
+EOF
+
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see something!"
+
+  # Defining @@_main~_repo_rules~bar should now cause @foo to refetch.
+  cat >> MODULE.bazel <<EOF
+bar = use_repo_rule("//:bar.bzl", "bar")
+bar(name = "bar")
+EOF
+  cat > bar.bzl <<EOF
+def _bar(rctx):
+  rctx.file("BUILD", "filegroup(name='bar')")
+bar=repository_rule(_bar)
+EOF
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see something!"
+
+  # However, just adding a random other repo shouldn't alert @foo.
+  cat >> MODULE.bazel <<EOF
+bar(name = "baz")
+EOF
+  bazel build @foo >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see something!"
+}
+
+function test_file_watching_in_other_repo_cycle() {
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+foo = use_repo_rule("//:r.bzl", "foo")
+foo(name = "foo")
+bar = use_repo_rule("//:r.bzl", "bar")
+bar(name = "bar")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _foo(rctx):
+  rctx.file("BUILD", "filegroup(name='foo')")
+  print("I see: " + rctx.read(Label("@bar//:BUILD")))
+foo=repository_rule(_foo)
+def _bar(rctx):
+  rctx.file("BUILD", "filegroup(name='bar')")
+  print("I see: " + rctx.read(Label("@foo//:BUILD")))
+bar=repository_rule(_bar)
+EOF
+
+  bazel build @foo >& $TEST_log && fail "expected bazel to fail!"
+  expect_log "Circular definition of repositories"
+}
+
+function test_watch_file_status_change() {
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  mkdir -p "${outside_dir}"
+  echo something > ${outside_dir}/data.txt
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  data_file = rctx.path("${outside_dir}/data.txt")
+  rctx.watch(data_file)
+  if not data_file.exists:
+    print("I see nothing")
+  elif data_file.is_dir:
+    print("I see a directory")
+  else:
+    print("I see: " + rctx.read(data_file))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: something"
+
+  # test that all kinds of transitions between file, dir, and noent are watched
+
+  rm ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see nothing"
+
+  mkdir ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see a directory"
+
+  rm -r ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see nothing"
+
+  echo something again > ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: something again"
+
+  rm ${outside_dir}/data.txt
+  mkdir ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see a directory"
+
+  rm -r ${outside_dir}/data.txt
+  echo something yet again > ${outside_dir}/data.txt
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: something yet again"
+}
+
+function test_watch_file_status_change_dangling_symlink() {
+  if "$is_windows"; then
+    # symlinks on Windows... annoying
+    return
+  fi
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  mkdir -p "${outside_dir}"
+  ln -s ${outside_dir}/pointee ${outside_dir}/pointer
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  data_file = rctx.path("${outside_dir}/pointer")
+  rctx.watch(data_file)
+  if not data_file.exists:
+    print("I see nothing")
+  elif data_file.is_dir:
+    print("I see a directory")
+  else:
+    print("I see: " + rctx.read(data_file))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see nothing"
+
+  echo haha > ${outside_dir}/pointee
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: haha"
+
+  rm ${outside_dir}/pointee
+  mkdir ${outside_dir}/pointee
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see a directory"
+}
+
+function test_watch_file_status_change_symlink_parent() {
+  if "$is_windows"; then
+    # symlinks on Windows... annoying
+    return
+  fi
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  mkdir -p "${outside_dir}/a"
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  data_file = rctx.path("${outside_dir}/a/b/c")
+  rctx.watch(data_file)
+  if not data_file.exists:
+    print("I see nothing")
+  elif data_file.is_dir:
+    print("I see a directory")
+  else:
+    print("I see: " + rctx.read(data_file))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see nothing"
+
+  mkdir -p ${outside_dir}/a/b
+  echo blah > ${outside_dir}/a/b/c
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: blah"
+
+  rm -rf ${outside_dir}/a/b
+  ln -s ${outside_dir}/d ${outside_dir}/a/b
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see nothing"
+
+  mkdir ${outside_dir}/d
+  echo bleh > ${outside_dir}/d/c
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: bleh"
+}
+
+function test_path_readdir_watches_dirents() {
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  touch ${outside_dir}/foo
+  touch ${outside_dir}/bar
+  touch ${outside_dir}/baz
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  outside_dir = rctx.path("${outside_dir}")
+  print("I see: " + ",".join(sorted([p.basename for p in outside_dir.readdir()])))
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: bar,baz,foo"
+
+  # changing the contents of a file under there shouldn't trigger a refetch.
+  echo haha > ${outside_dir}/foo
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+
+  # adding a file should trigger a refetch.
+  touch ${outside_dir}/quux
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: bar,baz,foo,quux"
+
+  # removing a file should trigger a refetch.
+  rm ${outside_dir}/baz
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I see: bar,foo,quux"
+
+  # changing a file to a directory shouldn't trigger a refetch.
+  rm ${outside_dir}/bar
+  mkdir ${outside_dir}/bar
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+
+  # changing entries in subdirectories shouldn't trigger a refetch.
+  touch ${outside_dir}/bar/inner
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I see:"
+}
+
+function test_watch_tree() {
+  local outside_dir=$(mktemp -d "${TEST_TMPDIR}/testXXXXXX")
+  touch ${outside_dir}/foo
+  touch ${outside_dir}/bar
+  touch ${outside_dir}/baz
+
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r = use_repo_rule("//:r.bzl", "r")
+r(name = "r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+def _r(rctx):
+  rctx.file("BUILD", "filegroup(name='r')")
+  print("I'm running!")
+  rctx.watch_tree("${outside_dir}")
+r=repository_rule(_r)
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I'm running!"
+
+  # changing the contents of a file under there should trigger a refetch.
+  echo haha > ${outside_dir}/foo
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I'm running!"
+
+  # adding a file should trigger a refetch.
+  touch ${outside_dir}/quux
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I'm running!"
+
+  # just touching an existing file shouldn't cause a refetch.
+  touch ${outside_dir}/bar
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_not_log "I'm running!"
+
+  # changing a file to a directory should trigger a refetch.
+  rm ${outside_dir}/baz
+  mkdir ${outside_dir}/baz
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I'm running!"
+
+  # changing entries in subdirectories should trigger a refetch.
+  touch ${outside_dir}/baz/inner
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+  expect_log "I'm running!"
+}
+
+function test_unexported_rule() {
+  # alas, we still need to support this while WORKSPACE is around...
+  create_new_workspace
+  touch MODULE.bazel
+  touch BUILD
+  cat > r.bzl <<EOF
+def _impl(rctx):
+  rctx.file('BUILD', 'filegroup(name="r")')
+def r():
+  repository_rule(_impl)(name = "r")
+EOF
+  cat > WORKSPACE.bzlmod <<EOF
+load('//:r.bzl', 'r')
+r()
+EOF
+
+  bazel build @r >& $TEST_log || fail "expected bazel to succeed"
+}
+
+# Regression test for https://github.com/bazelbuild/bazel/issues/21823.
+function test_repository_cache_concurrency() {
+  sha=cd55a062e763b9349921f0f5db8c3933288dc8ba4f76dd9416aac68acee3cb94
+
+  cat > MODULE.bazel <<EOF
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+[
+  http_file(
+    name = "repo" + str(i),
+    url = "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
+    sha256 = "$sha",
+  )
+  for i in range(100)
+]
+EOF
+  cat > BUILD <<'EOF'
+FILES = ["@repo{}//file".format(i) for i in range(100)]
+filegroup(
+  name = "files",
+  srcs = FILES,
+)
+genrule(
+  name = "unique_hashes",
+  srcs = [":files"],
+  outs = ["unique_hashes"],
+  cmd = """
+# Get the unique sha256 hashes of the files.
+sha256sum $(execpaths :files) |
+  cut -d' ' -f1 |
+  sort |
+  uniq > $@
+""".format(),
+)
+EOF
+
+  repo_cache_dir=$TEST_TMPDIR/repository_cache
+  trap 'rm -rf ${repo_cache_dir}' EXIT
+  bazel build --repository_cache="$repo_cache_dir" \
+    //:unique_hashes >& $TEST_log || fail "expected bazel to succeed"
+  assert_equals 1 "$(wc -l < bazel-bin/unique_hashes | tr -d ' ')"
+  assert_equals $sha "$(cat bazel-bin/unique_hashes)"
+
+  # Verify that the repository cache entry has been created.
+  cache_entry="$repo_cache_dir/content_addressable/sha256/$sha/file"
+  echo "$sha $cache_entry" | sha256sum --check || fail "sha256 mismatch"
+}
+
+function test_keep_going_weird_deadlock() {
+  # regression test for b/330892334
+  if "$is_windows"; then
+    # no symlinks on windows
+    return
+  fi
+  create_new_workspace
+  cat > MODULE.bazel <<EOF
+r=use_repo_rule("//:r.bzl", "r")
+r(name="r")
+EOF
+  touch BUILD
+  cat > r.bzl <<EOF
+r=repository_rule(lambda rctx: rctx.read(Label("//blarg")))
+EOF
+
+  # make //blarg a bad package by creating a symlink cycle (note that just the package not
+  # existing is not enough to make the PackageLookupFunction fail)
+  mkdir blarg
+  cd blarg
+  ln -s BUILD DUILB
+  ln -s DUILB BUILD
+  cd ..
+
+  # now build both //blarg and @r. The latter depends on the former, which is in error.
+  # with --keep_going, this could result in a deadlock.
+  bazel build --keep_going //blarg @r >& $TEST_log && fail "bazel somehow succeeded"
+  # the fact that the invocation didn't time out should suffice as success.
+  true
 }
 
 run_suite "local repository tests"

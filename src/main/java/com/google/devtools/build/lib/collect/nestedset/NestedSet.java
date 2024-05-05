@@ -13,9 +13,11 @@
 // limitations under the License.
 package com.google.devtools.build.lib.collect.nestedset;
 
+import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
@@ -24,11 +26,11 @@ import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.bugreport.Crash;
 import com.google.devtools.build.lib.bugreport.CrashContext;
 import com.google.devtools.build.lib.collect.compacthashset.CompactHashSet;
-import com.google.devtools.build.lib.collect.nestedset.NestedSetStore.MissingNestedSetException;
 import com.google.devtools.build.lib.concurrent.MoreFutures;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.Interrupted;
 import com.google.devtools.build.lib.server.FailureDetails.Interrupted.Code;
+import com.google.devtools.build.lib.skyframe.serialization.FingerprintValueStore.MissingFingerprintValueException;
 import com.google.devtools.build.lib.skyframe.serialization.VisibleForSerialization;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
@@ -207,8 +209,7 @@ public final class NestedSet<E> {
           approxDepth = Math.max(approxDepth, 1 + subset.getApproxDepth());
           // If this is a deserialization future, this call blocks.
           Object c = subset.getChildrenInternal(interruptStrategy);
-          if (c instanceof Object[]) {
-            Object[] a = (Object[]) c;
+          if (c instanceof Object[] a) {
             if (a.length < 2) {
               throw new AssertionError(a.length);
             }
@@ -408,16 +409,16 @@ public final class NestedSet<E> {
 
   /**
    * Returns an immutable list of all unique elements of this set, similar to {@link #toList}, but
-   * will propagate an {@code InterruptedException} or {@link MissingNestedSetException} if one is
-   * thrown.
+   * will propagate an {@code InterruptedException} or {@link MissingFingerprintValueException} if
+   * one is thrown.
    */
   public ImmutableList<E> toListInterruptibly()
-      throws InterruptedException, MissingNestedSetException {
+      throws InterruptedException, MissingFingerprintValueException {
     Object actualChildren;
     if (children instanceof ListenableFuture) {
       actualChildren =
           MoreFutures.waitForFutureAndGetWithCheckedException(
-              (ListenableFuture<Object[]>) children, MissingNestedSetException.class);
+              (ListenableFuture<Object[]>) children, MissingFingerprintValueException.class);
     } else {
       actualChildren = children;
     }
@@ -430,22 +431,23 @@ public final class NestedSet<E> {
    * TimeoutException} if this set is deserializing and does not become ready within the given
    * timeout.
    *
-   * <p>Additionally, throws {@link MissingNestedSetException} if this nested set {@link
+   * <p>Additionally, throws {@link MissingFingerprintValueException} if this nested set {@link
    * #isFromStorage} and could not be retrieved.
    *
    * <p>Note that the timeout only applies to blocking for the deserialization future to become
    * available. The actual list transformation is untimed.
    */
   public ImmutableList<E> toListWithTimeout(Duration timeout)
-      throws InterruptedException, TimeoutException, MissingNestedSetException {
+      throws InterruptedException, TimeoutException, MissingFingerprintValueException {
     Object actualChildren;
     if (children instanceof ListenableFuture) {
       try {
         actualChildren =
             ((ListenableFuture<Object[]>) children).get(timeout.toNanos(), TimeUnit.NANOSECONDS);
       } catch (ExecutionException e) {
-        Throwables.propagateIfPossible(
-            e.getCause(), InterruptedException.class, MissingNestedSetException.class);
+        throwIfInstanceOf(e.getCause(), InterruptedException.class);
+        throwIfInstanceOf(e.getCause(), MissingFingerprintValueException.class);
+        throwIfUnchecked(e.getCause());
         throw new IllegalStateException(e);
       }
     } else {
@@ -768,10 +770,9 @@ public final class NestedSet<E> {
   public NestedSet<E> splitIfExceedsMaximumSize(int maxDegree) {
     Preconditions.checkArgument(maxDegree >= 2, "maxDegree must be at least 2");
     Object children = getChildren(); // may wait for a future
-    if (!(children instanceof Object[])) {
+    if (!(children instanceof Object[] succs)) {
       return this;
     }
-    Object[] succs = (Object[]) children;
     int nsuccs = succs.length;
     if (nsuccs <= maxDegree) {
       return this;

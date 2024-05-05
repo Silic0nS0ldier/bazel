@@ -14,8 +14,10 @@
 
 package com.google.devtools.build.lib.query2.query;
 
+import static com.google.common.base.Throwables.throwIfInstanceOf;
+import static com.google.common.base.Throwables.throwIfUnchecked;
+
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
@@ -311,8 +313,9 @@ final class PathLabelVisitor {
               }
             });
       } catch (CompletionException e) {
-        Throwables.propagateIfPossible(
-            e.getCause(), InterruptedException.class, NoSuchThingException.class);
+        throwIfInstanceOf(e.getCause(), InterruptedException.class);
+        throwIfInstanceOf(e.getCause(), NoSuchThingException.class);
+        throwIfUnchecked(e.getCause());
         throw e;
       }
     }
@@ -325,11 +328,9 @@ final class PathLabelVisitor {
       // of *different* attributes. These visitations get culled later, but we still have to pay the
       // overhead for all that.
 
-      if (!(from instanceof Rule) || !(to instanceof Rule)) {
+      if (!(from instanceof Rule fromRule) || !(to instanceof Rule toRule)) {
         return;
       }
-      Rule fromRule = (Rule) from;
-      Rule toRule = (Rule) to;
       for (Aspect aspect : attribute.getAspects(fromRule)) {
         if (AspectDefinition.satisfies(
             aspect, toRule.getRuleClassObject().getAdvertisedProviders())) {

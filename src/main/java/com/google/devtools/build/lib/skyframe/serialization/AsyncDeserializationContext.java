@@ -15,20 +15,38 @@ package com.google.devtools.build.lib.skyframe.serialization;
 
 import com.google.protobuf.CodedInputStream;
 import java.io.IOException;
+import javax.annotation.Nullable;
 
 /**
  * Context provided to {@link ObjectCodec} implementations with methods compatible with asynchrony.
  *
  * <p>The {@link #deserialize} signatures are defined in such a way that the context may decide when
  * to make values available.
+ *
+ * <p>The semantics of {@link #deserialize} can be divided into two cases.
+ *
+ * <ul>
+ *   <li><b>Acyclic</b>: any asynchronous activity needed for deserialization is guaranteed to have
+ *       completed prior to setting the value. Since there are no cycles, this is straightforward to
+ *       implement by bottom-up futures-chaining. This works for any acyclic backreferences by
+ *       allowing those backreferences to be stored as futures.
+ *   <li><b>Cyclic</b>: when there are object graph cycles, it means that a node has a reference to
+ *       one of its ancestors. In this case, during deserialization, the node will observe a
+ *       partially formed ancestor value, defined by {@link #registerInitialValue}. It's impossible
+ *       to guarantee that the provided value is complete due to the cycle.
+ * </ul>
  */
-// TODO(b/297857068): There is no asynchronous implementation yet. Although it won't be in this
-// interface, intended for codecs, a new API method will be needed signal when deserialized values
-// are complete.
-//
-// Once all codecs are migrated, this should replace the existing DeserializationContext as the
-// interface to codecs.
-public interface AsyncDeserializationContext extends FlatDeserializationContext {
+public interface AsyncDeserializationContext extends LeafDeserializationContext {
+  /** Defines a way to set a field in a given object. */
+  interface FieldSetter<T> {
+    /**
+     * Sets a field of {@code obj}.
+     *
+     * @param target the object that accepts the field value.
+     * @param fieldValue the non-null field value.
+     */
+    void set(T target, Object fieldValue) throws SerializationException;
+  }
 
   /**
    * Registers an initial value for the currently deserializing value, for use by child objects that
@@ -69,5 +87,36 @@ public interface AsyncDeserializationContext extends FlatDeserializationContext 
    * even if the deserialized value is null.
    */
   void deserialize(CodedInputStream codedIn, Object obj, long offset, Runnable done)
+      throws IOException, SerializationException;
+
+  /**
+   * Reads a value from key value storage into {@code obj}.
+   *
+   * <p>Reads the next fingerprint from {@code codedIn}, fetches the corresponding remote value and
+   * deserializes it using {@code codec} into {@code obj} using {@code setter}.
+   *
+   * <p>This method may schedule some activities in the background.
+   *
+   * <ul>
+   *   <li>Fetching the data bytes associated with the fingerprint from the stream.
+   *   <li>Waiting for another concurrent read of the same data by a different caller.
+   * </ul>
+   *
+   * <p>These background activities are tracked by {@link
+   * SharedValueDeserializationContext#readStatusFutures}.
+   *
+   * <p>{@link DeserializationContext#deserialize(CodedInputStream)} blocks until the background
+   * activities are complete.
+   *
+   * <p>TODO: b/297857068 - expose an API enabling callers to release the thread if it is blocked.
+   *
+   * @param distinguisher see documentation at {@link SerializationContext#putSharedValue}
+   */
+  <T> void getSharedValue(
+      CodedInputStream codedIn,
+      @Nullable Object distinguisher,
+      DeferredObjectCodec<?> codec,
+      T obj,
+      FieldSetter<? super T> setter)
       throws IOException, SerializationException;
 }

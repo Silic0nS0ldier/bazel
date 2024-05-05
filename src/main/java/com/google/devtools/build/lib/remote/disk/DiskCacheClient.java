@@ -13,8 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.remote.disk;
 
-import static com.google.common.util.concurrent.Futures.immediateFailedFuture;
 import static com.google.common.util.concurrent.Futures.immediateFuture;
+import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 import static com.google.devtools.build.lib.remote.util.DigestUtil.isOldStyleDigestFunction;
 
 import build.bazel.remote.execution.v2.ActionCacheUpdateCapabilities;
@@ -29,7 +29,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteStreams;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.devtools.build.lib.exec.SpawnCheckingCacheEvent;
 import com.google.devtools.build.lib.remote.Store;
 import com.google.devtools.build.lib.remote.common.CacheNotFoundException;
 import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
@@ -47,6 +49,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import javax.annotation.Nullable;
 
 /**
@@ -60,7 +63,12 @@ import javax.annotation.Nullable;
  * safe to trim the cache at the same time a Bazel process is accessing it.
  */
 public class DiskCacheClient implements RemoteCacheClient {
+
+  private static final SpawnCheckingCacheEvent SPAWN_CHECKING_CACHE_EVENT =
+      SpawnCheckingCacheEvent.create("disk-cache");
+
   private final Path root;
+  private final ListeningExecutorService executorService;
   private final boolean verifyDownloads;
   private final DigestUtil digestUtil;
 
@@ -68,10 +76,12 @@ public class DiskCacheClient implements RemoteCacheClient {
    * @param verifyDownloads whether verify the digest of downloaded content are the same as the
    *     digest used to index that file.
    */
-  public DiskCacheClient(Path root, boolean verifyDownloads, DigestUtil digestUtil)
+  public DiskCacheClient(
+      Path root, DigestUtil digestUtil, ExecutorService executorService, boolean verifyDownloads)
       throws IOException {
-    this.verifyDownloads = verifyDownloads;
     this.digestUtil = digestUtil;
+    this.executorService = MoreExecutors.listeningDecorator(executorService);
+    this.verifyDownloads = verifyDownloads;
 
     if (isOldStyleDigestFunction(digestUtil.getDigestFunction())) {
       this.root = root;
@@ -119,18 +129,17 @@ public class DiskCacheClient implements RemoteCacheClient {
   }
 
   private ListenableFuture<Void> download(Digest digest, OutputStream out, Store store) {
-    Path path = toPath(digest, store);
-    try {
-      if (!refresh(path)) {
-        return immediateFailedFuture(new CacheNotFoundException(digest));
-      }
-      try (InputStream in = path.getInputStream()) {
-        ByteStreams.copy(in, out);
-        return immediateFuture(null);
-      }
-    } catch (IOException e) {
-      return immediateFailedFuture(e);
-    }
+    return executorService.submit(
+        () -> {
+          Path path = toPath(digest, store);
+          if (!refresh(path)) {
+            throw new CacheNotFoundException(digest);
+          }
+          try (InputStream in = path.getInputStream()) {
+            ByteStreams.copy(in, out);
+          }
+          return null;
+        });
   }
 
   @Override
@@ -151,7 +160,7 @@ public class DiskCacheClient implements RemoteCacheClient {
             return Futures.immediateFailedFuture(e);
           }
         },
-        MoreExecutors.directExecutor());
+        directExecutor());
   }
 
   private void checkDigestExists(Digest digest) throws IOException {
@@ -222,7 +231,14 @@ public class DiskCacheClient implements RemoteCacheClient {
   @Override
   public ListenableFuture<CachedActionResult> downloadActionResult(
       RemoteActionExecutionContext context, ActionKey actionKey, boolean inlineOutErr) {
+    if (context.getSpawnExecutionContext() != null) {
+      context.getSpawnExecutionContext().report(SPAWN_CHECKING_CACHE_EVENT);
+    }
+
     return Futures.transformAsync(
+        // Update the mtime on the action result itself before any of the blobs it references.
+        // This ensures that the blobs are always newer than the action result, so that trimming the
+        // cache in LRU order cannot create dangling references.
         Utils.downloadAsActionResult(actionKey, (digest, out) -> download(digest, out, Store.AC)),
         actionResult -> {
           if (actionResult == null) {
@@ -240,25 +256,21 @@ public class DiskCacheClient implements RemoteCacheClient {
             return immediateFuture(null);
           }
 
-          // Update the mtime for the action result itself. This ensures that blobs are older than
-          // the action result, so that trimming the cache in LRU order will not create dangling
-          // references.
-          var unused = refresh(toPath(actionKey.getDigest(), Store.AC));
-
           return immediateFuture(CachedActionResult.disk(actionResult));
         },
-        MoreExecutors.directExecutor());
+        directExecutor());
   }
 
   @Override
   public ListenableFuture<Void> uploadActionResult(
       RemoteActionExecutionContext context, ActionKey actionKey, ActionResult actionResult) {
-    try (InputStream data = actionResult.toByteString().newInput()) {
-      saveFile(actionKey.getDigest(), Store.AC, data);
-      return immediateFuture(null);
-    } catch (IOException e) {
-      return Futures.immediateFailedFuture(e);
-    }
+    return executorService.submit(
+        () -> {
+          try (InputStream data = actionResult.toByteString().newInput()) {
+            saveFile(actionKey.getDigest(), Store.AC, data);
+          }
+          return null;
+        });
   }
 
   @Override
@@ -267,23 +279,25 @@ public class DiskCacheClient implements RemoteCacheClient {
   @Override
   public ListenableFuture<Void> uploadFile(
       RemoteActionExecutionContext context, Digest digest, Path file) {
-    try (InputStream in = file.getInputStream()) {
-      saveFile(digest, Store.CAS, in);
-    } catch (IOException e) {
-      return Futures.immediateFailedFuture(e);
-    }
-    return immediateFuture(null);
+    return executorService.submit(
+        () -> {
+          try (InputStream in = file.getInputStream()) {
+            saveFile(digest, Store.CAS, in);
+          }
+          return null;
+        });
   }
 
   @Override
   public ListenableFuture<Void> uploadBlob(
       RemoteActionExecutionContext context, Digest digest, ByteString data) {
-    try (InputStream in = data.newInput()) {
-      saveFile(digest, Store.CAS, in);
-    } catch (IOException e) {
-      return Futures.immediateFailedFuture(e);
-    }
-    return immediateFuture(null);
+    return executorService.submit(
+        () -> {
+          try (InputStream in = data.newInput()) {
+            saveFile(digest, Store.CAS, in);
+          }
+          return null;
+        });
   }
 
   @Override
@@ -315,11 +329,13 @@ public class DiskCacheClient implements RemoteCacheClient {
     Path temp = getTempPath();
 
     try {
-      try (FileOutputStream out = new FileOutputStream(temp.getPathFile())) {
+      try (OutputStream out = temp.getOutputStream()) {
         ByteStreams.copy(in, out);
         // Fsync temp before we rename it to avoid data loss in the case of machine
         // crashes (the OS may reorder the writes and the rename).
-        out.getFD().sync();
+        if (out instanceof FileOutputStream fos) {
+          fos.getFD().sync();
+        }
       }
       path.getParentDirectory().createDirectoryAndParents();
       temp.renameTo(path);

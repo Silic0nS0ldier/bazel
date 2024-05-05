@@ -30,11 +30,9 @@ import com.google.devtools.build.lib.actions.Artifact.SpecialArtifactType;
 import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
-import com.google.devtools.build.lib.actions.EmptyRunfilesSupplier;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
-import com.google.devtools.build.lib.actions.RunfilesSupplier;
-import com.google.devtools.build.lib.actions.RunfilesSupplier.RunfilesTree;
+import com.google.devtools.build.lib.actions.RunfilesTree;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnMetrics;
 import com.google.devtools.build.lib.actions.SpawnResult;
@@ -47,6 +45,7 @@ import com.google.devtools.build.lib.exec.Protos.EnvironmentVariable;
 import com.google.devtools.build.lib.exec.Protos.File;
 import com.google.devtools.build.lib.exec.Protos.Platform;
 import com.google.devtools.build.lib.exec.Protos.SpawnExec;
+import com.google.devtools.build.lib.exec.util.FakeActionInputFileCache;
 import com.google.devtools.build.lib.exec.util.SpawnBuilder;
 import com.google.devtools.build.lib.server.FailureDetails.Crash;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
@@ -76,6 +75,8 @@ public abstract class SpawnLogContextTestBase {
   protected final ArtifactRoot rootDir = ArtifactRoot.asSourceRoot(Root.fromPath(execRoot));
   protected final ArtifactRoot outputDir =
       ArtifactRoot.asDerivedRoot(execRoot, RootType.Output, "out");
+  protected final ArtifactRoot middlemanDir =
+      ArtifactRoot.asDerivedRoot(execRoot, RootType.Middleman, "middlemen");
 
   // A fake action filesystem that provides a fast digest, but refuses to compute it from the
   // file contents (which won't be available when building without the bytes).
@@ -125,6 +126,16 @@ public abstract class SpawnLogContextTestBase {
     }
   }
 
+  /** Test parameter determining whether an output is indirected through a symlink. */
+  enum OutputIndirection {
+    DIRECT,
+    INDIRECT;
+
+    boolean viaSymlink() {
+      return this == INDIRECT;
+    }
+  }
+
   @Test
   public void testFileInput(@TestParameter InputsMode inputsMode) throws Exception {
     Artifact fileInput = ActionsTestUtil.createArtifact(rootDir, "file");
@@ -154,6 +165,47 @@ public abstract class SpawnLogContextTestBase {
                     .setPath("file")
                     .setDigest(getDigest("abc"))
                     .setIsTool(inputsMode.isTool()))
+            .build());
+  }
+
+  @Test
+  public void testFileInputWithDirectoryContents(
+      @TestParameter InputsMode inputsMode, @TestParameter DirContents dirContents)
+      throws Exception {
+    Artifact fileInput = ActionsTestUtil.createArtifact(rootDir, "file");
+
+    fileInput.getPath().createDirectoryAndParents();
+    if (!dirContents.isEmpty()) {
+      writeFile(fileInput.getPath().getChild("file"), "abc");
+    }
+
+    SpawnBuilder spawn = defaultSpawnBuilder().withInputs(fileInput);
+    if (inputsMode.isTool()) {
+      spawn.withTools(fileInput);
+    }
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    context.logSpawn(
+        spawn.build(),
+        createInputMetadataProvider(fileInput),
+        createInputMap(fileInput),
+        fs,
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(
+        context,
+        defaultSpawnExecBuilder()
+            .addAllInputs(
+                dirContents.isEmpty()
+                    ? ImmutableList.of()
+                    : ImmutableList.of(
+                        File.newBuilder()
+                            .setPath("file/file")
+                            .setDigest(getDigest("abc"))
+                            .setIsTool(inputsMode.isTool())
+                            .build()))
             .build());
   }
 
@@ -241,23 +293,61 @@ public abstract class SpawnLogContextTestBase {
   }
 
   @Test
-  public void testRunfilesFileInput() throws Exception {
-    Artifact runfilesInput = ActionsTestUtil.createArtifact(rootDir, "data.txt");
+  public void testUnresolvedSymlinkInput(@TestParameter InputsMode inputsMode) throws Exception {
+    Artifact symlinkInput = ActionsTestUtil.createUnresolvedSymlinkArtifact(outputDir, "symlink");
 
-    writeFile(runfilesInput, "abc");
+    symlinkInput.getPath().getParentDirectory().createDirectoryAndParents();
+    symlinkInput.getPath().createSymbolicLink(PathFragment.create("/some/path"));
 
-    PathFragment runfilesRoot = outputDir.getExecPath().getRelative("foo.runfiles");
-    RunfilesSupplier runfilesSupplier =
-        createRunfilesSupplier(runfilesRoot, ImmutableMap.of("data.txt", runfilesInput));
-
-    Spawn spawn = defaultSpawnBuilder().withRunfilesSupplier(runfilesSupplier).build();
+    SpawnBuilder spawn = defaultSpawnBuilder().withInputs(symlinkInput);
+    if (inputsMode.isTool()) {
+      spawn.withTools(symlinkInput);
+    }
 
     SpawnLogContext context = createSpawnLogContext();
 
     context.logSpawn(
+        spawn.build(),
+        createInputMetadataProvider(symlinkInput),
+        createInputMap(symlinkInput),
+        fs,
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(
+        context,
+        defaultSpawnExecBuilder()
+            .addInputs(
+                File.newBuilder()
+                    .setPath("out/symlink")
+                    .setSymlinkTargetPath("/some/path")
+                    .setIsTool(inputsMode.isTool()))
+            .build());
+  }
+
+  @Test
+  public void testRunfilesFileInput() throws Exception {
+    Artifact runfilesInput = ActionsTestUtil.createArtifact(rootDir, "data.txt");
+    Artifact runfilesMiddleman = ActionsTestUtil.createArtifact(middlemanDir, "runfiles");
+
+    writeFile(runfilesInput, "abc");
+
+    PathFragment runfilesRoot = outputDir.getExecPath().getRelative("foo.runfiles");
+    RunfilesTree runfilesTree =
+        createRunfilesTree(runfilesRoot, ImmutableMap.of("data.txt", runfilesInput));
+
+    Spawn spawn = defaultSpawnBuilder().withInput(runfilesMiddleman).build();
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    FakeActionInputFileCache inputMetadataProvider = new FakeActionInputFileCache();
+    inputMetadataProvider.putRunfilesTree(runfilesMiddleman, runfilesTree);
+    inputMetadataProvider.put(runfilesInput, FileArtifactValue.createForTesting(runfilesInput));
+
+    context.logSpawn(
         spawn,
-        createInputMetadataProvider(runfilesInput),
-        createInputMap(runfilesSupplier),
+        inputMetadataProvider,
+        createInputMap(runfilesTree),
         fs,
         defaultTimeout(),
         defaultSpawnResult());
@@ -272,6 +362,7 @@ public abstract class SpawnLogContextTestBase {
 
   @Test
   public void testRunfilesDirectoryInput(@TestParameter DirContents dirContents) throws Exception {
+    Artifact runfilesMiddleman = ActionsTestUtil.createArtifact(middlemanDir, "runfiles");
     Artifact runfilesInput = ActionsTestUtil.createArtifact(rootDir, "dir");
 
     runfilesInput.getPath().createDirectoryAndParents();
@@ -280,17 +371,21 @@ public abstract class SpawnLogContextTestBase {
     }
 
     PathFragment runfilesRoot = outputDir.getExecPath().getRelative("foo.runfiles");
-    RunfilesSupplier runfilesSupplier =
-        createRunfilesSupplier(runfilesRoot, ImmutableMap.of("dir", runfilesInput));
+    RunfilesTree runfilesTree =
+        createRunfilesTree(runfilesRoot, ImmutableMap.of("dir", runfilesInput));
 
-    Spawn spawn = defaultSpawnBuilder().withRunfilesSupplier(runfilesSupplier).build();
+    Spawn spawn = defaultSpawnBuilder().withInput(runfilesMiddleman).build();
 
     SpawnLogContext context = createSpawnLogContext();
 
+    FakeActionInputFileCache inputMetadataProvider = new FakeActionInputFileCache();
+    inputMetadataProvider.putRunfilesTree(runfilesMiddleman, runfilesTree);
+    inputMetadataProvider.put(runfilesInput, FileArtifactValue.createForTesting(runfilesInput));
+
     context.logSpawn(
         spawn,
-        createInputMetadataProvider(runfilesInput),
-        createInputMap(runfilesSupplier),
+        inputMetadataProvider,
+        createInputMap(runfilesTree),
         fs,
         defaultTimeout(),
         defaultSpawnResult());
@@ -311,19 +406,23 @@ public abstract class SpawnLogContextTestBase {
 
   @Test
   public void testRunfilesEmptyInput() throws Exception {
+    Artifact runfilesMiddleman = ActionsTestUtil.createArtifact(middlemanDir, "runfiles");
     PathFragment runfilesRoot = outputDir.getExecPath().getRelative("foo.runfiles");
     HashMap<String, Artifact> mapping = new HashMap<>();
     mapping.put("__init__.py", null);
-    RunfilesSupplier runfilesSupplier = createRunfilesSupplier(runfilesRoot, mapping);
+    RunfilesTree runfilesTree = createRunfilesTree(runfilesRoot, mapping);
 
-    Spawn spawn = defaultSpawnBuilder().withRunfilesSupplier(runfilesSupplier).build();
+    Spawn spawn = defaultSpawnBuilder().withInput(runfilesMiddleman).build();
 
     SpawnLogContext context = createSpawnLogContext();
 
+    FakeActionInputFileCache inputMetadataProvider = new FakeActionInputFileCache();
+    inputMetadataProvider.putRunfilesTree(runfilesMiddleman, runfilesTree);
+
     context.logSpawn(
         spawn,
-        createInputMetadataProvider(),
-        createInputMap(runfilesSupplier),
+        inputMetadataProvider,
+        createInputMap(runfilesTree),
         fs,
         defaultTimeout(),
         defaultSpawnResult());
@@ -385,10 +484,22 @@ public abstract class SpawnLogContextTestBase {
   }
 
   @Test
-  public void testFileOutput(@TestParameter OutputsMode outputsMode) throws Exception {
+  public void testFileOutput(
+      @TestParameter OutputsMode outputsMode, @TestParameter OutputIndirection indirection)
+      throws Exception {
     Artifact fileOutput = ActionsTestUtil.createArtifact(outputDir, "file");
 
-    writeFile(fileOutput, "abc");
+    Path actualPath =
+        indirection.viaSymlink()
+            ? outputDir.getRoot().asPath().getChild("actual")
+            : fileOutput.getPath();
+
+    if (indirection.viaSymlink()) {
+      fileOutput.getPath().getParentDirectory().createDirectoryAndParents();
+      fileOutput.getPath().createSymbolicLink(actualPath);
+    }
+
+    writeFile(actualPath, "abc");
 
     Spawn spawn = defaultSpawnBuilder().withOutputs(fileOutput).build();
 
@@ -411,17 +522,14 @@ public abstract class SpawnLogContextTestBase {
   }
 
   @Test
-  public void testDirectoryOutput(
-      @TestParameter OutputsMode outputsMode, @TestParameter DirContents dirContents)
+  public void testFileOutputWithDirectoryContents(@TestParameter OutputsMode outputsMode)
       throws Exception {
-    Artifact dirOutput = ActionsTestUtil.createArtifact(outputDir, "dir");
+    Artifact fileOutput = ActionsTestUtil.createArtifact(outputDir, "file");
 
-    dirOutput.getPath().createDirectoryAndParents();
-    if (!dirContents.isEmpty()) {
-      writeFile(dirOutput.getPath().getChild("file"), "abc");
-    }
+    fileOutput.getPath().createDirectoryAndParents();
+    writeFile(fileOutput.getPath().getChild("file"), "abc");
 
-    SpawnBuilder spawn = defaultSpawnBuilder().withOutputs(dirOutput);
+    SpawnBuilder spawn = defaultSpawnBuilder().withOutputs(fileOutput);
 
     SpawnLogContext context = createSpawnLogContext();
 
@@ -436,28 +544,41 @@ public abstract class SpawnLogContextTestBase {
     closeAndAssertLog(
         context,
         defaultSpawnExecBuilder()
-            .addListedOutputs("out/dir")
-            .addAllActualOutputs(
-                dirContents.isEmpty()
-                    ? ImmutableList.of()
-                    : ImmutableList.of(
-                        File.newBuilder()
-                            .setPath("out/dir/file")
-                            .setDigest(getDigest("abc"))
-                            .build()))
+            .addListedOutputs("out/file")
+            .addActualOutputs(
+                File.newBuilder().setPath("out/file/file").setDigest(getDigest("abc")))
             .build());
   }
 
   @Test
   public void testTreeOutput(
-      @TestParameter OutputsMode outputsMode, @TestParameter DirContents dirContents)
+      @TestParameter OutputsMode outputsMode,
+      @TestParameter DirContents dirContents,
+      @TestParameter OutputIndirection indirection)
       throws Exception {
     SpecialArtifact treeOutput =
         ActionsTestUtil.createTreeArtifactWithGeneratingAction(outputDir, "tree");
 
-    treeOutput.getPath().createDirectoryAndParents();
+    Path actualPath =
+        indirection.viaSymlink()
+            ? outputDir.getRoot().asPath().getChild("actual")
+            : treeOutput.getPath();
+
+    if (indirection.viaSymlink()) {
+      treeOutput.getPath().getParentDirectory().createDirectoryAndParents();
+      treeOutput.getPath().createSymbolicLink(actualPath);
+    }
+
+    actualPath.createDirectoryAndParents();
     if (!dirContents.isEmpty()) {
-      writeFile(treeOutput.getPath().getChild("child"), "abc");
+      Path firstChildPath = actualPath.getRelative("dir1/file1");
+      Path secondChildPath = actualPath.getRelative("dir2/file2");
+      firstChildPath.getParentDirectory().createDirectoryAndParents();
+      secondChildPath.getParentDirectory().createDirectoryAndParents();
+      writeFile(firstChildPath, "abc");
+      writeFile(secondChildPath, "def");
+      Path emptySubdirPath = actualPath.getRelative("dir3");
+      emptySubdirPath.createDirectoryAndParents();
     }
 
     Spawn spawn = defaultSpawnBuilder().withOutputs(treeOutput).build();
@@ -481,10 +602,86 @@ public abstract class SpawnLogContextTestBase {
                     ? ImmutableList.of()
                     : ImmutableList.of(
                         File.newBuilder()
-                            .setPath("out/tree/child")
+                            .setPath("out/tree/dir1/file1")
                             .setDigest(getDigest("abc"))
+                            .build(),
+                        File.newBuilder()
+                            .setPath("out/tree/dir2/file2")
+                            .setDigest(getDigest("def"))
                             .build()))
             .build());
+  }
+
+  @Test
+  public void testTreeOutputWithInvalidType(@TestParameter OutputsMode outputsMode)
+      throws Exception {
+    Artifact treeOutput = ActionsTestUtil.createTreeArtifactWithGeneratingAction(outputDir, "tree");
+
+    writeFile(treeOutput, "abc");
+
+    SpawnBuilder spawn = defaultSpawnBuilder().withOutputs(treeOutput);
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    context.logSpawn(
+        spawn.build(),
+        createInputMetadataProvider(),
+        createInputMap(),
+        outputsMode.getActionFileSystem(fs),
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(context, defaultSpawnExecBuilder().addListedOutputs("out/tree").build());
+  }
+
+  @Test
+  public void testUnresolvedSymlinkOutput(@TestParameter OutputsMode outputsMode) throws Exception {
+    Artifact symlinkOutput = ActionsTestUtil.createUnresolvedSymlinkArtifact(outputDir, "symlink");
+
+    symlinkOutput.getPath().getParentDirectory().createDirectoryAndParents();
+    symlinkOutput.getPath().createSymbolicLink(PathFragment.create("/some/path"));
+
+    SpawnBuilder spawn = defaultSpawnBuilder().withOutputs(symlinkOutput);
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    context.logSpawn(
+        spawn.build(),
+        createInputMetadataProvider(),
+        createInputMap(),
+        outputsMode.getActionFileSystem(fs),
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(
+        context,
+        defaultSpawnExecBuilder()
+            .addListedOutputs("out/symlink")
+            .addActualOutputs(
+                File.newBuilder().setPath("out/symlink").setSymlinkTargetPath("/some/path"))
+            .build());
+  }
+
+  @Test
+  public void testUnresolvedSymlinkOutputWithInvalidType(@TestParameter OutputsMode outputsMode)
+      throws Exception {
+    Artifact symlinkOutput = ActionsTestUtil.createUnresolvedSymlinkArtifact(outputDir, "symlink");
+
+    writeFile(symlinkOutput, "abc");
+
+    SpawnBuilder spawn = defaultSpawnBuilder().withOutputs(symlinkOutput);
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    context.logSpawn(
+        spawn.build(),
+        createInputMetadataProvider(),
+        createInputMap(),
+        outputsMode.getActionFileSystem(fs),
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(context, defaultSpawnExecBuilder().addListedOutputs("out/symlink").build());
   }
 
   @Test
@@ -631,7 +828,7 @@ public abstract class SpawnLogContextTestBase {
   public void testDigest() throws Exception {
     SpawnLogContext context = createSpawnLogContext();
 
-    Digest digest = Digest.newBuilder().setHash("deadbeef").build();
+    Digest digest = getDigest("something");
 
     SpawnResult result = defaultSpawnResultBuilder().setDigest(digest).build();
 
@@ -750,19 +947,16 @@ public abstract class SpawnLogContextTestBase {
         .setMetrics(Protos.SpawnMetrics.getDefaultInstance());
   }
 
-  protected static RunfilesSupplier createRunfilesSupplier(
+  protected static RunfilesTree createRunfilesTree(
       PathFragment root, Map<String, Artifact> mapping) {
     HashMap<PathFragment, Artifact> mappingByPath = new HashMap<>();
     for (Map.Entry<String, Artifact> entry : mapping.entrySet()) {
       mappingByPath.put(PathFragment.create(entry.getKey()), entry.getValue());
     }
     RunfilesTree runfilesTree = mock(RunfilesTree.class);
-    when(runfilesTree.getPossiblyIncorrectExecPath()).thenReturn(root);
+    when(runfilesTree.getExecPath()).thenReturn(root);
     when(runfilesTree.getMapping()).thenReturn(mappingByPath);
-    RunfilesSupplier runfilesSupplier = mock(RunfilesSupplier.class);
-    when(runfilesSupplier.getRunfilesTrees()).thenReturn(ImmutableList.of(runfilesTree));
-    when(runfilesSupplier.getRunfilesDirOverride()).thenReturn(null);
-    return runfilesSupplier;
+    return runfilesTree;
   }
 
   protected static InputMetadataProvider createInputMetadataProvider(Artifact... artifacts)
@@ -777,6 +971,8 @@ public abstract class SpawnLogContextTestBase {
             treeMetadata.getChildValues().entrySet()) {
           builder.put(entry.getKey(), entry.getValue());
         }
+      } else if (artifact.isSymlink()) {
+        builder.put(artifact, FileArtifactValue.createForUnresolvedSymlink(artifact));
       } else {
         builder.put(artifact, FileArtifactValue.createForTesting(artifact));
       }
@@ -786,22 +982,24 @@ public abstract class SpawnLogContextTestBase {
 
   protected static SortedMap<PathFragment, ActionInput> createInputMap(Artifact... artifacts)
       throws Exception {
-    return createInputMap(EmptyRunfilesSupplier.INSTANCE, artifacts);
+    return createInputMap(null, artifacts);
   }
 
   protected static SortedMap<PathFragment, ActionInput> createInputMap(
-      RunfilesSupplier runfilesSupplier, Artifact... artifacts) throws Exception {
+      RunfilesTree runfilesTree, Artifact... artifacts) throws Exception {
     ImmutableSortedMap.Builder<PathFragment, ActionInput> builder =
         ImmutableSortedMap.naturalOrder();
-    for (RunfilesTree tree : runfilesSupplier.getRunfilesTrees()) {
+
+    if (runfilesTree != null) {
       // Emulate SpawnInputExpander: expand runfiles, replacing nulls with empty inputs.
-      PathFragment root = tree.getPossiblyIncorrectExecPath();
-      for (Map.Entry<PathFragment, Artifact> entry : tree.getMapping().entrySet()) {
+      PathFragment root = runfilesTree.getExecPath();
+      for (Map.Entry<PathFragment, Artifact> entry : runfilesTree.getMapping().entrySet()) {
         PathFragment execPath = root.getRelative(entry.getKey());
         Artifact artifact = entry.getValue();
         builder.put(execPath, artifact != null ? artifact : VirtualActionInput.EMPTY_MARKER);
       }
     }
+
     for (Artifact artifact : artifacts) {
       if (artifact.isTreeArtifact()) {
         // Emulate SpawnInputExpander: expand to children, preserve if empty.
@@ -825,7 +1023,7 @@ public abstract class SpawnLogContextTestBase {
     TreeArtifactValue.Builder builder = TreeArtifactValue.newBuilder((SpecialArtifact) tree);
     TreeArtifactValue.visitTree(
         tree.getPath(),
-        (parentRelativePath, type) -> {
+        (parentRelativePath, type, traversedSymlink) -> {
           if (type.equals(Dirent.Type.DIRECTORY)) {
             return;
           }
@@ -836,12 +1034,12 @@ public abstract class SpawnLogContextTestBase {
     return builder.build();
   }
 
-  protected SpawnLogContext createSpawnLogContext() throws IOException {
+  protected SpawnLogContext createSpawnLogContext() throws IOException, InterruptedException {
     return createSpawnLogContext(ImmutableSortedMap.of());
   }
 
   protected abstract SpawnLogContext createSpawnLogContext(
-      ImmutableMap<String, String> platformProperties) throws IOException;
+      ImmutableMap<String, String> platformProperties) throws IOException, InterruptedException;
 
   protected Digest getDigest(String content) {
     return Digest.newBuilder()
@@ -861,5 +1059,5 @@ public abstract class SpawnLogContextTestBase {
   }
 
   protected abstract void closeAndAssertLog(SpawnLogContext context, SpawnExec... expected)
-      throws IOException;
+      throws IOException, InterruptedException;
 }

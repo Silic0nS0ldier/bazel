@@ -15,7 +15,6 @@
 
 package com.google.devtools.build.lib.rules.repository;
 
-import static com.google.devtools.build.lib.cmdline.LabelConstants.EXTERNAL_PACKAGE_IDENTIFIER;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -91,9 +90,12 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
   public static final Precomputed<Optional<Path>> VENDOR_DIRECTORY =
       new Precomputed<>("vendor_directory");
 
+  public static final Precomputed<Boolean> DISABLE_NATIVE_REPO_RULES =
+      new Precomputed<>("disable_native_repo_rules");
+
   // The marker file version is inject in the rule key digest so the rule key is always different
   // when we decide to update the format.
-  private static final int MARKER_FILE_VERSION = 3;
+  private static final int MARKER_FILE_VERSION = 7;
 
   // Mapping of rule class name to RepositoryFunction.
   private final ImmutableMap<String, RepositoryFunction> handlers;
@@ -153,7 +155,6 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
       if (env.valuesMissing()) {
         return null;
       }
-
       if (rule == null) {
         return new NoRepositoryDirectoryValue(
             String.format("Repository '%s' is not defined", repositoryName.getCanonicalForm()));
@@ -166,51 +167,31 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
             String.format("'%s' is not a repository rule", repositoryName.getCanonicalForm()));
       }
 
-      DigestWriter digestWriter = new DigestWriter(directories, repositoryName, rule);
+      DigestWriter digestWriter =
+          new DigestWriter(directories, repositoryName, rule, starlarkSemantics);
       if (shouldUseVendorRepos(env, handler, rule)) {
-        Path vendorPath = VENDOR_DIRECTORY.get(env).get();
-        Path vendorMarker = vendorPath.getChild("@" + repositoryName.getName() + ".marker");
-        boolean isVendorRepoUpToDate =
-            digestWriter.areRepositoryAndMarkerFileConsistent(handler, env, vendorMarker) != null;
+        RepositoryDirectoryValue repositoryDirectoryValue =
+            tryGettingValueUsingVendoredRepo(
+                env, rule, repoRoot, repositoryName, handler, digestWriter);
         if (env.valuesMissing()) {
           return null;
         }
-        if (isVendorRepoUpToDate) {
-          PathFragment vendorRepoPath =
-              vendorPath.getRelative(repositoryName.getName()).asFragment();
-          return setupOverride(vendorRepoPath, env, repoRoot, repositoryName.getName());
-        } else if (!IS_VENDOR_COMMAND.get(env).booleanValue()) {
-          // If this is vendor command, proceed with fetching to update the vendor directory.
-          // Otherwise, for example, the build command, we need to display a warning indicating
-          // that the vendored repository is out-of-date.
-          env.getListener()
-              .handle(
-                  Event.warn(
-                      rule.getLocation(),
-                      String.format(
-                          "Vendored repository '%s' is out-of-date. The up-to-date version will"
-                              + " be fetched into the external cache and used. To update the repo"
-                              + " in the  vendor directory, run 'bazel vendor' with the directory"
-                              + " flag",
-                          rule.getName())));
+        if (repositoryDirectoryValue != null) {
+          return repositoryDirectoryValue;
         }
       }
-
       if (shouldUseCachedRepos(env, handler, repoRoot, rule)) {
         // Make sure marker file is up-to-date; correctly describes the current repository state
         byte[] markerHash = digestWriter.areRepositoryAndMarkerFileConsistent(handler, env);
         if (env.valuesMissing()) {
           return null;
         }
-        if (markerHash != null) {
+        if (markerHash != null) { // repo exist & up-to-date
           return RepositoryDirectoryValue.builder()
               .setPath(repoRoot)
               .setDigest(markerHash)
               .setExcludeFromVendoring(shouldExcludeRepoFromVendoring(handler, rule))
               .build();
-        } else {
-          // So that we are in a consistent state if something happens while fetching the repository
-          DigestWriter.clearMarkerFile(directories, repositoryName);
         }
       }
 
@@ -224,7 +205,8 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
         // only recreate it after fetching is done to prevent this scenario.
         DigestWriter.clearMarkerFile(directories, repositoryName);
         RepositoryDirectoryValue.Builder builder =
-            fetchRepository(skyKey, repoRoot, env, digestWriter.getMarkerData(), handler, rule);
+            fetchRepository(
+                skyKey, repoRoot, env, digestWriter.getRecordedInputValues(), handler, rule);
         if (builder == null) {
           return null;
         }
@@ -266,6 +248,63 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
           .setExcludeFromVendoring(shouldExcludeRepoFromVendoring(handler, rule))
           .build();
     }
+  }
+
+  @Nullable
+  private RepositoryDirectoryValue tryGettingValueUsingVendoredRepo(
+      Environment env,
+      Rule rule,
+      Path repoRoot,
+      RepositoryName repositoryName,
+      RepositoryFunction handler,
+      DigestWriter digestWriter)
+      throws RepositoryFunctionException, InterruptedException {
+    Path vendorPath = VENDOR_DIRECTORY.get(env).get();
+    Path vendorRepoPath = vendorPath.getRelative(repositoryName.getName());
+    if (vendorRepoPath.exists()) {
+      Path vendorMarker = vendorPath.getChild("@" + repositoryName.getName() + ".marker");
+      boolean isVendorRepoUpToDate =
+          digestWriter.areRepositoryAndMarkerFileConsistent(handler, env, vendorMarker) != null;
+      if (env.valuesMissing()) {
+        return null;
+      }
+      // If our repo is up-to-date, or this is an offline build (--nofetch), then the vendored repo
+      // is used.
+      if (isVendorRepoUpToDate || (!IS_VENDOR_COMMAND.get(env).booleanValue() && !isFetch.get())) {
+        if (!isVendorRepoUpToDate) { // If the repo is out-of-date, show a warning
+          env.getListener()
+              .handle(
+                  Event.warn(
+                      rule.getLocation(),
+                      String.format(
+                          "Vendored repository '%s' is out-of-date and fetching is disabled."
+                              + " Run build without the '--nofetch' option or run"
+                              + " `bazel vendor` to update it",
+                          rule.getName())));
+        }
+        return setupOverride(vendorRepoPath.asFragment(), env, repoRoot, repositoryName.getName());
+      } else if (!IS_VENDOR_COMMAND.get(env).booleanValue()) { // build command & fetch enabled
+        // We will continue fetching but warn the user that we are not using the vendored repo
+        env.getListener()
+            .handle(
+                Event.warn(
+                    rule.getLocation(),
+                    String.format(
+                        "Vendored repository '%s' is out-of-date. The up-to-date version will"
+                            + " be fetched into the external cache and used. To update the repo"
+                            + " in the  vendor directory, run 'bazel vendor'",
+                        rule.getName())));
+      }
+    } else if (!isFetch.get()) { // repo not vendored & fetching is disabled (--nofetch)
+      throw new RepositoryFunctionException(
+          new IOException(
+              "Vendored repository "
+                  + repositoryName.getName()
+                  + " not found under the vendor directory and fetching is disabled."
+                  + " To fix run 'bazel vendor' or build without the '--nofetch'"),
+          Transience.TRANSIENT);
+    }
+    return null;
   }
 
   @Nullable
@@ -353,16 +392,14 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
       return false;
     }
 
+    // TODO(salmasamy) do we need to check vendor ignore here?
     return true;
   }
 
   private boolean shouldExcludeRepoFromVendoring(RepositoryFunction handler, Rule rule) {
-    return handler.isLocal(rule) || handler.isConfigure(rule) || isWorkspaceRepo(rule);
-  }
-
-  private boolean isWorkspaceRepo(Rule rule) {
-    // All workspace repos are under //external, while bzlmod repo rules are not
-    return rule.getPackage().getPackageIdentifier().equals(EXTERNAL_PACKAGE_IDENTIFIER);
+    return handler.isLocal(rule)
+        || handler.isConfigure(rule)
+        || RepositoryFunction.isWorkspaceRepo(rule);
   }
 
   @Nullable
@@ -370,7 +407,7 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
       SkyKey skyKey,
       Path repoRoot,
       Environment env,
-      Map<String, String> markerData,
+      Map<RepoRecordedInput, String> recordedInputValues,
       RepositoryFunction handler,
       Rule rule)
       throws InterruptedException, RepositoryFunctionException {
@@ -382,7 +419,7 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
 
     RepositoryDirectoryValue.Builder repoBuilder;
     try {
-      repoBuilder = handler.fetch(rule, repoRoot, directories, env, markerData, skyKey);
+      repoBuilder = handler.fetch(rule, repoRoot, directories, env, recordedInputValues, skyKey);
     } catch (RepositoryFunctionException e) {
       // Upon an exceptional exit, the fetching of that repository is over as well.
       env.getListener().post(RepositoryFetchProgress.finished(repoName));
@@ -549,25 +586,31 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
   }
 
   private static class DigestWriter {
+    private final BlazeDirectories directories;
     private final Path markerPath;
     private final Rule rule;
     // not just Map<> to signal that iteration order must be deterministic
-    private final TreeMap<String, String> markerData;
+    private final TreeMap<RepoRecordedInput, String> recordedInputValues;
     private final String ruleKey;
 
-    DigestWriter(BlazeDirectories directories, RepositoryName repositoryName, Rule rule) {
-      ruleKey = computeRuleKey(rule);
+    DigestWriter(
+        BlazeDirectories directories,
+        RepositoryName repositoryName,
+        Rule rule,
+        StarlarkSemantics starlarkSemantics) {
+      this.directories = directories;
+      ruleKey = computeRuleKey(rule, starlarkSemantics);
       markerPath = getMarkerPath(directories, repositoryName.getName());
       this.rule = rule;
-      markerData = Maps.newTreeMap();
+      recordedInputValues = Maps.newTreeMap();
     }
 
     byte[] writeMarkerFile() throws RepositoryFunctionException {
       StringBuilder builder = new StringBuilder();
       builder.append(ruleKey).append("\n");
-      for (Map.Entry<String, String> data : markerData.entrySet()) {
-        String key = data.getKey();
-        String value = data.getValue();
+      for (Map.Entry<RepoRecordedInput, String> recordedInput : recordedInputValues.entrySet()) {
+        String key = recordedInput.getKey().toString();
+        String value = recordedInput.getValue();
         builder.append(escape(key)).append(" ").append(escape(value)).append("\n");
       }
       String content = builder.toString();
@@ -604,14 +647,14 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
         return null;
       }
 
-      Map<String, String> markerData = new TreeMap<>();
+      Map<RepoRecordedInput, String> recordedInputValues = new TreeMap<>();
       String content;
       try {
         content = FileSystemUtils.readContent(markerPath, UTF_8);
-        String markerRuleKey = readMarkerFile(content, markerData);
+        String markerRuleKey = readMarkerFile(content, recordedInputValues);
         boolean verified = false;
         if (Preconditions.checkNotNull(ruleKey).equals(markerRuleKey)) {
-          verified = handler.verifyMarkerData(rule, markerData, env);
+          verified = handler.verifyRecordedInputs(rule, directories, recordedInputValues, env);
           if (env.valuesMissing()) {
             return null;
           }
@@ -627,12 +670,13 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
       }
     }
 
-    Map<String, String> getMarkerData() {
-      return markerData;
+    Map<RepoRecordedInput, String> getRecordedInputValues() {
+      return recordedInputValues;
     }
 
     @Nullable
-    private String readMarkerFile(String content, Map<String, String> markerData) {
+    private static String readMarkerFile(
+        String content, Map<RepoRecordedInput, String> recordedInputValues) {
       String markerRuleKey = null;
       Iterable<String> lines = Splitter.on('\n').split(content);
 
@@ -643,22 +687,26 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
           firstLine = false;
         } else {
           int sChar = line.indexOf(' ');
-          String key = line;
-          String value = "";
           if (sChar > 0) {
-            key = unescape(line.substring(0, sChar));
-            value = unescape(line.substring(sChar + 1));
+            RepoRecordedInput input = RepoRecordedInput.parse(unescape(line.substring(0, sChar)));
+            if (input == null) {
+              // ignore invalid entries.
+              continue;
+            }
+            recordedInputValues.put(input, unescape(line.substring(sChar + 1)));
           }
-          markerData.put(key, value);
         }
       }
       return markerRuleKey;
     }
 
-    private String computeRuleKey(Rule rule) {
+    private String computeRuleKey(Rule rule, StarlarkSemantics starlarkSemantics) {
       return new Fingerprint()
           .addBytes(RuleFormatter.serializeRule(rule).build().toByteArray())
           .addInt(MARKER_FILE_VERSION)
+          // TODO: Using the hashCode() method for StarlarkSemantics here is suboptimal as
+          //   it doesn't include any default values.
+          .addInt(starlarkSemantics.hashCode())
           .hexDigestAndReset();
     }
 

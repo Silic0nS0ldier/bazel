@@ -20,24 +20,25 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Table;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.RuleDefinition;
 import com.google.devtools.build.lib.bazel.repository.RepositoryResolvedEvent;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
-import com.google.devtools.build.lib.bazel.repository.starlark.RepoFetchingSkyKeyComputeState.Signal;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.BazelStarlarkContext;
 import com.google.devtools.build.lib.packages.Rule;
-import com.google.devtools.build.lib.packages.SymbolGenerator;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
+import com.google.devtools.build.lib.repository.RepositoryFetchProgress;
 import com.google.devtools.build.lib.rules.repository.NeedsSkyframeRestartException;
+import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.rules.repository.RepositoryFunction;
 import com.google.devtools.build.lib.rules.repository.WorkspaceFileHelper;
@@ -54,10 +55,8 @@ import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 import com.google.devtools.build.skyframe.SkyKey;
 import java.io.IOException;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Mutability;
@@ -65,14 +64,13 @@ import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkCallable;
 import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkThread;
+import net.starlark.java.eval.SymbolGenerator;
 
 /** A repository function to delegate work done by Starlark remote repositories. */
 public final class StarlarkRepositoryFunction extends RepositoryFunction {
-  static final String SEMANTICS = "STARLARK_SEMANTICS";
-
   private final DownloadManager downloadManager;
   private double timeoutScaling = 1.0;
-  @Nullable private ExecutorService workerExecutorService = null;
+  private boolean useWorkers;
   @Nullable private ProcessWrapper processWrapper = null;
   @Nullable private RepositoryRemoteExecutor repositoryRemoteExecutor;
   @Nullable private SyscallCache syscallCache;
@@ -93,35 +91,15 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
     this.syscallCache = checkNotNull(syscallCache);
   }
 
-  public void setWorkerExecutorService(@Nullable ExecutorService workerExecutorService) {
-    this.workerExecutorService = workerExecutorService;
-  }
-
-  static String describeSemantics(StarlarkSemantics semantics) {
-    // Here we use the hash code provided by AutoValue. This is unique, as long
-    // as the number of bits in the StarlarkSemantics is small enough. We will have to
-    // move to a longer description once the number of flags grows too large.
-    return "" + semantics.hashCode();
-  }
-
-  @Override
-  protected boolean verifySemanticsMarkerData(Map<String, String> markerData, Environment env)
-      throws InterruptedException {
-    StarlarkSemantics starlarkSemantics = PrecomputedValue.STARLARK_SEMANTICS.get(env);
-    if (starlarkSemantics == null) {
-      // As it is a precomputed value, it should already be available. If not, returning
-      // false is the safe thing to do.
-      return false;
-    }
-
-    return describeSemantics(starlarkSemantics).equals(markerData.get(SEMANTICS));
+  public void setUseWorkers(boolean useWorkers) {
+    this.useWorkers = useWorkers;
   }
 
   @Override
   protected void setupRepoRootBeforeFetching(Path repoRoot) throws RepositoryFunctionException {
     // DON'T delete the repo root here if we're using a worker thread, since when this SkyFunction
     // restarts, fetching is still happening inside the worker thread.
-    if (workerExecutorService == null) {
+    if (!useWorkers) {
       setupRepoRoot(repoRoot);
     }
   }
@@ -130,8 +108,20 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
   public void reportSkyframeRestart(Environment env, RepositoryName repoName) {
     // DON'T report a "restarting." event if we're using a worker thread, since the actual fetch
     // function run by the worker thread never restarts.
-    if (workerExecutorService == null) {
+    if (!useWorkers) {
       super.reportSkyframeRestart(env, repoName);
+    }
+  }
+
+  private record FetchArgs(
+      Rule rule,
+      Path outputDirectory,
+      BlazeDirectories directories,
+      Environment env,
+      Map<RepoRecordedInput, String> recordedInputValues,
+      SkyKey key) {
+    FetchArgs toWorkerArgs(Environment env, Map<RepoRecordedInput, String> recordedInputValues) {
+      return new FetchArgs(rule, outputDirectory, directories, env, recordedInputValues, key);
     }
   }
 
@@ -142,64 +132,87 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
       Path outputDirectory,
       BlazeDirectories directories,
       Environment env,
-      Map<String, String> markerData,
+      Map<RepoRecordedInput, String> recordedInputValues,
       SkyKey key)
       throws RepositoryFunctionException, InterruptedException {
-    if (workerExecutorService == null) {
-      return fetchInternal(rule, outputDirectory, directories, env, markerData, key);
+    var args = new FetchArgs(rule, outputDirectory, directories, env, recordedInputValues, key);
+    if (!useWorkers) {
+      return fetchInternal(args);
     }
-    var state = env.getState(RepoFetchingSkyKeyComputeState::new);
-    var workerFuture = state.workerFuture;
-    if (workerFuture == null) {
-      // No worker is running yet, which means we're just starting to fetch this repo. Start with a
-      // clean slate, and create the worker.
-      setupRepoRoot(outputDirectory);
-      Environment workerEnv = new RepoFetchingWorkerSkyFunctionEnvironment(state, env);
-      workerFuture =
-          workerExecutorService.submit(
-              () -> {
-                try {
-                  return fetchInternal(
-                      rule, outputDirectory, directories, workerEnv, state.markerData, key);
-                } finally {
-                  state.signalQueue.put(Signal.DONE);
-                }
-              });
-      state.workerFuture = workerFuture;
-    } else {
-      // A worker is already running. This can only mean one thing -- we just had a Skyframe
-      // restart, and need to send over a fresh Environment.
-      state.delegateEnvQueue.put(env);
+    var state = env.getState(() -> new RepoFetchingSkyKeyComputeState(rule.getName()));
+    if (state.workerExecutorService.isShutdown()) {
+      // If we get here and the worker executor is shut down, this can only mean that the worker
+      // future was cancelled while we (the host Skyframe thread) were inactive (as in, having
+      // returned `null` but not yet restarted). So we wait for the previous worker thread to finish
+      // first.
+      // TODO: instead of this complicated dance, consider making it legal for
+      //  `SkyKeyComputeState#close()` to block. This would undo the advice added in commit 8ef0a51,
+      //  but would allow us to merge `close()` and `closeAndWaitForTermination()` and avoid some
+      //  headache.
+      state.closeAndWaitForTermination();
     }
-    switch (state.signalQueue.take()) {
-      case RESTART:
+    boolean shouldShutDownWorkerExecutorInFinally = true;
+    try {
+      var workerFuture = state.workerFuture;
+      if (workerFuture == null) {
+        // No worker is running yet, which means we're just starting to fetch this repo. Start with
+        // a clean slate, and create the worker.
+        setupRepoRoot(outputDirectory);
+        Environment workerEnv = new RepoFetchingWorkerSkyFunctionEnvironment(state, env);
+        workerFuture =
+            state.startWorker(
+                () -> fetchInternal(args.toWorkerArgs(workerEnv, state.recordedInputValues)));
+      } else {
+        // A worker is already running. This can only mean one thing -- we just had a Skyframe
+        // restart, and need to send over a fresh Environment.
+        state.delegateEnvQueue.put(env);
+      }
+      state.signalSemaphore.acquire();
+      if (!workerFuture.isDone()) {
+        // This means that the worker is still running, and expecting a fresh Environment. Return
+        // null to trigger a Skyframe restart, but *don't* shut down the worker executor.
+        shouldShutDownWorkerExecutorInFinally = false;
         return null;
-      case DONE:
-        try {
-          RepositoryDirectoryValue.Builder result = workerFuture.get();
-          markerData.putAll(state.markerData);
-          return result;
-        } catch (ExecutionException e) {
-          Throwables.throwIfInstanceOf(e.getCause(), RepositoryFunctionException.class);
-          Throwables.throwIfUnchecked(e.getCause());
-          throw new IllegalStateException(
-              "unexpected exception type: " + e.getClass(), e.getCause());
-        } finally {
-          // Make sure we interrupt the worker thread if work on the Skyframe thread were cut short
-          // for any reason.
-          state.close();
-          try {
-            // Synchronously wait for the worker thread to finish any remaining work.
-            workerFuture.get();
-          } catch (ExecutionException e) {
-            // When this happens, we either already dealt with the exception (see `catch` clause
-            // above), or we're in the middle of propagating an InterruptedException in which case
-            // we don't care about the result of execution anyway.
-          }
-        }
+      }
+      RepositoryDirectoryValue.Builder result = workerFuture.get();
+      recordedInputValues.putAll(state.recordedInputValues);
+      return result;
+    } catch (ExecutionException e) {
+      Throwables.throwIfInstanceOf(e.getCause(), RepositoryFunctionException.class);
+      Throwables.throwIfUnchecked(e.getCause());
+      throw new IllegalStateException("unexpected exception type: " + e.getClass(), e.getCause());
+    } catch (CancellationException e) {
+      // This can only happen if the state object was invalidated due to memory pressure, in
+      // which case we can simply reattempt the fetch.
+      env.getListener()
+          .post(
+              RepositoryFetchProgress.ongoing(
+                  RepositoryName.createUnvalidated(rule.getName()),
+                  "fetch interrupted due to memory pressure; restarting."));
+      return fetch(rule, outputDirectory, directories, env, recordedInputValues, key);
+    } finally {
+      if (shouldShutDownWorkerExecutorInFinally) {
+        // Unless we know the worker is waiting on a fresh Environment, we should *always* shut down
+        // the worker executor and reset the state by the time we finish executing (successfully or
+        // otherwise). This ensures that 1) no background work happens without our knowledge, and
+        // 2) if the SkyFunction is re-entered for any reason (for example b/330892334 and
+        // https://github.com/bazelbuild/bazel/issues/21238), we don't have lingering state messing
+        // things up.
+        state.closeAndWaitForTermination();
+      }
     }
-    // TODO(wyv): use a switch expression above instead and remove this.
-    throw new IllegalStateException();
+  }
+
+  @Nullable
+  private RepositoryDirectoryValue.Builder fetchInternal(FetchArgs args)
+      throws RepositoryFunctionException, InterruptedException {
+    return fetchInternal(
+        args.rule,
+        args.outputDirectory,
+        args.directories,
+        args.env,
+        args.recordedInputValues,
+        args.key);
   }
 
   @Nullable
@@ -208,7 +221,7 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
       Path outputDirectory,
       BlazeDirectories directories,
       Environment env,
-      Map<String, String> markerData,
+      Map<RepoRecordedInput, String> recordedInputValues,
       SkyKey key)
       throws RepositoryFunctionException, InterruptedException {
 
@@ -216,14 +229,13 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
     env.getListener().post(new StarlarkRepositoryDefinitionLocationEvent(rule.getName(), defInfo));
 
     StarlarkCallable function = rule.getRuleClassObject().getConfiguredTargetFunction();
-    if (declareEnvironmentDependencies(markerData, env, getEnviron(rule)) == null) {
+    if (declareEnvironmentDependencies(recordedInputValues, env, getEnviron(rule)) == null) {
       return null;
     }
     StarlarkSemantics starlarkSemantics = PrecomputedValue.STARLARK_SEMANTICS.get(env);
     if (env.valuesMissing()) {
       return null;
     }
-    markerData.put(SEMANTICS, describeSemantics(starlarkSemantics));
 
     PathPackageLocator packageLocator = PrecomputedValue.PATH_PACKAGE_LOCATOR.get(env);
     if (env.valuesMissing()) {
@@ -238,13 +250,21 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
     ImmutableSet<PathFragment> ignoredPatterns = checkNotNull(ignoredPackagesValue).getPatterns();
 
     try (Mutability mu = Mutability.create("Starlark repository")) {
-      StarlarkThread thread = new StarlarkThread(mu, starlarkSemantics);
+      StarlarkThread thread =
+          StarlarkThread.create(
+              mu, starlarkSemantics, /* contextDescription= */ "", SymbolGenerator.create(key));
       thread.setPrintHandler(Event.makeDebugPrintHandler(env.getListener()));
+      var repoMappingRecorder = new Label.RepoMappingRecorder();
+      // For repos defined in Bzlmod, record any used repo mappings in the marker file.
+      // Repos defined in WORKSPACE are impossible to verify given the chunked loading (we'd have to
+      // record which chunk the repo mapping was used in, and ain't nobody got time for that).
+      if (!isWorkspaceRepo(rule)) {
+        repoMappingRecorder.mergeEntries(
+            rule.getRuleClassObject().getRuleDefinitionEnvironmentRepoMappingEntries());
+        thread.setThreadLocal(Label.RepoMappingRecorder.class, repoMappingRecorder);
+      }
 
-      new BazelStarlarkContext(
-              BazelStarlarkContext.Phase.LOADING, // ("fetch")
-              new SymbolGenerator<>(key))
-          .storeInThread(thread);
+      new BazelStarlarkContext(BazelStarlarkContext.Phase.LOADING).storeInThread(thread); // "fetch"
 
       StarlarkRepositoryContext starlarkRepositoryContext =
           new StarlarkRepositoryContext(
@@ -260,7 +280,7 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
               starlarkSemantics,
               repositoryRemoteExecutor,
               syscallCache,
-              directories.getWorkspace());
+              directories);
 
       if (starlarkRepositoryContext.isRemotable()) {
         // If a rule is declared remotable then invalidate it if remote execution gets
@@ -316,16 +336,23 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
         env.getListener().handle(Event.debug(defInfo));
       }
 
-      // Modify marker data to include the files used by the rule's implementation function.
-      for (Map.Entry<Label, String> entry :
-          starlarkRepositoryContext.getAccumulatedFileDigests().entrySet()) {
-        // A label does not contain spaces so it's safe to use as a key.
-        markerData.put("FILE:" + entry.getKey(), entry.getValue());
-      }
+      // Modify marker data to include the files/dirents used by the rule's implementation function.
+      recordedInputValues.putAll(starlarkRepositoryContext.getRecordedFileInputs());
+      recordedInputValues.putAll(starlarkRepositoryContext.getRecordedDirentsInputs());
+      recordedInputValues.putAll(starlarkRepositoryContext.getRecordedDirTreeInputs());
 
       // Ditto for environment variables accessed via `getenv`.
       for (String envKey : starlarkRepositoryContext.getAccumulatedEnvKeys()) {
-        markerData.put("ENV:" + envKey, clientEnvironment.get(envKey));
+        recordedInputValues.put(
+            new RepoRecordedInput.EnvVar(envKey), clientEnvironment.get(envKey));
+      }
+
+      for (Table.Cell<RepositoryName, String, RepositoryName> repoMappings :
+          repoMappingRecorder.recordedEntries().cellSet()) {
+        recordedInputValues.put(
+            new RepoRecordedInput.RecordedRepoMapping(
+                repoMappings.getRowKey(), repoMappings.getColumnKey()),
+            repoMappings.getValue().getName());
       }
 
       env.getListener().post(resolved);
@@ -358,7 +385,18 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
           new IOException(rule + " must create a directory"), Transience.TRANSIENT);
     }
 
+    // Make sure the fetched repo has a boundary file.
     if (!WorkspaceFileHelper.isValidRepoRoot(outputDirectory)) {
+      if (outputDirectory.isSymbolicLink()) {
+        // The created repo is actually just a symlink to somewhere else (think local_repository).
+        // In this case, we shouldn't try to create the repo boundary file ourselves, but report an
+        // error instead.
+        throw new RepositoryFunctionException(
+            new IOException(
+                "No MODULE.bazel, REPO.bazel, or WORKSPACE file found in " + outputDirectory),
+            Transience.TRANSIENT);
+      }
+      // Otherwise, we can just create an empty REPO.bazel file.
       try {
         FileSystemUtils.createEmptyFile(outputDirectory.getRelative(LabelConstants.REPO_FILE_NAME));
         if (starlarkSemantics.getBool(BuildLanguageOptions.ENABLE_WORKSPACE)) {
@@ -376,47 +414,6 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
   @SuppressWarnings("unchecked")
   private static ImmutableSet<String> getEnviron(Rule rule) {
     return ImmutableSet.copyOf((Iterable<String>) rule.getAttr("$environ"));
-  }
-
-  /**
-   * Verify marker data previously saved by {@link #declareEnvironmentDependencies(Map, Environment,
-   * Set)} and/or {@link #fetchInternal(Rule, Path, BlazeDirectories, Environment, Map, SkyKey)} (on
-   * behalf of {@link StarlarkBaseExternalContext#getEnvironmentValue(String, Object)}).
-   */
-  @Override
-  protected boolean verifyEnvironMarkerData(
-      Map<String, String> markerData, Environment env, Set<String> keys)
-      throws InterruptedException {
-    /*
-     * We can ignore `keys` and instead only verify what's recorded in the marker file, because
-     * any change to `keys` between builds would be caused by a change to a .bzl file, and that's
-     * covered by RepositoryDelegatorFunction.DigestWriter#areRepositoryAndMarkerFileConsistent.
-     */
-
-    ImmutableSet<String> markerKeys =
-        markerData.keySet().stream()
-            .filter(s -> s.startsWith("ENV:"))
-            .collect(ImmutableSet.toImmutableSet());
-
-    ImmutableMap<String, String> environ =
-        getEnvVarValues(
-            env,
-            markerKeys.stream()
-                .map(s -> s.substring(4)) // ENV:FOO -> FOO
-                .collect(ImmutableSet.toImmutableSet()));
-    if (environ == null) {
-      return false;
-    }
-
-    for (String key : markerKeys) {
-      String markerValue = markerData.get(key);
-      String envKey = key.substring(4); // ENV:FOO -> FOO
-      if (!Objects.equals(markerValue, environ.get(envKey))) {
-        return false;
-      }
-    }
-
-    return true;
   }
 
   @Override
@@ -439,6 +436,7 @@ public final class StarlarkRepositoryFunction extends RepositoryFunction {
     return rule.getRuleClassObject().isStarlark() && ((Boolean) rule.getAttr("$configure"));
   }
 
+  @Nullable
   @Override
   public Class<? extends RuleDefinition> getRuleDefinition() {
     return null; // unused so safe to return null

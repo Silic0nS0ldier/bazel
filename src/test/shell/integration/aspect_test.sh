@@ -71,7 +71,7 @@ function test_cycle_under_command_line_aspect() {
   mkdir -p test
   cat > test/aspect.bzl << 'EOF' || fail "Couldn't write aspect.bzl"
 def _simple_aspect_impl(target, ctx):
-    return struct()
+    return []
 
 simple_aspect = aspect(implementation=_simple_aspect_impl)
 EOF
@@ -97,7 +97,7 @@ function test_aspect_on_target_with_analysis_failure() {
   mkdir -p test
   cat > test/aspect.bzl << 'EOF' || fail "Couldn't write aspect.bzl"
 def _simple_aspect_impl(target, ctx):
-    return struct()
+    return []
 
 simple_aspect = aspect(implementation=_simple_aspect_impl)
 EOF
@@ -1790,7 +1790,6 @@ EOF
 
   bazel build "//${package}:t1" \
     --aspects="//${package}:defs.bzl%aspect_c,//${package}:defs.bzl%aspect_b,//${package}:defs.bzl%aspect_a" \
-    --separate_aspect_deps \
       &> $TEST_log || fail "Build failed"
 
   expect_log "aspect_c on target @@\?//test:t1: aspect_c _tool=@@\?//test:aspect_c_tool, rule _tool=@@\?//test:r1_tool"

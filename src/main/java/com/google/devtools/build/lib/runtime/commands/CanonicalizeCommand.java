@@ -97,7 +97,7 @@ public final class CanonicalizeCommand implements BlazeCommand {
 
     @Option(
         name = "experimental_include_default_values",
-        defaultValue = "false",
+        defaultValue = "true",
         documentationCategory = OptionDocumentationCategory.OUTPUT_SELECTION,
         effectTags = {OptionEffectTag.AFFECTS_OUTPUTS, OptionEffectTag.TERMINAL_OUTPUT},
         help = "Whether Starlark options set to their default values are included in the output.")
@@ -227,7 +227,8 @@ public final class CanonicalizeCommand implements BlazeCommand {
     try {
       InvocationPolicyEnforcer invocationPolicyEnforcer =
           new InvocationPolicyEnforcer(policy, Level.INFO, mainRepoMapping);
-      invocationPolicyEnforcer.enforce(parser, commandName);
+      invocationPolicyEnforcer.enforce(
+          parser, commandName, /* invocationPolicyFlagListBuilder= */ ImmutableList.builder());
 
       // Print out the canonical invocation policy if requested.
       if (canonicalizeOptions.canonicalizePolicy) {

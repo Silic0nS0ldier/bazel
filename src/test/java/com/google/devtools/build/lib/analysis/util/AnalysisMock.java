@@ -25,9 +25,12 @@ import com.google.devtools.build.lib.bazel.bzlmod.FakeRegistry;
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleExtensionRepoMappingEntriesFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleFileFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.NonRegistryOverride;
+import com.google.devtools.build.lib.bazel.bzlmod.RegistryFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.RepoSpecFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.SingleExtensionEvalFunction;
+import com.google.devtools.build.lib.bazel.bzlmod.SingleExtensionFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.SingleExtensionUsagesFunction;
+import com.google.devtools.build.lib.bazel.bzlmod.YankedVersionsFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.YankedVersionsUtil;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.BazelCompatibilityMode;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.CheckDirectDepsMode;
@@ -139,6 +142,8 @@ public abstract class AnalysisMock extends LoadingMock {
 
   public abstract MockCcSupport ccSupport();
 
+  public abstract AbstractMockJavaSupport javaSupport();
+
   public abstract MockPythonSupport pySupport();
 
   public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctions(BlazeDirectories directories) {
@@ -166,17 +171,20 @@ public abstract class AnalysisMock extends LoadingMock {
         .put(
             SkyFunctions.MODULE_FILE,
             new ModuleFileFunction(
-                FakeRegistry.DEFAULT_FACTORY,
+                createRuleClassProvider().getBazelStarlarkEnvironment(),
                 directories.getWorkspace(),
                 getBuiltinModules(directories)))
         .put(SkyFunctions.BAZEL_DEP_GRAPH, new BazelDepGraphFunction())
         .put(SkyFunctions.BAZEL_LOCK_FILE, new BazelLockFileFunction(directories.getWorkspace()))
         .put(SkyFunctions.BAZEL_MODULE_RESOLUTION, new BazelModuleResolutionFunction())
+        .put(SkyFunctions.SINGLE_EXTENSION, new SingleExtensionFunction())
         .put(
             SkyFunctions.SINGLE_EXTENSION_EVAL,
             new SingleExtensionEvalFunction(directories, ImmutableMap::of, downloadManager))
         .put(SkyFunctions.SINGLE_EXTENSION_USAGES, new SingleExtensionUsagesFunction())
-        .put(SkyFunctions.REPO_SPEC, new RepoSpecFunction(FakeRegistry.DEFAULT_FACTORY))
+        .put(SkyFunctions.REGISTRY, new RegistryFunction(FakeRegistry.DEFAULT_FACTORY))
+        .put(SkyFunctions.REPO_SPEC, new RepoSpecFunction())
+        .put(SkyFunctions.YANKED_VERSIONS, new YankedVersionsFunction())
         .put(
             SkyFunctions.MODULE_EXTENSION_REPO_MAPPING_ENTRIES,
             new ModuleExtensionRepoMappingEntriesFunction())
@@ -199,6 +207,7 @@ public abstract class AnalysisMock extends LoadingMock {
             RepositoryDelegatorFunction.FORCE_FETCH,
             RepositoryDelegatorFunction.FORCE_FETCH_DISABLED),
         PrecomputedValue.injected(RepositoryDelegatorFunction.VENDOR_DIRECTORY, Optional.empty()),
+        PrecomputedValue.injected(RepositoryDelegatorFunction.DISABLE_NATIVE_REPO_RULES, false),
         PrecomputedValue.injected(ModuleFileFunction.REGISTRIES, ImmutableList.of()),
         PrecomputedValue.injected(ModuleFileFunction.IGNORE_DEV_DEPS, false),
         PrecomputedValue.injected(ModuleFileFunction.MODULE_OVERRIDES, ImmutableMap.of()),
@@ -272,6 +281,11 @@ public abstract class AnalysisMock extends LoadingMock {
     }
 
     @Override
+    public AbstractMockJavaSupport javaSupport() {
+      return delegate.javaSupport();
+    }
+
+    @Override
     public MockPythonSupport pySupport() {
       return delegate.pySupport();
     }
@@ -287,7 +301,7 @@ public abstract class AnalysisMock extends LoadingMock {
           .put(
               SkyFunctions.MODULE_FILE,
               new ModuleFileFunction(
-                  FakeRegistry.DEFAULT_FACTORY,
+                  createRuleClassProvider().getBazelStarlarkEnvironment(),
                   directories.getWorkspace(),
                   getBuiltinModules(directories)))
           .buildOrThrow();

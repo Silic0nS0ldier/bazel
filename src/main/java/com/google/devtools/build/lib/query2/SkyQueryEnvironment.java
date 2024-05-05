@@ -22,7 +22,6 @@ import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
@@ -38,6 +37,7 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.google.devtools.build.lib.analysis.config.ToolchainTypeRequirement;
 import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
@@ -161,6 +161,7 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   protected final PathPackageLocator pkgPath;
   protected final int queryEvaluationParallelismLevel;
   private final boolean visibilityDepsAreAllowed;
+  private final boolean toolchainTypeDepsAreAllowed;
 
   // The following fields are set in the #beforeEvaluateQuery method.
   protected MultisetSemaphore<PackageIdentifier> packageSemaphore;
@@ -238,6 +239,9 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
     // Since this attribute is of the NODEP type, that means we need a special implementation of
     // NO_NODEP_DEPS.
     this.visibilityDepsAreAllowed = !settings.contains(Setting.NO_NODEP_DEPS);
+    // The "toolchains" parameter of rule definition should be treated as an implicit dep despite
+    // not being represented by an attribute.
+    this.toolchainTypeDepsAreAllowed = !settings.contains(Setting.NO_IMPLICIT_DEPS);
   }
 
   @Override
@@ -409,44 +413,38 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   protected void evalTopLevelInternal(
       QueryExpression expr, OutputFormatterCallback<Target> callback)
       throws QueryException, InterruptedException {
-    Throwable throwableToThrow = null;
     try {
       super.evalTopLevelInternal(expr, callback);
-    } catch (Throwable throwable) {
-      throwableToThrow = throwable;
-    } finally {
-      if (throwableToThrow != null) {
-        logger.atInfo().withCause(throwableToThrow).log(
-            "About to shutdown query threadpool because of throwable");
-        ListeningExecutorService obsoleteExecutor = executor;
-        // Signal that executor must be recreated on the next invocation.
-        executor = null;
+    } catch (QueryException | InterruptedException | RuntimeException | Error throwable) {
+      logger.atInfo().withCause(throwable).log(
+          "About to shutdown query threadpool because of throwable");
+      ListeningExecutorService obsoleteExecutor = executor;
+      // Signal that executor must be recreated on the next invocation.
+      executor = null;
 
-        // If evaluation failed abruptly (e.g. was interrupted), attempt to terminate all remaining
-        // tasks and then wait for them all to finish. We don't want to leave any dangling threads
-        // running tasks.
-        obsoleteExecutor.shutdownNow();
-        boolean interrupted = false;
-        boolean executorTerminated = false;
-        try {
-          while (!executorTerminated) {
-            try {
-              executorTerminated =
-                  obsoleteExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-              interrupted = true;
-              handleInterruptedShutdown();
-            }
-          }
-        } finally {
-          if (interrupted) {
-            Thread.currentThread().interrupt();
+      // If evaluation failed abruptly (e.g. was interrupted), attempt to terminate all remaining
+      // tasks and then wait for them all to finish. We don't want to leave any dangling threads
+      // running tasks.
+      obsoleteExecutor.shutdownNow();
+      boolean interrupted = false;
+      boolean executorTerminated = false;
+      try {
+        while (!executorTerminated) {
+          try {
+            executorTerminated =
+                obsoleteExecutor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+          } catch (InterruptedException e) {
+            interrupted = true;
+            handleInterruptedShutdown();
           }
         }
-
-        Throwables.propagateIfPossible(
-            throwableToThrow, QueryException.class, InterruptedException.class);
+      } finally {
+        if (interrupted) {
+          Thread.currentThread().interrupt();
+        }
       }
+
+      throw throwable;
     }
   }
 
@@ -530,6 +528,12 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
       // know about deps from the labels of the rule's package's default_visibility. Therefore, we
       // need to explicitly handle that here.
       Iterables.addAll(allowedLabels, rule.getVisibilityDependencyLabels());
+    }
+    if (toolchainTypeDepsAreAllowed) {
+      for (ToolchainTypeRequirement toolchainTypeRequirement :
+          rule.getRuleClassObject().getToolchainTypes()) {
+        allowedLabels.add(toolchainTypeRequirement.toolchainType());
+      }
     }
     // We should add deps from aspects, otherwise they are going to be filtered out.
     allowedLabels.addAll(rule.getAspectLabelsSuperset(dependencyFilter));
@@ -1145,8 +1149,8 @@ public class SkyQueryEnvironment extends AbstractBlazeQueryEnvironment<Target>
   }
 
   protected static FailureDetail createUnsuccessfulKeyFailure(Exception exception) {
-    return exception instanceof DetailedException
-        ? ((DetailedException) exception).getDetailedExitCode().getFailureDetail()
+    return exception instanceof DetailedException detailedException
+        ? detailedException.getDetailedExitCode().getFailureDetail()
         : FailureDetail.newBuilder()
             .setMessage(exception.getMessage())
             .setQuery(Query.newBuilder().setCode(Code.SKYQUERY_TARGET_EXCEPTION))

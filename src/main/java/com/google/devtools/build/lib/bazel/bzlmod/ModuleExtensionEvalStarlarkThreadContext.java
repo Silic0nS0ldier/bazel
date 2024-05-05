@@ -86,11 +86,10 @@ public final class ModuleExtensionEvalStarlarkThreadContext {
   public void createRepo(StarlarkThread thread, Dict<String, Object> kwargs, RuleClass ruleClass)
       throws InterruptedException, EvalException {
     Object nameValue = kwargs.getOrDefault("name", Starlark.NONE);
-    if (!(nameValue instanceof String)) {
+    if (!(nameValue instanceof String name)) {
       throw Starlark.errorf(
           "expected string for attribute 'name', got '%s'", Starlark.type(nameValue));
     }
-    String name = (String) nameValue;
     RepositoryName.validateUserProvidedRepoName(name);
     RepoSpecAndLocation conflict = generatedRepos.get(name);
     if (conflict != null) {
@@ -111,7 +110,9 @@ public final class ModuleExtensionEvalStarlarkThreadContext {
               ruleClass,
               Maps.transformEntries(kwargs, (k, v) -> k.equals("name") ? prefixedName : v));
 
-      Map<String, Object> attributes = Maps.transformEntries(kwargs, (k, v) -> rule.getAttr(k));
+      Map<String, Object> attributes =
+          Maps.filterKeys(
+              Maps.transformEntries(kwargs, (k, v) -> rule.getAttr(k)), k -> !k.equals("name"));
       String bzlFile = ruleClass.getRuleDefinitionEnvironmentLabel().getUnambiguousCanonicalForm();
       RepoSpec repoSpec =
           RepoSpec.builder()

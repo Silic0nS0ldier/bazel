@@ -1,9 +1,9 @@
 # Description:
 #   A grab-bag of testing utilities.
 
-load("//src/tools/bzlmod:utils.bzl", "get_canonical_repo_name")
-load("@rules_java//java:defs.bzl", "java_library", "java_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_java//java:defs.bzl", "java_library", "java_test")
+load("//src/tools/bzlmod:utils.bzl", "get_canonical_repo_name")
 
 package(
     default_applicable_licenses = ["//:license"],
@@ -333,7 +333,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/actions:middleman_type",
-        "//src/main/java/com/google/devtools/build/lib/actions:runfiles_supplier",
         "//src/main/java/com/google/devtools/build/lib/analysis/platform",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/net/starlark/java/syntax",

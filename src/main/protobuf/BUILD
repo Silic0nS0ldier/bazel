@@ -12,6 +12,7 @@ FILES = [
     "bazel_flags",
     "build",
     "builtin",
+    "crash_debugging",
     "crosstool_config",
     "deps",
     "desugar_deps",
@@ -252,6 +253,49 @@ java_library_srcs(
 )
 
 proto_library(
+    name = "bazel_output_service_proto",
+    srcs = ["bazel_output_service.proto"],
+    deps = [
+        "@com_google_protobuf//:any_proto",
+        "@googleapis//:google_rpc_status_proto",
+    ],
+)
+
+java_proto_library(
+    name = "bazel_output_service_java_proto",
+    deps = [":bazel_output_service_proto"],
+)
+
+java_library_srcs(
+    name = "bazel_output_service_java_proto_srcs",
+    deps = [":bazel_output_service_java_proto"],
+)
+
+proto_library(
+    name = "bazel_output_service_rev2_proto",
+    srcs = ["bazel_output_service_rev2.proto"],
+    deps = [
+        "@remoteapis//:build_bazel_remote_execution_v2_remote_execution_proto",
+    ],
+)
+
+java_proto_library(
+    name = "bazel_output_service_rev2_java_proto",
+    deps = [":bazel_output_service_rev2_proto"],
+)
+
+java_grpc_library(
+    name = "bazel_output_service_java_grpc",
+    srcs = [":bazel_output_service_proto"],
+    deps = [":bazel_output_service_java_proto"],
+)
+
+java_library_srcs(
+    name = "bazel_output_service_rev2_java_proto_srcs",
+    deps = [":bazel_output_service_rev2_java_proto"],
+)
+
+proto_library(
     name = "spawn_proto",
     srcs = ["spawn.proto"],
     deps = [
@@ -267,6 +311,38 @@ java_proto_library(
 java_library_srcs(
     name = "spawn_java_proto_srcs",
     deps = [":spawn_java_proto"],
+)
+
+# Note that stardoc_output_proto and stardoc_output_java_proto are vendored by
+# Stardoc: https://github.com/bazelbuild/stardoc/tree/master/stardoc/proto
+package_group(
+    name = "stardoc_output_users",
+    packages = [
+        "//src/main/java/com/google/devtools/build/docgen/...",
+        "//src/main/java/com/google/devtools/build/lib/rules/starlarkdocextract/...",
+        "//src/main/java/com/google/devtools/build/skydoc/...",
+        "//src/test/java/com/google/devtools/build/docgen/...",
+        "//src/test/java/com/google/devtools/build/lib/rules/starlarkdocextract/...",
+        "//src/test/java/com/google/devtools/build/skydoc/...",
+    ],
+)
+
+proto_library(
+    name = "stardoc_output_proto",
+    srcs = ["stardoc_output.proto"],
+    visibility = [":stardoc_output_users"],
+)
+
+java_proto_library(
+    name = "stardoc_output_java_proto",
+    visibility = [":stardoc_output_users"],
+    deps = [":stardoc_output_proto"],
+)
+
+java_library_srcs(
+    name = "stardoc_output_java_proto_srcs",
+    visibility = [":stardoc_output_users"],
+    deps = [":stardoc_output_java_proto"],
 )
 
 proto_library(
@@ -299,6 +375,9 @@ filegroup(
     name = "dist_jars",
     srcs = [s + "_java_proto_srcs" for s in FILES] + [
         ":analysis_v2_java_proto_srcs",
+        ":bazel_output_service_java_grpc_srcs",
+        ":bazel_output_service_java_proto_srcs",
+        ":bazel_output_service_rev2_java_proto_srcs",
         ":cache_salt_java_proto_srcs",
         ":command_line_java_proto_srcs",
         ":command_server_java_grpc_srcs",
@@ -309,6 +388,7 @@ filegroup(
         ":remote_execution_log_java_proto_srcs",
         ":remote_scrubbing_java_proto_srcs",
         ":spawn_java_proto_srcs",
+        ":stardoc_output_java_proto_srcs",
         ":xcode_java_proto_srcs",
     ],
 )

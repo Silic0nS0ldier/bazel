@@ -17,7 +17,7 @@ import com.google.common.flogger.GoogleLogger;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
-import com.google.devtools.build.lib.exec.TreeDeleter;
+import com.google.devtools.build.lib.sandbox.AsynchronousTreeDeleter;
 import com.google.devtools.build.lib.server.FailureDetails.Worker.Code;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -46,9 +46,10 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
   private static final AtomicInteger pidCounter = new AtomicInteger(1);
 
   private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
+  protected final WorkerOptions workerOptions;
 
   private final Path workerBaseDir;
-  private final TreeDeleter treeDeleter;
+  private final AsynchronousTreeDeleter treeDeleter;
   private Reporter reporter;
 
   /**
@@ -57,15 +58,17 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
    */
   @Nullable private final WorkerSandboxOptions hardenedSandboxOptions;
 
-  public WorkerFactory(Path workerBaseDir) {
-    this(workerBaseDir, null, null);
+  public WorkerFactory(Path workerBaseDir, WorkerOptions workerOptions) {
+    this(workerBaseDir, workerOptions, null, null);
   }
 
   public WorkerFactory(
       Path workerBaseDir,
+      WorkerOptions workerOptions,
       @Nullable WorkerSandboxOptions hardenedSandboxOptions,
-      @Nullable TreeDeleter treeDeleter) {
+      @Nullable AsynchronousTreeDeleter treeDeleter) {
     this.workerBaseDir = workerBaseDir;
+    this.workerOptions = workerOptions;
     this.hardenedSandboxOptions = hardenedSandboxOptions;
     this.treeDeleter = treeDeleter;
   }
@@ -80,6 +83,10 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
     String workTypeName = key.getWorkerTypeName();
     if (!workerBaseDir.isDirectory()) {
       workerBaseDir.createDirectoryAndParents();
+      Path deleterTrashBase = treeDeleter == null ? null : treeDeleter.getTrashBase();
+      if (deleterTrashBase != null) {
+        deleterTrashBase.createDirectory();
+      }
     }
     Path logFile =
         workerBaseDir.getRelative(workTypeName + "-" + workerId + "-" + key.getMnemonic() + ".log");
@@ -94,7 +101,13 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
         Path workDir = getSandboxedWorkerPath(key, workerId);
         worker =
             new SandboxedWorker(
-                key, workerId, workDir, logFile, hardenedSandboxOptions, treeDeleter);
+                key,
+                workerId,
+                workDir,
+                logFile,
+                workerOptions,
+                hardenedSandboxOptions,
+                treeDeleter);
       }
     } else if (key.isMultiplex()) {
       WorkerMultiplexer workerMultiplexer = WorkerMultiplexerManager.getInstance(key, logFile);
@@ -102,7 +115,7 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
           new WorkerProxy(
               key, workerId, workerMultiplexer.getLogFile(), workerMultiplexer, key.getExecRoot());
     } else {
-      worker = new SingleplexWorker(key, workerId, key.getExecRoot(), logFile);
+      worker = new SingleplexWorker(key, workerId, key.getExecRoot(), logFile, workerOptions);
     }
 
     String msg =
@@ -141,16 +154,19 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
   /** When a worker process is discarded, destroy its process, too. */
   @Override
   public void destroyObject(WorkerKey key, PooledObject<Worker> p) {
-    Worker worker = p.getObject();
+    destroyWorker(key, p.getObject());
+  }
+
+  public void destroyWorker(WorkerKey key, Worker worker) {
     int workerId = worker.getWorkerId();
     String workerFailureCode = "";
-    Optional<Code> code = p.getObject().getStatus().getWorkerCode();
+    Optional<Code> code = worker.getStatus().getWorkerCode();
     if (code.isPresent()) {
       workerFailureCode = String.format("(code: %s)", code.get());
     }
     String msg =
         String.format(
-            "Destroying %s %s (id %d, key hash %d) with cause: %s %s",
+            "Destroying %s %s (id %d, key hash %d) with cause: %s %s\n",
             key.getMnemonic(),
             key.getWorkerTypeName(),
             workerId,
@@ -158,7 +174,7 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
             worker.getStatus().get(),
             workerFailureCode);
     WorkerLoggingHelper.logMessage(reporter, WorkerLoggingHelper.LogLevel.INFO, msg);
-    p.getObject().destroy();
+    worker.destroy();
   }
 
   /**
@@ -168,7 +184,10 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
    */
   @Override
   public boolean validateObject(WorkerKey key, PooledObject<Worker> p) {
-    Worker worker = p.getObject();
+    return validateWorker(key, p.getObject());
+  }
+
+  public boolean validateWorker(WorkerKey key, Worker worker) {
     // Status is invalid if the status is either killed or pending killed.
     if (!worker.getStatus().isValid()) {
       return false;
@@ -235,11 +254,11 @@ public class WorkerFactory extends BaseKeyedPooledObjectFactory<WorkerKey, Worke
     if (this == o) {
       return true;
     }
-    if (!(o instanceof WorkerFactory)) {
+    if (!(o instanceof WorkerFactory that)) {
       return false;
     }
-    WorkerFactory that = (WorkerFactory) o;
     return workerBaseDir.equals(that.workerBaseDir)
+        && workerOptions.useCgroupsOnLinux == that.workerOptions.useCgroupsOnLinux
         && Objects.equals(this.hardenedSandboxOptions, that.hardenedSandboxOptions);
   }
 

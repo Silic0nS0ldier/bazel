@@ -15,6 +15,7 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -31,7 +32,6 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.ExpansionException;
 import com.google.devtools.build.lib.starlarkbuildapi.cpp.CcToolchainVariablesApi;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,8 +87,7 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
       if (this == object) {
         return true;
       }
-      if (object instanceof StringLiteralChunk) {
-        StringLiteralChunk that = (StringLiteralChunk) object;
+      if (object instanceof StringLiteralChunk that) {
         return text.equals(that.text);
       }
       return false;
@@ -128,8 +127,7 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
       if (this == object) {
         return true;
       }
-      if (object instanceof VariableChunk) {
-        VariableChunk that = (VariableChunk) object;
+      if (object instanceof VariableChunk that) {
         return variableName.equals(that.variableName);
       }
       return false;
@@ -341,31 +339,29 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
       structuredVariableCache = Maps.newConcurrentMap();
     }
 
-    Object variableOrError =
-        structuredVariableCache.computeIfAbsent(
-            name,
-            n -> {
-              try {
-                VariableValue variable = getStructureVariable(n, throwOnMissingVariable, expander);
-                return variable != null ? variable : NULL_MARKER;
-              } catch (ExpansionException e) {
-                if (throwOnMissingVariable) {
-                  return e.getMessage();
-                } else {
-                  throw new IllegalStateException(
-                      "Should not happen - call to getStructuredVariable threw when asked not to.",
-                      e);
-                }
-              }
-            });
+    Object variableOrError = structuredVariableCache.get(name);
+    if (variableOrError == null) {
+      try {
+        VariableValue variable = getStructureVariable(name, throwOnMissingVariable, expander);
+        variableOrError = variable != null ? variable : NULL_MARKER;
+      } catch (ExpansionException e) {
+        if (throwOnMissingVariable) {
+          variableOrError = e.getMessage();
+        } else {
+          throw new IllegalStateException(
+              "Should not happen - call to getStructuredVariable threw when asked not to.", e);
+        }
+      }
+      structuredVariableCache.putIfAbsent(name, variableOrError);
+    }
 
-    if (variableOrError instanceof VariableValue) {
-      return (VariableValue) variableOrError;
+    if (variableOrError instanceof VariableValue variableValue) {
+      return variableValue;
     }
     if (throwOnMissingVariable) {
       throw new ExpansionException(
-          variableOrError instanceof String
-              ? (String) variableOrError
+          variableOrError instanceof String string
+              ? string
               : String.format(
                   "Invalid toolchain configuration: Cannot find variable named '%s'.", name));
     }
@@ -733,13 +729,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
 
     @Override
     public boolean equals(Object obj) {
-      if (!(obj instanceof LibraryToLinkValue)) {
+      if (!(obj instanceof LibraryToLinkValue other)) {
         return false;
       }
       if (this == obj) {
         return true;
       }
-      LibraryToLinkValue other = (LibraryToLinkValue) obj;
       return this.getTypeName().equals(other.getTypeName())
           && getIsWholeArchive() == other.getIsWholeArchive();
     }
@@ -770,13 +765,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
 
       @Override
       public boolean equals(Object obj) {
-        if (!(obj instanceof LibraryToLinkValueWithName)) {
+        if (!(obj instanceof LibraryToLinkValueWithName other)) {
           return false;
         }
         if (this == obj) {
           return true;
         }
-        LibraryToLinkValueWithName other = (LibraryToLinkValueWithName) obj;
         return this.name.equals(other.name) && super.equals(other);
       }
 
@@ -819,13 +813,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
 
       @Override
       public boolean equals(Object obj) {
-        if (!(obj instanceof ForVersionedDynamicLibrary)) {
+        if (!(obj instanceof ForVersionedDynamicLibrary other)) {
           return false;
         }
         if (this == obj) {
           return true;
         }
-        ForVersionedDynamicLibrary other = (ForVersionedDynamicLibrary) obj;
         return this.path.equals(other.path) && super.equals(other);
       }
 
@@ -916,11 +909,10 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
         if (OBJECT_FILES_FIELD_NAME.equals(field)) {
           ImmutableList.Builder<String> expandedObjectFiles = ImmutableList.builder();
           for (Artifact objectFile : objectFiles) {
-            if (objectFile.isTreeArtifact() && (expander != null)) {
-              List<Artifact> artifacts = new ArrayList<>();
-              expander.expand(objectFile, artifacts);
+            if (objectFile.isTreeArtifact() && expander != null) {
               expandedObjectFiles.addAll(
-                  Iterables.transform(artifacts, Artifact::getExecPathString));
+                  Collections2.transform(
+                      expander.expandTreeArtifact(objectFile), Artifact::getExecPathString));
             } else {
               expandedObjectFiles.add(objectFile.getExecPathString());
             }
@@ -938,13 +930,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
 
       @Override
       public boolean equals(Object obj) {
-        if (!(obj instanceof ForObjectFileGroup)) {
+        if (!(obj instanceof ForObjectFileGroup other)) {
           return false;
         }
         if (this == obj) {
           return true;
         }
-        ForObjectFileGroup other = (ForObjectFileGroup) obj;
         return this.objectFiles.equals(other.objectFiles) && super.equals(other);
       }
 
@@ -1458,8 +1449,8 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
     VariableValue getNonStructuredVariable(String name) {
       if (keyToIndex.containsKey(name)) {
         Object o = values.get(keyToIndex.get(name));
-        if (o instanceof String) {
-          return new StringValue((String) o);
+        if (o instanceof String string) {
+          return new StringValue(string);
         }
         return (VariableValue) o;
       }
@@ -1483,13 +1474,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
      */
     @Override
     public boolean equals(Object other) {
-      if (!(other instanceof MapVariables)) {
+      if (!(other instanceof MapVariables that)) {
         return false;
       }
       if (this == other) {
         return true;
       }
-      MapVariables that = (MapVariables) other;
       if (this.parent != that.parent) {
         return false;
       }
@@ -1535,13 +1525,12 @@ public abstract class CcToolchainVariables implements CcToolchainVariablesApi {
 
     @Override
     public boolean equals(Object other) {
-      if (!(other instanceof SingleVariables)) {
+      if (!(other instanceof SingleVariables that)) {
         return false;
       }
       if (this == other) {
         return true;
       }
-      SingleVariables that = (SingleVariables) other;
       if (this.parent != that.parent) {
         return false;
       }

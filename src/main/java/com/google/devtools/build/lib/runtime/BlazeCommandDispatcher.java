@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.runtime;
 
 import static com.google.devtools.build.lib.runtime.BlazeOptionHandler.BAD_OPTION_TAG;
 import static com.google.devtools.build.lib.runtime.BlazeOptionHandler.ERROR_SEPARATOR;
+import static com.google.devtools.build.lib.util.DetailedExitCode.DetailedExitCodeComparator.chooseMoreImportantWithFirstIfTie;
 import static com.google.devtools.common.options.Converters.BLAZE_ALIASING_FLAG;
 
 import com.github.benmanes.caffeine.cache.CacheLoader;
@@ -66,6 +67,7 @@ import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.OpaqueOptionsData;
+import com.google.devtools.common.options.OptionAndRawValue;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingResult;
 import com.google.devtools.common.options.TriState;
@@ -333,7 +335,11 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
     BlazeOptionHandler optionHandler =
         new BlazeOptionHandler(
             runtime, workspace, command, commandAnnotation, optionsParser, invocationPolicy);
-    DetailedExitCode earlyExitCode = optionHandler.parseOptions(args, storedEventHandler);
+    DetailedExitCode earlyExitCode =
+        optionHandler.parseOptions(
+            args,
+            storedEventHandler,
+            /* invocationPolicyFlagListBuilder= */ ImmutableList.builder());
     OptionsParsingResult options = optionHandler.getOptionsResult();
 
     // The initCommand call also records the start time for the timestamp granularity monitor.
@@ -367,10 +373,7 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
     if (commonOptions.enableTracer == TriState.YES) {
       tracerEnabled = true;
     } else if (commonOptions.enableTracer == TriState.AUTO) {
-      boolean commandSupportsProfile =
-          (commandAnnotation.builds() || "query".equals(commandName))
-              && !"clean".equals(commandName)
-              && !"info".equals(commandName);
+      boolean commandSupportsProfile = commandName.equals("query") || env.commandActuallyBuilds();
       tracerEnabled = commandSupportsProfile || commonOptions.profilePath != null;
     }
 
@@ -432,9 +435,10 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
           // and will be calling afterCommand soon in the future - a module's afterCommand might
           // rightfully assume its beforeCommand has already been called.
           storedEventHandler.handle(Event.error(e.getMessage()));
-          // It's not ideal but we can only return one exit code, so we just pick the code of the
-          // last exception.
-          earlyExitCode = e.getDetailedExitCode();
+
+          // Use the highest priority exit code, or the first one that is encountered if all exit
+          // codes have equivalent priority.
+          earlyExitCode = chooseMoreImportantWithFirstIfTie(earlyExitCode, e.getDetailedExitCode());
         }
       }
       reporter.removeHandler(storedEventHandler);
@@ -461,11 +465,12 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
         OutErr colorfulOutErr = outErr;
 
         if (!eventHandlerOptions.useColor()) {
-          outErr = ansiStripOut(ansiStripErr(outErr));
           if (!commandAnnotation.binaryStdOut()) {
+            outErr = ansiStripOut(outErr);
             colorfulOutErr = ansiStripOut(colorfulOutErr);
           }
           if (!commandAnnotation.binaryStdErr()) {
+            outErr = ansiStripErr(outErr);
             colorfulOutErr = ansiStripErr(colorfulOutErr);
           }
         }
@@ -480,9 +485,7 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
 
         DebugLoggerConfigurator.setupLogging(commonOptions.verbosity);
 
-        EventHandler handler =
-            createEventHandler(
-                outErr, eventHandlerOptions, env.withMergedAnalysisAndExecutionSourceOfTruth());
+        EventHandler handler = createEventHandler(outErr, eventHandlerOptions, env);
         reporter.addHandler(handler);
         env.getEventBus().register(handler);
 
@@ -492,10 +495,7 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
         // modified.
         if (!eventHandlerOptions.useColor()) {
           UiEventHandler ansiAllowingHandler =
-              createEventHandler(
-                  colorfulOutErr,
-                  eventHandlerOptions,
-                  env.withMergedAnalysisAndExecutionSourceOfTruth());
+              createEventHandler(colorfulOutErr, eventHandlerOptions, env);
           reporter.registerAnsiAllowingHandler(handler, ansiAllowingHandler);
           env.getEventBus().register(new PassiveExperimentalEventHandler(ansiAllowingHandler));
         }
@@ -571,13 +571,12 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
         }
       }
 
-      // {@link CleanCommand} is annotated with {@code builds = true}
-      // to have access to relevant build options but don't actually do building.
-      // {@link InfoCommand} is annotated with {@code builds = true} but only conditionally
-      // does this step based on some complicated logic.
-      if (commandAnnotation.builds()
-          && !commandAnnotation.name().equals("clean")
-          && !commandAnnotation.name().equals("info")) {
+      // It is not sufficient to check commandAnnotation.builds(), because
+      // {@link CleanCommand} is annotated with {@code builds = true} to have
+      // access to relevant build options but don't actually do building.  Same
+      // for {@link InfoCommand}, which is annotated with {@code builds = true}
+      // but only conditionally does this step based on some complicated logic.
+      if (env.commandActuallyBuilds()) {
         try {
           env.syncPackageLoading(options);
         } catch (InterruptedException e) {
@@ -629,7 +628,11 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
           optionHandler =
               new BlazeOptionHandler(
                   runtime, workspace, command, commandAnnotation, optionsParser, invocationPolicy);
-          earlyExitCode = optionHandler.parseOptions(args, reporter);
+          ImmutableList.Builder<OptionAndRawValue> invocationPolicyFlagListBuilder =
+              ImmutableList.builder();
+          earlyExitCode =
+              optionHandler.parseOptions(args, reporter, invocationPolicyFlagListBuilder);
+          env.setInvocationPolicyFlags(invocationPolicyFlagListBuilder.build());
         }
         if (!earlyExitCode.isSuccess()) {
           reporter.post(
@@ -700,7 +703,7 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
       }
 
       needToCallAfterCommand = false;
-      var newResult = runtime.afterCommand(env, result);
+      var newResult = runtime.afterCommand(/* forceKeepStateForTesting= */ false, env, result);
       if (newResult.getExitCode().equals(ExitCode.REMOTE_CACHE_EVICTED)) {
         var executionOptions =
             Preconditions.checkNotNull(options.getOptions(ExecutionOptions.class));
@@ -721,7 +724,7 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
       return result;
     } finally {
       if (needToCallAfterCommand) {
-        BlazeCommandResult newResult = runtime.afterCommand(env, result);
+        BlazeCommandResult newResult = runtime.afterCommand(false, env, result);
         if (!newResult.equals(result)) {
           logger.atWarning().log("afterCommand yielded different result: %s %s", result, newResult);
         }
@@ -865,11 +868,16 @@ public class BlazeCommandDispatcher implements CommandDispatcher {
 
   /** Returns the event handler to use for this Blaze command. */
   private UiEventHandler createEventHandler(
-      OutErr outErr, UiOptions eventOptions, boolean skymeldMode) {
+      OutErr outErr, UiOptions eventOptions, CommandEnvironment env) {
     Path workspacePath = runtime.getWorkspace().getDirectories().getWorkspace();
     PathFragment workspacePathFragment = workspacePath == null ? null : workspacePath.asFragment();
     return new UiEventHandler(
-        outErr, eventOptions, runtime.getClock(), workspacePathFragment, skymeldMode);
+        outErr,
+        eventOptions,
+        runtime.getClock(),
+        env.getEventBus(),
+        workspacePathFragment,
+        env.withMergedAnalysisAndExecutionSourceOfTruth());
   }
 
   /** Returns the runtime instance shared by the commands that this dispatcher dispatches to. */

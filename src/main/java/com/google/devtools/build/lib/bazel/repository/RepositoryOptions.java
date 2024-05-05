@@ -98,6 +98,18 @@ public class RepositoryOptions extends OptionsBase {
   public boolean disableDownload;
 
   @Option(
+      name = "incompatible_disable_native_repo_rules",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
+      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      help =
+          "If false, native repo rules can be used in WORKSPACE; otherwise, Starlark repo rules "
+              + "must be used instead. Native repo rules include local_repository, "
+              + "new_local_repository, local_config_platform, android_sdk_repository, and "
+              + "android_ndk_repository.")
+  public boolean disableNativeRepoRules;
+
+  @Option(
       name = "experimental_repository_downloader_retries",
       defaultValue = "0",
       documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
@@ -216,7 +228,8 @@ public class RepositoryOptions extends OptionsBase {
   public enum WorkerForRepoFetching {
     OFF,
     PLATFORM,
-    VIRTUAL;
+    VIRTUAL,
+    AUTO;
 
     static class Converter extends EnumConverter<WorkerForRepoFetching> {
       public Converter() {
@@ -227,14 +240,14 @@ public class RepositoryOptions extends OptionsBase {
 
   @Option(
       name = "experimental_worker_for_repo_fetching",
-      defaultValue = "off",
+      defaultValue = "auto",
       converter = WorkerForRepoFetching.Converter.class,
       documentationCategory = OptionDocumentationCategory.REMOTE,
       effectTags = {OptionEffectTag.UNKNOWN},
       help =
           "The threading mode to use for repo fetching. If set to 'off', no worker thread is used,"
-              + " and the repo fetching is subject to restarts. Otherwise, uses a platform thread"
-              + " (i.e. OS thread) if set to 'platform' or a virtual thread if set to 'virtual'.")
+              + " and the repo fetching is subject to restarts. Otherwise, uses a virtual worker"
+              + " thread.")
   public WorkerForRepoFetching workerForRepoFetching;
 
   @Option(

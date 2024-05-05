@@ -26,6 +26,7 @@ filegroup(
     srcs = glob(
         ["*"],
         exclude = [
+            "MODULE.bazel.lock",  # Use MODULE.bazel.lock.dist instead
             "WORKSPACE.bzlmod",  # Needs to be filtered.
             "bazel-*",  # convenience symlinks
             "out",  # IntelliJ with setup-intellij.sh
@@ -33,6 +34,7 @@ filegroup(
             ".*",  # mainly .git* files
         ],
     ) + [
+        "//:MODULE.bazel.lock.dist",
         "//:WORKSPACE.bzlmod.filtered",
         "//examples:srcs",
         "//scripts:srcs",
@@ -86,6 +88,32 @@ genrule(
     ]),
 )
 
+genrule(
+    name = "generate_dist_lockfile",
+    srcs = [
+        "MODULE.bazel",
+        "//third_party/googleapis:MODULE.bazel",
+        "//third_party/remoteapis:MODULE.bazel",
+    ],
+    outs = ["MODULE.bazel.lock.dist"],
+    cmd = " && ".join([
+        "ROOT=$$PWD",
+        "TMPDIR=$$(mktemp -d)",
+        "trap 'rm -rf $$TMPDIR' EXIT",
+        "mkdir -p $$TMPDIR/workspace",
+        "touch $$TMPDIR/workspace/BUILD.bazel",
+        "for i in $(SRCS); do dir=$$TMPDIR/workspace/$$(dirname $$i); mkdir -p $$dir; cp $$i $$dir; done",
+        "cd $$TMPDIR/workspace",
+        # Instead of `bazel mod deps`, we run a simpler command like `bazel query :all` here
+        # so that we only trigger module resolution, not extension eval.
+        # Also use `--batch` so that Bazel doesn't keep a server process alive.
+        "$$ROOT/$(location //src:bazel) --batch --output_user_root=$$TMPDIR/output_user_root query --check_direct_dependencies=error --lockfile_mode=update :all",
+        "mv MODULE.bazel.lock $$ROOT/$@",
+    ]),
+    tags = ["requires-network"],
+    tools = ["//src:bazel"],
+)
+
 pkg_tar(
     name = "bootstrap-jars",
     srcs = [
@@ -96,7 +124,11 @@ pkg_tar(
         "@zstd-jni//:zstd-jni",
     ],
     package_dir = "derived/jars",
-    strip_prefix = "external",
+    remap_paths = {
+        "external/": "",
+        "../": "",
+    },
+    strip_prefix = ".",
     # Public but bazel-only visibility.
     visibility = ["//:__subpackages__"],
 )
@@ -141,10 +173,8 @@ pkg_tar(
     ],
     # TODO(aiuto): Replace with pkg_filegroup when that is available.
     remap_paths = {
+        "MODULE.bazel.lock.dist": "MODULE.bazel.lock",
         "WORKSPACE.bzlmod.filtered": "WORKSPACE.bzlmod",
-        # Rewrite paths coming from local repositories back into third_party.
-        "external/googleapis~override": "third_party/googleapis",
-        "external/remoteapis~override": "third_party/remoteapis",
     },
     strip_prefix = ".",
     # Public but bazel-only visibility.
@@ -154,21 +184,31 @@ pkg_tar(
 pkg_tar(
     name = "platforms-srcs",
     srcs = ["@platforms//:srcs"],
-    strip_prefix = "external",
+    remap_paths = {
+        "external/": "",
+        "../": "",
+    },
+    strip_prefix = ".",
     visibility = ["//:__subpackages__"],
 )
 
 pkg_tar(
     name = "rules_java-srcs",
     srcs = ["@rules_java//:distribution"],
-    strip_prefix = "external",
+    remap_paths = {
+        "external/": "",
+        "../": "",
+    },
+    strip_prefix = ".",
     visibility = ["//:__subpackages__"],
 )
 
 write_file(
     name = "gen_maven_repo_name",
     out = "MAVEN_CANONICAL_REPO_NAME",
-    content = [get_canonical_repo_name("@maven")],
+    # TODO: Use this instead after building with Bazel 7.1.0 or later.
+    #    content = [get_canonical_repo_name("@maven")],
+    content = ["rules_jvm_external~~maven~maven"],
 )
 
 # The @maven repository is created by maven_install from rules_jvm_external.
@@ -177,7 +217,11 @@ pkg_tar(
     name = "maven-srcs",
     srcs = ["@maven//:srcs"] + ["MAVEN_CANONICAL_REPO_NAME"],
     package_dir = "derived/maven",
-    strip_prefix = "external/" + get_canonical_repo_name("@maven"),
+    remap_paths = {
+        "external/" + get_canonical_repo_name("@maven") + "/": "",
+        "../" + get_canonical_repo_name("@maven") + "/": "",
+    },
+    strip_prefix = ".",
     visibility = ["//:__subpackages__"],
 )
 
@@ -200,7 +244,6 @@ genrule(
         ":bootstrap-jars",
         ":maven-srcs",
         "//src:derived_java_srcs",
-        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec:bootstrap_autocodec.tar",
         "@bootstrap_repo_cache//:archives.tar",
     ],
     outs = ["bazel-distfile.zip"],
@@ -219,7 +262,6 @@ genrule(
         ":rules_java-srcs",
         ":maven-srcs",
         "//src:derived_java_srcs",
-        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec:bootstrap_autocodec.tar",
         "@bootstrap_repo_cache//:archives.tar",
     ],
     outs = ["bazel-distfile.tar"],
@@ -243,7 +285,7 @@ platform(
     constraint_values = [
         ":highcpu_machine",
     ],
-    parents = ["@local_config_platform//:host"],
+    parents = ["@platforms//host"],
 )
 
 platform(
@@ -254,7 +296,7 @@ platform(
     ],
 )
 
-REMOTE_PLATFORMS = ("rbe_ubuntu2004_java11",)
+REMOTE_PLATFORMS = ("rbe_ubuntu2004",)
 
 [
     platform(

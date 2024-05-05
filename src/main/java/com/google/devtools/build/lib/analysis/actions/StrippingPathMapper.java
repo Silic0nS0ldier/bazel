@@ -14,11 +14,15 @@
 
 package com.google.devtools.build.lib.analysis.actions;
 
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionInputHelper.BasicActionInput;
 import com.google.devtools.build.lib.actions.Artifact.DerivedArtifact;
+import com.google.devtools.build.lib.actions.CommandLine.ArgChunk;
+import com.google.devtools.build.lib.actions.CommandLine.SimpleArgChunk;
 import com.google.devtools.build.lib.actions.CommandLineItem;
 import com.google.devtools.build.lib.actions.CommandLineItem.ExceptionlessMapFn;
 import com.google.devtools.build.lib.actions.CommandLineItem.MapFn;
@@ -26,10 +30,9 @@ import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.PathMapper;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.analysis.config.CoreOptions.OutputPathsMode;
-import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
-import java.util.HashSet;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -88,10 +91,15 @@ public final class StrippingPathMapper {
    * @param action the action to potentially strip paths from
    * @return a {@link StrippingPathMapper} if the action supports it, else {@link Optional#empty()}.
    */
-  static Optional<PathMapper> tryCreate(Action action) {
+  static Optional<PathMapper> tryCreate(AbstractAction action) {
     // This is expected to always be "bazel-out", but we don't want to hardcode it here.
     PathFragment outputRoot = action.getPrimaryOutput().getExecPath().subFragment(0, 1);
-    if (isPathStrippable(action.getInputs(), outputRoot)) {
+    // Additional artifacts to map are not part of the action's inputs, but may still lead to
+    // path collisions after stripping. It is thus important to include them in this check.
+    if (isPathStrippable(
+        Iterables.concat(
+            action.getInputs().toList(), action.getAdditionalArtifactsForPathMapping().toList()),
+        outputRoot)) {
       return Optional.of(
           create(action.getMnemonic(), action instanceof StarlarkAction, outputRoot));
     }
@@ -103,8 +111,8 @@ public final class StrippingPathMapper {
     final StringStripper argStripper = new StringStripper(outputRoot.getPathString());
     final ExceptionlessMapFn<Object> structuredArgStripper =
         (object, args) -> {
-          if (object instanceof String) {
-            args.accept(argStripper.strip((String) object));
+          if (object instanceof String string) {
+            args.accept(argStripper.strip(string));
           } else {
             args.accept(CommandLineItem.expandToCommandLine(object));
           }
@@ -134,9 +142,9 @@ public final class StrippingPathMapper {
       }
 
       @Override
-      public List<String> mapCustomStarlarkArgs(List<String> args) {
+      public ArgChunk mapCustomStarlarkArgs(ArgChunk chunk) {
         if (!isStarlarkAction) {
-          return args;
+          return chunk;
         }
         // Add your favorite Starlark mnemonic that needs custom arg processing here.
         if (!mnemonic.contains("Android")
@@ -145,28 +153,14 @@ public final class StrippingPathMapper {
             && !mnemonic.equals("StarlarkAARGenerator")
             && !mnemonic.equals("JetifySrcs")
             && !mnemonic.equals("Desugar")) {
-          return args;
+          return chunk;
         }
-        // Add your favorite arg to custom-process here. When Bazel finds one of these in the
-        // argument list (an argument name), it strips output path prefixes from the following
-        // argument (the argument value).
-        ImmutableList<String> starlarkArgsToStrip =
-            ImmutableList.of(
-                "--mainData",
-                "--primaryData",
-                "--directData",
-                "--data",
-                "--resources",
-                "--mergeeManifests",
-                "--library",
-                "-i",
-                "--input");
-        for (int i = 1; i < args.size(); i++) {
-          if (starlarkArgsToStrip.contains(args.get(i - 1))) {
-            args.set(i, argStripper.strip(args.get(i)));
-          }
-        }
-        return args;
+
+        // TODO: b/327187486 - This materializes strings when totalArgLength() is called. Can it
+        //  compute the total arg length without creating garbage strings?
+        Iterable<String> args = chunk.arguments();
+        return new SimpleArgChunk(
+            () -> new CustomStarlarkArgsIterator(args.iterator(), argStripper));
       }
 
       @Override
@@ -188,12 +182,53 @@ public final class StrippingPathMapper {
     };
   }
 
+  private static final class CustomStarlarkArgsIterator implements Iterator<String> {
+    // Add your favorite arg to custom-process here. When Bazel finds one of these in the argument
+    // list (an argument name), it strips output path prefixes from the following argument (the
+    // argument value).
+    private static final ImmutableSet<String> STARLARK_ARGS_TO_STRIP =
+        ImmutableSet.of(
+            "--mainData",
+            "--primaryData",
+            "--directData",
+            "--data",
+            "--resources",
+            "--mergeeManifests",
+            "--library",
+            "-i",
+            "--input");
+
+    private final Iterator<String> args;
+    private final StringStripper argStripper;
+    private boolean stripNext = false;
+
+    CustomStarlarkArgsIterator(Iterator<String> args, StringStripper argStripper) {
+      this.args = args;
+      this.argStripper = argStripper;
+    }
+
+    @Override
+    public boolean hasNext() {
+      return args.hasNext();
+    }
+
+    @Override
+    public String next() {
+      String next = args.next();
+      if (stripNext) {
+        next = argStripper.strip(next);
+      }
+      stripNext = STARLARK_ARGS_TO_STRIP.contains(next);
+      return next;
+    }
+  }
+
   /** Utility class to strip output path configuration prefixes from arbitrary strings. */
   private static class StringStripper {
     private final Pattern pattern;
     private final String outputRoot;
 
-    public StringStripper(String outputRoot) {
+    StringStripper(String outputRoot) {
       this.outputRoot = outputRoot;
       this.pattern = stripPathsPattern(outputRoot);
     }
@@ -250,7 +285,7 @@ public final class StrippingPathMapper {
    * <p>This method checks b).
    */
   private static boolean isPathStrippable(
-      NestedSet<? extends ActionInput> actionInputs, PathFragment outputRoot) {
+      Iterable<? extends ActionInput> actionInputs, PathFragment outputRoot) {
     // For qualifying action types, check that no inputs or outputs would clash if paths were
     // removed, e.g. "bazel-out/k8-fastbuild/foo" and "bazel-out/host/foo".
     //
@@ -261,15 +296,15 @@ public final class StrippingPathMapper {
     // with configurations). While this would help more action instances qualify, it also blocks
     // caching the same action in host and target configurations. This could be mitigated by
     // stripping the host prefix *only* when the entire action is in the host configuration.
-    HashSet<PathFragment> rootRelativePaths = new HashSet<>();
-    for (ActionInput input : actionInputs.toList()) {
+    HashMap<PathFragment, ActionInput> rootRelativePaths = new HashMap<>();
+    for (ActionInput input : actionInputs) {
       if (!isOutputPath(input, outputRoot)) {
         continue;
       }
       // For "bazel-out/k8-fastbuild/foo/bar", get "foo/bar".
-      if (!rootRelativePaths.add(input.getExecPath().subFragment(2))) {
-        // TODO(bazel-team): don't fail on duplicate inputs, i.e. when the same exact exec path
-        // (including config prefix) is included twice.
+      if (!rootRelativePaths
+          .computeIfAbsent(input.getExecPath().subFragment(2), k -> input)
+          .equals(input)) {
         return false;
       }
     }

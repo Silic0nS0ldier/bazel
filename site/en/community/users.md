@@ -39,11 +39,18 @@ In their own words:
 > Bazel has increased reliability, stability, and speed for all of builds/tests
 at Asana. We no longer need to clean because of incorrect caches.
 
-
 ### [Ascend.io](https://ascend.io)
 
 Ascend is a Palo Alto startup that offers solutions for large data sets
 analysis. Their motto is _Big data is hard. We make it easy_.
+
+### [ASML](https://asml.com){: .external}
+
+<img src="https://upload.wikimedia.org/wikipedia/en/6/6c/ASML_Holding_N.V._logo.svg" width="150" align=right>
+
+ASML is an innovation leader in the semiconductor industry. We provide chipmakers
+with everything they need – hardware, software and services – to mass produce
+patterns on silicon through lithography.
 
 ### [Beeswax](https://www.beeswax.com/){: .external}
 
@@ -356,8 +363,7 @@ details about their process, see their [engineering blog](https://eng.snap.com/b
 ### [Stripe](https://stripe.com){: .external}
 <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/ba/Stripe_Logo%2C_revised_2016.svg/320px-Stripe_Logo%2C_revised_2016.svg.png" width="150" align="right">
 
-Stripe provides mobile payment solutions.  They are the main maintainers of the
-[Bazel Scala rules](https://github.com/bazelbuild/rules_scala){: .external}.
+Stripe provides mobile payment solutions. They use Bazel in their build and test pipelines, as detailed in their [engineering blog](https://stripe.com/blog/fast-secure-builds-choose-two){: .external}.
 
 ### [Tinder](https://tinder.com){: .external}
 <img src="https://policies.tinder.com/static/b0327365f4c0a31c4337157c10e9fadf/c1b63/tinder_full_color_watermark.png" width="150" align="right">
@@ -386,6 +392,13 @@ They wrote the article
 where they explain how Bazel sped up their builds. The build duration went from
 55 minutes to 10 minutes by using Bazel, and down to 5 minutes with remote
 caching.
+
+### [Trunk.io](https://trunk.io/merge/trunk-merge-and-bazel){: .external}
+<img src="/community/images/trunk-logo-dark.svg" width="150" align="right">
+
+Trunk is a San Francisco-based company backed by Andreessen Horowitz and Initialized Capital. Trunk offers a powerful pull request merge service with first-class support for the Bazel build system. By leveraging Bazel's understanding of dependencies within a codebase, Trunk's merge service intelligently creates parallel merge lanes, allowing independent changes to be tested and merged simultaneously.
+
+> Trunk’s internal monorepo builds modern C++ 20 and typescript all while leveraging bazel graph knowledge to selectively test and merge code.
 
 ### [Twitter](https://twitter.com/){: .external}
 

@@ -25,7 +25,6 @@ CcNativeLibraryInfo = _builtins.internal.CcNativeLibraryInfo
 config_common = _builtins.toplevel.config_common
 coverage_common = _builtins.toplevel.coverage_common
 platform_common = _builtins.toplevel.platform_common
-apple_common = _builtins.toplevel.apple_common
 
 artifact_category = struct(
     STATIC_LIBRARY = "STATIC_LIBRARY",
@@ -711,30 +710,13 @@ def _lookup_var(ctx, additional_vars, var):
         return expanded_make_var_ctx
     fail("{}: {} not defined".format(ctx.label, "$(" + var + ")"))
 
-def _build_variables(cc_toolchain, cpp_config, apple_config, cpu):
-    if not cc_toolchain._xcode_config_info:
-        return cc_toolchain._build_variables
-
-    return objc_common.apple_cc_toolchain_build_variables(
-        cc_toolchain._xcode_config_info,
-        apple_config.single_arch_platform,
-        cpu,
-        cpp_config,
-        cc_toolchain.sysroot,
-    )
-
 def _get_cc_flags_make_variable(ctx, feature_configuration, cc_toolchain):
     original_cc_flags = cc_toolchain._legacy_cc_flags_make_variable
     sysroot_cc_flag = ""
     if cc_toolchain.sysroot != None:
         sysroot_cc_flag = SYSROOT_FLAG + cc_toolchain.sysroot
 
-    build_vars = _build_variables(
-        cc_toolchain,
-        ctx.fragments.cpp,
-        cc_internal.apple_config_if_available(ctx = ctx),
-        ctx.configuration.cpu(),
-    )
+    build_vars = cc_toolchain._build_variables
     feature_config_cc_flags = cc_common.get_memory_inefficient_command_line(
         feature_configuration = feature_configuration,
         action_name = "cc-flags-make-variable",
@@ -1212,6 +1194,24 @@ def _proto_output_root(proto_root, bin_dir_path):
     else:
         return bin_dir_path + "/" + proto_root
 
+def _should_use_pic(ctx, cc_toolchain, feature_configuration):
+    """Whether to use pic files
+
+    Args:
+        ctx: (RuleContext)
+        cc_toolchain: (CcToolchainInfo)
+        feature_configuration: (FeatureConfiguration)
+
+    Returns:
+        (bool)
+    """
+    return ctx.fragments.cpp.force_pic() or (
+        cc_toolchain.needs_pic_for_dynamic_libraries(feature_configuration = feature_configuration) and (
+            ctx.var["COMPILATION_MODE"] != "opt" or
+            cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "prefer_pic_for_opt_binaries")
+        )
+    )
+
 cc_helper = struct(
     CPP_TOOLCHAIN_TYPE = _CPP_TOOLCHAIN_TYPE,
     merge_cc_debug_contexts = _merge_cc_debug_contexts,
@@ -1277,5 +1277,5 @@ cc_helper = struct(
     proto_output_root = _proto_output_root,
     package_source_root = _package_source_root,
     tokenize = _tokenize,
-    build_variables = _build_variables,
+    should_use_pic = _should_use_pic,
 )
