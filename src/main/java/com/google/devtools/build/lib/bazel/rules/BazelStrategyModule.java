@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.common.options.OptionsBase;
+import com.google.devtools.build.lib.cmdline.Label;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -94,7 +95,7 @@ public class BazelStrategyModule extends BlazeModule {
     // NOTE Whereas the prior "filters" function as overrides
     // this actually is a filter.
     // TODO Should the latter `add*Filter` methods be renamed to clarify their behaviour?
-    for (Map.Entry<Label, List<String>> entry : options.allowedStrategiesByExecPlatform) {
+    for (Map.Entry<Label, ImmutableList<String>> entry : options.allowedStrategiesByExecPlatform) {
       registryBuilder.addExecPlatformFilter(entry.getKey(), entry.getValue());
     }
   }

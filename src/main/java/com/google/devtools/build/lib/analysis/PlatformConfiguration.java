@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.starlarkbuildapi.platform.PlatformConfigurationApi;
 import com.google.devtools.build.lib.util.RegexFilter;
+import com.google.devtools.build.lib.exec.ExecutionOptions;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -39,10 +40,11 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   private final List<Map.Entry<RegexFilter, List<Label>>> targetFilterToAdditionalExecConstraints;
   private final RegexFilter toolchainResolutionDebugRegexFilter;
   private final boolean requireAllowedStrategiesByExecPlatform;
-  private final List<Map.Entry<String, List<String>>> allowedStrategiesByExecPlatform;
+  private final List<Map.Entry<Label, ImmutableList<String>>> allowedStrategiesByExecPlatform;
 
   public PlatformConfiguration(BuildOptions buildOptions) {
     PlatformOptions platformOptions = buildOptions.get(PlatformOptions.class);
+    // TODO ExecutionOptions is not a configuration fragment, this does not work
     ExecutionOptions executionOptions = buildOptions.get(ExecutionOptions.class);
 
     this.hostPlatform = platformOptions.hostPlatform;
@@ -149,7 +151,7 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   // TODO getter for allowedStrategiesByExecPlatform
   // Or perhaps behaviour should be implemented here?
   // `reportInvalidOptions()` makes the scope of this hard to determine
-  public List<Map.Entry<String, List<String>>> getAllowedStrategiesByExecPlatform() {
+  public List<Map.Entry<Label, ImmutableList<String>>> getAllowedStrategiesByExecPlatform() {
     // TODO Should make immutable
     return this.allowedStrategiesByExecPlatform;
   }

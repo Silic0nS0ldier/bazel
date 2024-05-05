@@ -37,6 +37,7 @@ import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Converters.BooleanConverter;
 import com.google.devtools.common.options.Converters.CommaSeparatedOptionListConverter;
 import com.google.devtools.common.options.Converters.StringConverter;
+import com.google.devtools.common.options.Converters.CommaSeparatedOptionSetConverter;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.util.Collections;
@@ -252,6 +253,35 @@ public class CoreOptionConverters {
   public static class StrictDepsConverter extends EnumConverter<StrictDepsMode> {
     public StrictDepsConverter() {
       super(StrictDepsMode.class, "strict dependency checking level");
+    }
+  }
+
+  /** Flag converter for assigning a Label to a String. */
+  // TODO This significantly duplicates com.google.devtools.build.lib.analysis.config.CoreOptionConverters.LabelToStringEntryConverter
+  //      Can this be addressed? It might be nice to make converters composable.
+  //      e.g. Have a generic `LabelToConverter<ValueType>`, assuming it can be done and won't lead to behaviour changes.
+  public static class LabelToCommaSeparatedOptionSetConverter implements Converter<Map.Entry<Label, ImmutableList<String>>> {
+    @Override
+    public Map.Entry<Label, ImmutableList<String>> convert(String input, Object conversionContext)
+        throws OptionsParsingException {
+      // TODO(twigg): This doesn't work well if the labels can themselves have an '='
+      long equalsCount = input.chars().filter(c -> c == '=').count();
+      if (equalsCount != 1 || input.charAt(0) == '=' || input.charAt(input.length() - 1) == '=') {
+        throw new OptionsParsingException(
+            "Variable definitions must be in the form of a 'name=value' assignment. 'name' and"
+                + " 'value' must be non-empty and may not include '='.");
+      }
+      int pos = input.indexOf("=");
+      Label name = convertOptionsLabel(input.substring(0, pos), conversionContext);
+      String valueStr = input.substring(pos + 1);
+      CommaSeparatedOptionSetConverter converter = new CommaSeparatedOptionSetConverter();
+      ImmutableList<String> value = converter.convert(valueStr);
+      return Maps.immutableEntry(name, value);
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "a 'label=value[,value]' assignment";
     }
   }
 

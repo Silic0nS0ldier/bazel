@@ -44,6 +44,7 @@ import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.devtools.build.lib.platform.PlatformFilteredSpawnStrategy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -506,15 +507,15 @@ public final class SpawnStrategyRegistry
       // "local" and "worker" strategies will not have "//:foo_platform" in the forbidden list.
       // "remote" (and others) will.
       // TODO Imuttable list
-      var forbiddenExecPlatforms = new List<Label>();
-      for (var entry : this.execPlatformToIdentifiers) {
+      var forbiddenExecPlatforms = new ArrayList<Label>();
+      for (var entry : this.execPlatformToIdentifiers.entrySet()) {
         if (!entry.getValue().contains(identifier)) {
           forbiddenExecPlatforms.add(entry.getKey());
         }
       }
 
       if (forbiddenExecPlatforms.size() > 0) {
-        return new PlatformFilteredSpawnStrategy(strategy, forbiddenExecPlatforms)
+        return new PlatformFilteredSpawnStrategy(strategy, ImmutableList.copyOf(forbiddenExecPlatforms));
       }
 
       return strategy;

@@ -158,7 +158,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
       // TODO Include missing platforms in thrown error.
 
       throw new RegisteredExecutionPlatformsFunctionException(
-        new ExecutionPlatformMissingAllowedStrategies());
+        new ExecutionPlatformMissingAllowedStrategies(), Transience.PERSISTENT);
     }
 
     // Load the configured target for each, and get the declared execution platforms providers.
@@ -308,7 +308,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
 
   static final class ExecutionPlatformMissingAllowedStrategies extends Exception {
     ExecutionPlatformMissingAllowedStrategies() {
-      super("Execution platforms must have allowed spawn strategies declared, but some are missing.")
+      super("Execution platforms must have allowed spawn strategies declared, but some are missing.");
     }
   }
 
@@ -325,6 +325,11 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
 
     private RegisteredExecutionPlatformsFunctionException(
         InvalidPlatformException cause, Transience transience) {
+      super(cause, transience);
+    }
+
+    private RegisteredExecutionPlatformsFunctionException(
+        ExecutionPlatformMissingAllowedStrategies cause, Transience transience) {
       super(cause, transience);
     }
   }
