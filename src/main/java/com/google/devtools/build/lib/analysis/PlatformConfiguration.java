@@ -24,6 +24,7 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.starlarkbuildapi.platform.PlatformConfigurationApi;
 import com.google.devtools.build.lib.util.RegexFilter;
+import com.google.devtools.build.lib.exec.ExecutionOptions;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -38,9 +39,13 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   private final ImmutableList<String> extraToolchains;
   private final List<Map.Entry<RegexFilter, List<Label>>> targetFilterToAdditionalExecConstraints;
   private final RegexFilter toolchainResolutionDebugRegexFilter;
+  private final boolean requireAllowedStrategiesByExecPlatform;
+  private final List<Map.Entry<Label, ImmutableList<String>>> allowedStrategiesByExecPlatform;
 
   public PlatformConfiguration(BuildOptions buildOptions) {
     PlatformOptions platformOptions = buildOptions.get(PlatformOptions.class);
+    // TODO ExecutionOptions is not a configuration fragment, this does not work
+    ExecutionOptions executionOptions = buildOptions.get(ExecutionOptions.class);
 
     this.hostPlatform = platformOptions.hostPlatform;
     this.extraExecutionPlatforms = ImmutableList.copyOf(platformOptions.extraExecutionPlatforms);
@@ -49,6 +54,8 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     this.targetFilterToAdditionalExecConstraints =
         platformOptions.targetFilterToAdditionalExecConstraints;
     this.toolchainResolutionDebugRegexFilter = platformOptions.toolchainResolutionDebug;
+    this.requireAllowedStrategiesByExecPlatform = executionOptions.requireAllowedStrategiesByExecPlatform;
+    this.allowedStrategiesByExecPlatform = executionOptions.allowedStrategiesByExecPlatform;
   }
 
   @Override
@@ -135,5 +142,17 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     return labels.stream()
         .map(Label::getCanonicalForm)
         .anyMatch(this.toolchainResolutionDebugRegexFilter);
+  }
+
+  public boolean getRequireAllowedStrategiesByExecPlatform() {
+    return this.requireAllowedStrategiesByExecPlatform;
+  }
+
+  // TODO getter for allowedStrategiesByExecPlatform
+  // Or perhaps behaviour should be implemented here?
+  // `reportInvalidOptions()` makes the scope of this hard to determine
+  public List<Map.Entry<Label, ImmutableList<String>>> getAllowedStrategiesByExecPlatform() {
+    // TODO Should make immutable
+    return this.allowedStrategiesByExecPlatform;
   }
 }

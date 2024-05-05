@@ -134,6 +134,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     targetPatternBuilder.addAll(TargetPatternUtil.toSigned(bzlmodNonRootModuleExecutionPlatforms));
 
     // Expand target patterns.
+    // This is the usable form for us
     ImmutableList<Label> platformLabels;
     try {
       platformLabels =
@@ -147,6 +148,19 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
           new InvalidExecutionPlatformLabelException(e), Transience.PERSISTENT);
     }
 
+    // run strategies check
+    if (platformConfiguration.getRequireAllowedStrategiesByExecPlatform()) {
+      // TODO Check that each platform has allowed strategies set
+      var u = platformConfiguration.getAllowedStrategiesByExecPlatform();
+
+      // TODO Loop through `platformLabels` list, collecting every item that is not in `u`
+      // TODO Convert `u` into a set (or similar data structure) for quick existance checks when there are many exec platforms
+      // TODO Include missing platforms in thrown error.
+
+      throw new RegisteredExecutionPlatformsFunctionException(
+        new ExecutionPlatformMissingAllowedStrategies(), Transience.PERSISTENT);
+    }
+
     // Load the configured target for each, and get the declared execution platforms providers.
     ImmutableList<ConfiguredTargetKey> registeredExecutionPlatformKeys =
         configureRegisteredExecutionPlatforms(env, platformLabels);
@@ -154,6 +168,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
       return null;
     }
 
+    // Is this hit before or after cli option errors are reported? probably after
     return RegisteredExecutionPlatformsValue.create(registeredExecutionPlatformKeys);
   }
 
@@ -291,6 +306,12 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     }
   }
 
+  static final class ExecutionPlatformMissingAllowedStrategies extends Exception {
+    ExecutionPlatformMissingAllowedStrategies() {
+      super("Execution platforms must have allowed spawn strategies declared, but some are missing.");
+    }
+  }
+
   /**
    * Used to declare all the exception types that can be wrapped in the exception thrown by {@link
    * #compute}.
@@ -304,6 +325,11 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
 
     private RegisteredExecutionPlatformsFunctionException(
         InvalidPlatformException cause, Transience transience) {
+      super(cause, transience);
+    }
+
+    private RegisteredExecutionPlatformsFunctionException(
+        ExecutionPlatformMissingAllowedStrategies cause, Transience transience) {
       super(cause, transience);
     }
   }

@@ -105,6 +105,9 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/util:resource_converter",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/java/com/google/devtools/common/options",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/analysis:config/fragment_options",
+        "//src/main/java/com/google/devtools/build/lib/analysis:config/core_option_converters",
         "//third_party:guava",
     ],
 )
@@ -349,6 +352,8 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/util:abrupt_exit_exception",
         "//src/main/java/com/google/devtools/build/lib/util:detailed_exit_code",
         "//src/main/protobuf:failure_details_java_proto",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
+        "//src/main/java/com/google/devtools/build/lib/platform:platform_filtered_spawn_strategy",
         "//third_party:auto_value",
         "//third_party:flogger",
         "//third_party:guava",

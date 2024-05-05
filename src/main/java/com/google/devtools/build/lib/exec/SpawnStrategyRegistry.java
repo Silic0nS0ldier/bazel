@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.actions.DynamicStrategyRegistry;
 import com.google.devtools.build.lib.actions.SandboxedSpawnStrategy;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnStrategy;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
@@ -43,6 +44,7 @@ import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.devtools.build.lib.platform.PlatformFilteredSpawnStrategy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -263,6 +265,7 @@ public final class SpawnStrategyRegistry
     // Using List values here rather than multimaps as there is no need for the latter's
     // functionality: The values are always replaced as a whole, no adding/creation required.
     private final HashMap<String, List<String>> mnemonicToIdentifiers = new HashMap<>();
+    private final HashMap<Label, List<String>> execPlatformToIdentifiers = new HashMap<>();
     private final HashMap<String, List<String>> mnemonicToRemoteDynamicIdentifiers =
         new HashMap<>();
     private final HashMap<String, List<String>> mnemonicToLocalDynamicIdentifiers = new HashMap<>();
@@ -300,6 +303,12 @@ public final class SpawnStrategyRegistry
     @CanIgnoreReturnValue
     public Builder addMnemonicFilter(String mnemonic, List<String> identifiers) {
       mnemonicToIdentifiers.put(mnemonic, identifiers);
+      return this;
+    }
+
+    @CanIgnoreReturnValue
+    public Builder addExecPlatformFilter(Label execPlatform, List<String> identifiers) {
+      execPlatformToIdentifiers.put(execPlatform, identifiers);
       return this;
     }
 
@@ -491,6 +500,24 @@ public final class SpawnStrategyRegistry
                 identifier, requestName, Joiner.on(", ").join(identifierToStrategy.keySet())),
             Code.STRATEGY_NOT_FOUND);
       }
+
+      // Exec platform filter
+      // Build forbidden exec platforms list for strategy
+      // e.g. for --require_allowed_strategies_by_exec_platform=//:foo_plaform=local,worker
+      // "local" and "worker" strategies will not have "//:foo_platform" in the forbidden list.
+      // "remote" (and others) will.
+      // TODO Imuttable list
+      var forbiddenExecPlatforms = new ArrayList<Label>();
+      for (var entry : this.execPlatformToIdentifiers.entrySet()) {
+        if (!entry.getValue().contains(identifier)) {
+          forbiddenExecPlatforms.add(entry.getKey());
+        }
+      }
+
+      if (forbiddenExecPlatforms.size() > 0) {
+        return new PlatformFilteredSpawnStrategy(strategy, ImmutableList.copyOf(forbiddenExecPlatforms));
+      }
+
       return strategy;
     }
 

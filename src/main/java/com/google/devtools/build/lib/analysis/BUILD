@@ -933,6 +933,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/starlarkbuildapi/platform",
         "//src/main/java/com/google/devtools/build/lib/util",
         "//third_party:guava",
+        "//src/main/java/com/google/devtools/build/lib/exec:execution_options",
     ],
 )
 

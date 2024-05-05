@@ -13,10 +13,12 @@
 // limitations under the License.
 package com.google.devtools.build.lib.exec;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.CpuResourceConverter;
 import com.google.devtools.build.lib.util.OptionsUtils;
 import com.google.devtools.build.lib.util.RamResourceConverter;
@@ -24,15 +26,18 @@ import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.build.lib.util.ResourceConverter;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.BoolOrEnumConverter;
+import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Converters;
 import com.google.devtools.common.options.Converters.CommaSeparatedNonEmptyOptionListConverter;
+import com.google.devtools.common.options.Converters.CommaSeparatedOptionSetConverter;
+import com.google.devtools.build.lib.analysis.config.CoreOptionConverters.LabelToCommaSeparatedOptionSetConverter;
 import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionMetadataTag;
 import com.google.devtools.common.options.Options;
-import com.google.devtools.common.options.OptionsBase;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.time.Duration;
 import java.util.Collections;
@@ -56,7 +61,8 @@ import java.util.Objects;
  * Ideally, the user would be unaware of the difference.  For now, the usage
  * strings are identical modulo "part 1", "part 2".
  */
-public class ExecutionOptions extends OptionsBase {
+// FragmentOptions extends OptionsBase
+public class ExecutionOptions extends FragmentOptions {
 
   public static final ExecutionOptions DEFAULTS = Options.getDefaults(ExecutionOptions.class);
 
@@ -121,6 +127,24 @@ public class ExecutionOptions extends OptionsBase {
               + " --strategy_regexp=Compiling=sandboxed will run 'Compiling //foo/bar/baz' with "
               + "the 'local' strategy, but reversing the order would run it with 'sandboxed'. ")
   public List<Map.Entry<RegexFilter, List<String>>> strategyByRegexp;
+
+  @Option(
+      name = "allowed_strategies_by_exec_platform",
+      allowMultiple = true,
+      converter = LabelToCommaSeparatedOptionSetConverter.class,
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help = "...")
+  public List<Map.Entry<Label, ImmutableList<String>>> allowedStrategiesByExecPlatform;
+
+  @Option(
+      name = "require_allowed_strategies_by_exec_platform",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help = "...")
+  public boolean requireAllowedStrategiesByExecPlatform;
 
   @Option(
       name = "materialize_param_files",
