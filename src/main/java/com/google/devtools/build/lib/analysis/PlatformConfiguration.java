@@ -31,7 +31,7 @@ import java.util.Map;
 
 /** A configuration fragment describing the current platform configuration. */
 @ThreadSafety.Immutable
-@RequiresOptions(options = {PlatformOptions.class})
+@RequiresOptions(options = {PlatformOptions.class, ExecutionOptions.class})
 public class PlatformConfiguration extends Fragment implements PlatformConfigurationApi {
   private final Label hostPlatform;
   private final ImmutableList<String> extraExecutionPlatforms;
