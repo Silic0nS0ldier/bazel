@@ -75,7 +75,7 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
   @Nullable
   @Override
   public SkyValue compute(SkyKey skyKey, Environment env)
-      throws RegisteredExecutionPlatformsFunctionException, InterruptedException {
+      throws RegisteredExecutionPlatformsFunctionException, InterruptedException, MissingStrategiesFunctionException {
     StarlarkSemantics starlarkSemantics = PrecomputedValue.STARLARK_SEMANTICS.get(env);
     BuildConfigurationValue configuration =
         (BuildConfigurationValue)
@@ -152,6 +152,22 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
         configureRegisteredExecutionPlatforms(env, platformLabels);
     if (env.valuesMissing()) {
       return null;
+    }
+
+    // This is the only place the complete list of execution platforms is known, so it is the only
+    // place `--require_platform_scoped_strategies` can be enforced.
+    if (platformConfiguration.getRequirePlatformScopedStrategies()) {
+      var l = platformConfiguration.getPlatformsWithStrategyFilters();
+      ImmutableList.Builder<String> missing = ImmutableList.builder();
+      for (var e : registeredExecutionPlatformKeys) {
+        var regl = e.getLabel().getCanonicalForm();
+        if (!l.contains(regl)) {
+          missing.add(regl);
+        }
+      }
+      if (missing.build().size() > 0) {
+        throw new MissingStrategiesFunctionException();
+      }
     }
 
     return RegisteredExecutionPlatformsValue.create(registeredExecutionPlatformKeys);
@@ -314,6 +330,12 @@ public class RegisteredExecutionPlatformsFunction implements SkyFunction {
     private RegisteredExecutionPlatformsFunctionException(
         InvalidPlatformException cause, Transience transience) {
       super(cause, transience);
+    }
+  }
+
+  private static class MissingStrategiesFunctionException extends SkyFunctionException {
+    MissingStrategiesFunctionException() {
+      super(new Exception(), SkyFunctionException.Transience.PERSISTENT);
     }
   }
 }

@@ -22,6 +22,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.starlarkbuildapi.platform.PlatformConfigurationApi;
 import com.google.devtools.build.lib.util.RegexFilter;
 import java.util.Collection;
@@ -39,11 +40,16 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
   private final List<Map.Entry<RegexFilter, List<Label>>> targetFilterToAdditionalExecConstraints;
   private final RegexFilter toolchainResolutionDebugRegexFilter;
 
+  // Needed for exhaustive strategy specification checks
+  private final List<Map.Entry<String, List<String>>> allowedStrategiesByExecPlatform;
+  private final boolean requirePlatformScopedStrategies;
+
+  // unused?
   public PlatformConfiguration(BuildOptions options) {
-    this(options.get(PlatformOptions.class));
+    this(options.get(PlatformOptions.class), options.get(ExecutionOptions.class));
   }
 
-  public PlatformConfiguration(PlatformOptions platformOptions) {
+  public PlatformConfiguration(PlatformOptions platformOptions, ExecutionOptions executionOptions) {
     this.hostPlatform = platformOptions.hostPlatform;
     this.extraExecutionPlatforms = ImmutableList.copyOf(platformOptions.extraExecutionPlatforms);
     this.targetPlatform = platformOptions.computeTargetPlatform();
@@ -51,12 +57,15 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     this.targetFilterToAdditionalExecConstraints =
         platformOptions.targetFilterToAdditionalExecConstraints;
     this.toolchainResolutionDebugRegexFilter = platformOptions.toolchainResolutionDebug;
+    this.allowedStrategiesByExecPlatform = executionOptions.allowedStrategiesByExecPlatform;
+    this.requirePlatformScopedStrategies = executionOptions.requirePlatformScopedStrategies;
   }
 
   @Override
   public void reportInvalidOptions(EventHandler reporter, BuildOptions buildOptions) {
     PlatformOptions platformOptions = buildOptions.get(PlatformOptions.class);
     // TODO(https://github.com/bazelbuild/bazel/issues/6519): Implement true multiplatform builds.
+    // turns out this is broken, .platforms is normalised before this runs
     if (platformOptions.platforms.size() > 1) {
       reporter.handle(
           Event.warn(
@@ -137,5 +146,17 @@ public class PlatformConfiguration extends Fragment implements PlatformConfigura
     return labels.stream()
         .map(Label::getCanonicalForm)
         .anyMatch(this.toolchainResolutionDebugRegexFilter);
+  }
+
+  public List<String> getPlatformsWithStrategyFilters() {
+    ImmutableList.Builder<String> v = ImmutableList.builder();
+    for (var filter : allowedStrategiesByExecPlatform) {
+      v.add(filter.getKey());
+    }
+    return v.build();
+  }
+
+  public boolean getRequirePlatformScopedStrategies() {
+    return requirePlatformScopedStrategies;
   }
 }

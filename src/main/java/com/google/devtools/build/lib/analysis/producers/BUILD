@@ -65,6 +65,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/collect",
         "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
         "//src/main/java/com/google/devtools/build/lib/events",
+        "//src/main/java/com/google/devtools/build/lib/exec:execution_options",
         "//src/main/java/com/google/devtools/build/lib/packages",
         "//src/main/java/com/google/devtools/build/lib/packages:configured_attribute_mapper",
         "//src/main/java/com/google/devtools/build/lib/packages:exec_group",

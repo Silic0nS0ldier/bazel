@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.actions.DynamicStrategyRegistry;
 import com.google.devtools.build.lib.actions.SandboxedSpawnStrategy;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnStrategy;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.events.Reporter;
@@ -69,6 +70,7 @@ public final class SpawnStrategyRegistry
 
   private final ImmutableListMultimap<String, SpawnStrategy> mnemonicToStrategies;
   private final StrategyRegexFilter strategyRegexFilter;
+  private final StrategyPlatformFilter strategyPlatformFilter;
   private final ImmutableList<? extends SpawnStrategy> defaultStrategies;
   private final ImmutableMultimap<String, SandboxedSpawnStrategy> mnemonicToRemoteDynamicStrategies;
   private final ImmutableMultimap<String, SandboxedSpawnStrategy> mnemonicToLocalDynamicStrategies;
@@ -77,12 +79,14 @@ public final class SpawnStrategyRegistry
   private SpawnStrategyRegistry(
       ImmutableListMultimap<String, SpawnStrategy> mnemonicToStrategies,
       StrategyRegexFilter strategyRegexFilter,
+      StrategyPlatformFilter strategyPlatformFilter,
       ImmutableList<? extends SpawnStrategy> defaultStrategies,
       ImmutableMultimap<String, SandboxedSpawnStrategy> mnemonicToRemoteDynamicStrategies,
       ImmutableMultimap<String, SandboxedSpawnStrategy> mnemonicToLocalDynamicStrategies,
       @Nullable AbstractSpawnStrategy remoteLocalFallbackStrategy) {
     this.mnemonicToStrategies = mnemonicToStrategies;
     this.strategyRegexFilter = strategyRegexFilter;
+    this.strategyPlatformFilter = strategyPlatformFilter;
     this.defaultStrategies = defaultStrategies;
     this.mnemonicToRemoteDynamicStrategies = mnemonicToRemoteDynamicStrategies;
     this.mnemonicToLocalDynamicStrategies = mnemonicToLocalDynamicStrategies;
@@ -105,7 +109,12 @@ public final class SpawnStrategyRegistry
    * using the given {@link Reporter}.
    */
   public List<? extends SpawnStrategy> getStrategies(Spawn spawn, @Nullable EventHandler reporter) {
-    return getStrategies(spawn.getResourceOwner(), spawn.getMnemonic(), reporter);
+    var strategies = getStrategies(spawn.getResourceOwner(), spawn.getMnemonic(), reporter);
+
+    // Filter strategies for exec platform (if a filter exists)
+    strategies = strategyPlatformFilter.getStrategies(spawn, reporter, strategies);
+
+    return strategies;
   }
 
   /**
@@ -116,6 +125,8 @@ public final class SpawnStrategyRegistry
    *
    * <p>If the reason for selecting the context is worth mentioning to the user, logs a message
    * using the given {@link Reporter}.
+   *
+   * NOTE: This method is public for Blaze, getStrategies(Spawn, EventHandler) must be used in Bazel.
    */
   public List<? extends SpawnStrategy> getStrategies(
       ActionExecutionMetadata resourceOwner, String mnemonic, @Nullable EventHandler reporter) {
@@ -136,6 +147,7 @@ public final class SpawnStrategyRegistry
     return defaultStrategies;
   }
 
+  // TODO figure this out in case exec filtering is needed
   @Override
   public void notifyUsedDynamic(ActionContext.ActionContextRegistry actionContextRegistry) {
     for (SandboxedSpawnStrategy strategy : mnemonicToLocalDynamicStrategies.values()) {
@@ -165,14 +177,19 @@ public final class SpawnStrategyRegistry
   @Nullable
   @Override
   public AbstractSpawnStrategy getRemoteLocalFallbackStrategy() {
+    // TODO filter for exec platform (will need to add new arg)
+    //      log if strategy eliminated to permit debugging
     return remoteLocalFallbackStrategy;
   }
 
+  // used as in included in the registry?
   /**
    * Notifies all (non-dynamic) strategies stored in this registry that they are {@linkplain
    * SpawnStrategy#usedContext used}.
    */
   public void notifyUsed(ActionContext.ActionContextRegistry actionContextRegistry) {
+    // regex is limited to subsets of the others...
+    // this is logically redundant (covers by others)
     for (SpawnStrategy strategy : strategyRegexFilter.getFilterToStrategies().values()) {
       strategy.usedContext(actionContextRegistry);
     }
@@ -202,6 +219,7 @@ public final class SpawnStrategyRegistry
     for (Map.Entry<RegexFilter, Collection<SpawnStrategy>> entry :
         strategyRegexFilter.getFilterToStrategies().asMap().entrySet()) {
       Collection<SpawnStrategy> value = entry.getValue();
+      // TODO This is a filter... and no longer the only one
       logger.atInfo().log(
           "FilterToStrategyImplementations: \"%s\" = [%s]",
           entry.getKey(), toImplementationNames(value));
@@ -229,6 +247,8 @@ public final class SpawnStrategyRegistry
           "MnemonicToLocalDynamicStrategyImplementations: \"%s\" = [%s]",
           entry.getKey(), toImplementationNames(entry.getValue()));
     }
+
+    // TODO add exec platform filtering
   }
 
   private static String toImplementationNames(Collection<?> strategies) {
@@ -260,7 +280,7 @@ public final class SpawnStrategyRegistry
    * <p>To {@linkplain SpawnStrategyRegistry#getStrategies match a strategy to a spawn} it needs to
    * be both {@linkplain #registerStrategy registered} and its registered command-line identifier
    * has to match {@linkplain #addDescriptionFilter a filter on the spawn's progress message},
-   * {@linkplain #addMnemonicFilter a filter on the spawn's mnemonic} or be part of the default
+   * {@linkplain #addMnemonicOverride a filter on the spawn's mnemonic} or be part of the default
    * strategies (see below).
    *
    * <p><strong>Default strategies</strong> are either {@linkplain #setDefaultStrategies set
@@ -284,9 +304,9 @@ public final class SpawnStrategyRegistry
     // Using List values here rather than multimaps as there is no need for the latter's
     // functionality: The values are always replaced as a whole, no adding/creation required.
     private final HashMap<String, List<String>> mnemonicToIdentifiers = new HashMap<>();
-    private final HashMap<String, List<String>> mnemonicToRemoteDynamicIdentifiers =
-        new HashMap<>();
+    private final HashMap<String, List<String>> mnemonicToRemoteDynamicIdentifiers = new HashMap<>();
     private final HashMap<String, List<String>> mnemonicToLocalDynamicIdentifiers = new HashMap<>();
+    private final HashMap<Label, List<String>> execPlatformFilters = new HashMap<>();
 
     @Nullable private String remoteLocalFallbackStrategyIdentifier;
 
@@ -316,6 +336,12 @@ public final class SpawnStrategyRegistry
       return this;
     }
 
+    @CanIgnoreReturnValue
+    public Builder addExecPlatformFilter(Label execPlatform, List<String> identifiers) {
+      this.execPlatformFilters.put(execPlatform, identifiers);
+      return this;
+    }
+
     /**
      * Adds a filter limiting any spawn whose {@linkplain Spawn#getMnemonic() mnemonic}
      * (case-sensitively) matches the given mnemonic to only use strategies with the given
@@ -328,7 +354,7 @@ public final class SpawnStrategyRegistry
      * filter} that filter will take precedence over any mnemonic-based filters.
      */
     @CanIgnoreReturnValue
-    public Builder addMnemonicFilter(String mnemonic, List<String> identifiers) {
+    public Builder addMnemonicOverride(String mnemonic, List<String> identifiers) {
       mnemonicToIdentifiers.put(mnemonic, identifiers);
       return this;
     }
@@ -446,6 +472,13 @@ public final class SpawnStrategyRegistry
         }
       }
 
+      // TODO ListMultimap is wrong type for the task, we don't accumulate values across keys
+      ListMultimap<Label, String> execPlatformToIdentifiers = LinkedListMultimap.create();
+      for (Map.Entry<Label, List<String>> entry : execPlatformFilters.entrySet()) {
+        Label execPlatform = entry.getKey();
+        execPlatformToIdentifiers.putAll(execPlatform, entry.getValue());
+      }
+
       ImmutableListMultimap.Builder<String, SpawnStrategy> mnemonicToStrategies =
           new ImmutableListMultimap.Builder<>();
       for (Map.Entry<String, List<String>> entry : mnemonicToIdentifiers.entrySet()) {
@@ -516,6 +549,7 @@ public final class SpawnStrategyRegistry
           mnemonicToStrategies.build(),
           new StrategyRegexFilter(
               strategyMapper, strategyPolicy, filterToIdentifiers, filterToStrategies),
+          new StrategyPlatformFilter(strategyMapper, execPlatformToIdentifiers),
           defaultStrategies,
           mnemonicToRemoteStrategies.build(),
           mnemonicToLocalStrategies.build(),
@@ -597,6 +631,41 @@ public final class SpawnStrategyRegistry
     }
   }
 
+  private static class StrategyPlatformFilter {
+    private final StrategyMapper strategyMapper;
+    private final ListMultimap<Label, String> execPlatformToIdentifiers;
+
+    private StrategyPlatformFilter(StrategyMapper strategyMapper, ListMultimap<Label, String> execPlatformToIdentifiers) {
+      this.strategyMapper = strategyMapper;
+      this.execPlatformToIdentifiers = execPlatformToIdentifiers;
+    }
+
+    public List<? extends SpawnStrategy> getStrategies(
+      Spawn spawn,
+      @Nullable EventHandler reporter,
+      List<? extends SpawnStrategy> candidateStrategies) {
+      var platformLabel = spawn.getExecutionPlatformLabel();
+      Preconditions.checkNotNull(platformLabel, "Attempting to spawn action without an execution platform.");
+      
+      // Confirm contains key as ListMultimap.get returns an empty list when unset
+      // Without this we'd forbid everything instead of allowing everything
+      if (execPlatformToIdentifiers.containsKey(platformLabel)) {
+        var allowedStrategies = execPlatformToIdentifiers.get(platformLabel);
+        List<SpawnStrategy> filteredStrategies = new ArrayList<>();
+        // strategies are order sensitive so whatever intersection logic is used, it needs to retain the order
+        for (var strategy : candidateStrategies) {
+          var identifier = strategyMapper.toIdentifier(strategy);
+          if (allowedStrategies.contains(identifier)) {
+            filteredStrategies.add(strategy);
+          }
+        }
+        return filteredStrategies;
+      }
+
+      return candidateStrategies;
+    }
+  }
+
   /* Maps the strategy identifier (e.g. "local", "worker"..) to the real strategy. */
   private static class StrategyMapper {
 
@@ -631,6 +700,15 @@ public final class SpawnStrategyRegistry
             Code.STRATEGY_NOT_FOUND);
       }
       return strategy;
+    }
+
+    String toIdentifier(SpawnStrategy spawnStrategy) {
+      for (var entry : identifierToStrategy.entrySet()) {
+        if (spawnStrategy == entry.getValue()) {
+          return entry.getKey();
+        }
+      }
+      throw new RuntimeException("This should never be reached");
     }
 
     Iterable<? extends SandboxedSpawnStrategy> toSandboxedStrategies(
