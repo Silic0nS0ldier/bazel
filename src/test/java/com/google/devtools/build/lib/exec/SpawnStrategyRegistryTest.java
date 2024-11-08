@@ -77,7 +77,7 @@ public class SpawnStrategyRegistryTest {
         SpawnStrategyRegistry.builder()
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "bar")
-            .addMnemonicFilter("mnem", ImmutableList.of("bar", "foo"))
+            .addMnemonicOverride("mnem", ImmutableList.of("bar", "foo"))
             .build();
 
     assertThat(
@@ -100,7 +100,7 @@ public class SpawnStrategyRegistryTest {
         SpawnStrategyRegistry.builder(strategyPolicyProto)
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "bar")
-            .addMnemonicFilter("some-mnemonic", ImmutableList.of("bar", "foo"))
+            .addMnemonicOverride("some-mnemonic", ImmutableList.of("bar", "foo"))
             .build();
 
     assertThat(
@@ -172,7 +172,7 @@ public class SpawnStrategyRegistryTest {
             .registerStrategy(strategy3, "baz")
             .addDescriptionFilter(ELLO_MATCHER, ImmutableList.of("foo"))
             .addDescriptionFilter(LLO_MATCHER, ImmutableList.of("bar"))
-            .addMnemonicFilter("regex-mnemonic", ImmutableList.of("baz"))
+            .addMnemonicOverride("regex-mnemonic", ImmutableList.of("baz"))
             .build();
 
     List<? extends SpawnStrategy> strategies =
@@ -191,7 +191,7 @@ public class SpawnStrategyRegistryTest {
         SpawnStrategyRegistry.builder()
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "foo")
-            .addMnemonicFilter("mnem", ImmutableList.of("foo"))
+            .addMnemonicOverride("mnem", ImmutableList.of("foo"))
             .build();
 
     assertThat(
@@ -227,7 +227,7 @@ public class SpawnStrategyRegistryTest {
         SpawnStrategyRegistry.builder()
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "bar")
-            .addMnemonicFilter("mnem", ImmutableList.of("foo"))
+            .addMnemonicOverride("mnem", ImmutableList.of("foo"))
             .addDescriptionFilter(ELLO_MATCHER, ImmutableList.of("bar"))
             .build();
 
@@ -246,8 +246,8 @@ public class SpawnStrategyRegistryTest {
         SpawnStrategyRegistry.builder()
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "bar")
-            .addMnemonicFilter("mnem", ImmutableList.of("foo"))
-            .addMnemonicFilter("mnem", ImmutableList.of("bar"))
+            .addMnemonicOverride("mnem", ImmutableList.of("foo"))
+            .addMnemonicOverride("mnem", ImmutableList.of("bar"))
             .build();
 
     assertThat(
@@ -330,7 +330,7 @@ public class SpawnStrategyRegistryTest {
             .registerStrategy(strategy1, "foo")
             .registerStrategy(strategy2, "bar")
             .registerStrategy(strategy3, "baz")
-            .addMnemonicFilter("mnem", ImmutableList.of("bar"))
+            .addMnemonicOverride("mnem", ImmutableList.of("bar"))
             .setDefaultStrategies(ImmutableList.of("foo", "baz"))
             .build();
 
@@ -373,7 +373,7 @@ public class SpawnStrategyRegistryTest {
             () ->
                 SpawnStrategyRegistry.builder()
                     .registerStrategy(strategy1, "foo")
-                    .addMnemonicFilter("mnem", ImmutableList.of("bar", "foo"))
+                    .addMnemonicOverride("mnem", ImmutableList.of("bar", "foo"))
                     .build());
 
     assertThat(exception).hasMessageThat().containsMatch("bar.*Valid.*foo");
@@ -586,7 +586,7 @@ public class SpawnStrategyRegistryTest {
             .registerStrategy(strategy6, "6") // no notification: dynamic strategies are separate
             .registerStrategy(strategy8, "8") // no notification: never referenced
             .registerStrategy(strategy9, "9") // no notification: reference overridden
-            .addMnemonicFilter("mnem", ImmutableList.of("1"))
+            .addMnemonicOverride("mnem", ImmutableList.of("1"))
             .addDescriptionFilter(ELLO_MATCHER, ImmutableList.of("2"))
             .setDefaultStrategies(ImmutableList.of("9"))
             .setDefaultStrategies(ImmutableList.of("3"))
@@ -627,7 +627,7 @@ public class SpawnStrategyRegistryTest {
             .registerStrategy(strategy5, "5")
             .registerStrategy(strategy6, "6")
             .registerStrategy(strategy7, "7") // no notification: reference overridden
-            .addMnemonicFilter("mnem", ImmutableList.of("1"))
+            .addMnemonicOverride("mnem", ImmutableList.of("1"))
             .addDescriptionFilter(ELLO_MATCHER, ImmutableList.of("2"))
             .setDefaultStrategies(ImmutableList.of("3"))
             .setRemoteLocalFallbackStrategyIdentifier("4")

@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.analysis.platform.PlatformInfo;
 import com.google.devtools.build.lib.analysis.platform.PlatformValue;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkTransition.TransitionException;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
+import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.packages.RuleTransitionData;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TargetUtils;
@@ -141,10 +142,12 @@ public class RuleTransitionApplier
     ConfiguredTargetKey preRuleTransitionKey = targetAndConfigurationData.getPreRuleTransitionKey();
     var platformOptions =
         preRuleTransitionKey.getConfigurationKey().getOptions().get(PlatformOptions.class);
+    var executionOptions =
+        preRuleTransitionKey.getConfigurationKey().getOptions().get(ExecutionOptions.class);
     if (platformOptions == null) {
       unloadedToolchainContextsInputs = UnloadedToolchainContextsInputs.empty();
     } else {
-      platformConfiguration = new PlatformConfiguration(platformOptions);
+      platformConfiguration = new PlatformConfiguration(platformOptions, executionOptions);
       unloadedToolchainContextsInputs =
           ToolchainContextUtil.getUnloadedToolchainContextsInputs(
               target,

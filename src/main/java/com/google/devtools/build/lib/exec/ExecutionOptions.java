@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.exec;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
+import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
 import com.google.devtools.build.lib.util.CpuResourceConverter;
 import com.google.devtools.build.lib.util.OptionsUtils;
@@ -56,7 +57,7 @@ import java.util.Objects;
  * Ideally, the user would be unaware of the difference.  For now, the usage
  * strings are identical modulo "part 1", "part 2".
  */
-public class ExecutionOptions extends OptionsBase {
+public class ExecutionOptions extends FragmentOptions {
 
   public static final ExecutionOptions DEFAULTS = Options.getDefaults(ExecutionOptions.class);
 
@@ -93,6 +94,9 @@ public class ExecutionOptions extends OptionsBase {
       defaultValue = "null",
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
+      // TODO Shockingly, this lacks a usage example which makes it less obvious this is for
+      //      mnemonic targetted overrides.
+      //      Easy to mix up with --spawn_strategy
       help =
           "Specify how to distribute compilation of other spawn actions. Accepts a comma-separated"
               + " list of strategies from highest to lowest priority. For each action Bazel picks"
@@ -109,18 +113,42 @@ public class ExecutionOptions extends OptionsBase {
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
       defaultValue = "null",
-      help =
-          "Override which spawn strategy should be used to execute spawn actions that have "
-              + "descriptions matching a certain regex_filter. See --per_file_copt for details on"
-              + "regex_filter matching. "
-              + "The last regex_filter that matches the description is used. "
-              + "This option overrides other flags for specifying strategy. "
-              + "Example: --strategy_regexp=//foo.*\\.cc,-//foo/bar=local means to run actions "
-              + "using local strategy if their descriptions match //foo.*.cc but not //foo/bar. "
-              + "Example: --strategy_regexp='Compiling.*/bar=local "
-              + " --strategy_regexp=Compiling=sandboxed will run 'Compiling //foo/bar/baz' with "
-              + "the 'local' strategy, but reversing the order would run it with 'sandboxed'. ")
+      // TODO Document that this works as a filter
+      help = """
+        Override which spawn strategy should be used to execute spawn actions that have \
+        descriptions matching a certain regex_filter. See <code>--per_file_copt</code> for details on \
+        regex_filter matching.
+        The last regex_filter that matches the description is used.
+        This option overrides other flags for specifying strategy.
+        <br>
+        Example: <code>--strategy_regexp=//foo.*\\.cc,-//foo/bar=local</code> means to run actions \
+        using local strategy if their descriptions match <code>//foo.*.cc</code> but not <code>//foo/bar</code>.
+        <br>
+        Example: <code>--strategy_regexp='Compiling.*/bar=local</code> \
+        <code>--strategy_regexp=Compiling=sandboxed</code> will run <code>'Compiling //foo/bar/baz'</code> with
+        the <code>'local'</code> strategy, but reversing the order would run it with <code>'sandboxed'</code>.
+        """)
   public List<Map.Entry<RegexFilter, List<String>>> strategyByRegexp;
+
+  @Option(
+      name = "allowed_strategies_by_exec_platform",
+      allowMultiple = true,
+      converter = Converters.StringToStringListConverter.class,
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help =
+          "")
+  public List<Map.Entry<String, List<String>>> allowedStrategiesByExecPlatform;
+
+  @Option(
+      name = "require_platform_scoped_strategies",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.EXECUTION},
+      help =
+          "")
+  public boolean requirePlatformScopedStrategies;
 
   @Option(
       name = "materialize_param_files",
