@@ -206,4 +206,22 @@ EOF
   true
 }
 
+function test_run_output_json() {
+  mkdir -p foo
+  cat > foo/BUILD <<'EOF'
+sh_binary(
+  name = "exit0",
+  srcs = ["exit0.sh"],
+)
+EOF
+
+  cat > foo/exit0.sh <<'EOF'
+set -x
+exit 0
+EOF
+  chmod +x foo/exit0.sh
+  bazel run --norun --output=json //foo:exit0 &>"$TEST_log"
+  expect_log "bar"
+}
+
 run_suite "run_under_tests"
