@@ -102,12 +102,17 @@ import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingResult;
 import com.google.protobuf.ByteString;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import javax.annotation.Nullable;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 /** Builds and run a target with the given command line arguments. */
 @Command(
@@ -136,6 +141,20 @@ public class RunCommand implements BlazeCommand {
                 + " '%{product} run //foo' in that the %{product} lock is released and the"
                 + " executable is connected to the terminal's stdin.")
     public PathFragment scriptPath;
+
+    // TODO use EnumConverter<?> to get strict type
+    @Option(
+        name = "output",
+        defaultValue = "none",
+        documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+        effectTags = {OptionEffectTag.AFFECTS_OUTPUTS, OptionEffectTag.EXECUTION},
+        help =
+            """
+            The format to print command instructions in. \
+            Allowed values are: none, json \
+            Note that this flag is only works in conjunction with <code>--norun</code>.
+            """)
+    public String output;
 
     @Option(
         name = "emit_script_path_in_exec_request",
@@ -317,28 +336,49 @@ public class RunCommand implements BlazeCommand {
       return e.result;
     }
 
+    // around about here
+
     if (runOptions.scriptPath != null) {
       return handleScriptPath(runOptions, execRequest, runCommandLine, env, builtTargets);
     }
+
+    ExecRequest builtExecRequest = execRequest.build();
+  
     if (runOptions.runBuiltTarget) {
       env.getReporter()
           .handle(Event.info(null, "Running command line: " + runCommandLine.getPrettyArgs()));
     } else {
-      env.getReporter()
-          .handle(Event.info(null, "Runnable command line: " + runCommandLine.getPrettyArgs()));
+      OutputStream out = env.getReporter().getOutErr().getOutputStream();
+      PrintStream printStream = new PrintStream(out);
+      if (runOptions.output == "none") {
+        env.getReporter()
+            .handle(Event.info(null, "Runnable command line: " + runCommandLine.getPrettyArgs()));
+      } else {
+        // TODO there are no string fields, just bytes
+        // - working_directory: string
+        // - argv: string[]
+        // - environment_variable: Record<string, string>
+        // - environment_variable_to_clear: string[]
+        // - script_path: string[]
+        JsonObject json = new JsonObject();
+        json.addProperty("workingDirectory", builtExecRequest.getWorkingDirectory().toStringUtf8());
+        // TODO the rest
+        printStream.println(new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(json));
+        printStream.println();
+      }
     }
 
     try {
       env.getReporter()
           .post(
               new ExecRequestEvent(
-                  execRequest.build(),
+                builtExecRequest,
                   /* redactedArgv= */ options.getOptions(BuildEventProtocolOptions.class)
                           .includeResidueInRunBepEvent
                       ? ImmutableList.copyOf(execRequest.getArgvList())
                       : getArgvWithoutResidue(
                           env, runCommandLine, builtTargets.configuration, builtTargets.stopTime)));
-      return BlazeCommandResult.execute(execRequest.build());
+      return BlazeCommandResult.execute(builtExecRequest);
     } catch (RunCommandException e) {
       return e.result;
     }
