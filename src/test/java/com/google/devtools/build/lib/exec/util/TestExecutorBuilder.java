@@ -132,7 +132,7 @@ public class TestExecutorBuilder {
 
   @CanIgnoreReturnValue
   public TestExecutorBuilder setExecution(String mnemonic, String strategy) {
-    strategyRegistryBuilder.addMnemonicFilter(mnemonic, ImmutableList.of(strategy));
+    strategyRegistryBuilder.addMnemonicOverride(mnemonic, ImmutableList.of(strategy));
     return this;
   }
 
