@@ -348,6 +348,12 @@ public class JavaIoFileSystem extends AbstractFileSystem {
   }
 
   @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    throw new UnsupportedOperationException("copy not implemented");
+  }
+
+  @Override
   public long getFileSize(PathFragment path, boolean followSymlinks) throws IOException {
     long startTime = Profiler.nanoTimeMaybe();
     try {

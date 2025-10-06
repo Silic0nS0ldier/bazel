@@ -783,6 +783,9 @@ public abstract class FileSystem {
     createFSDependentHardLink(linkPath, originalPath);
   }
 
+  public abstract void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException;
+
   /**
    * Create a new hard link file at "linkPath" for file at "originalPath".
    *

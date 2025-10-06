@@ -135,6 +135,7 @@ java_library(
         ":actions/abstract_file_write_action",
         ":actions/buildinfo_file_write_action",
         ":actions/compression",
+        ":actions/copy_action",
         ":actions/custom_command_line",
         ":actions/lazy_write_nested_set_of_tuple_action",
         ":actions/parameter_file_write_action",
@@ -1440,6 +1441,21 @@ java_library(
         "//src/main/protobuf:failure_details_java_proto",
         "//third_party:guava",
         "//third_party:jsr305",
+    ],
+)
+
+java_library(
+    name = "actions/copy_action",
+    srcs = ["actions/CopyAction.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
+        "//src/main/java/com/google/devtools/build/lib/collect/nestedset",
+        "//src/main/java/com/google/devtools/build/lib/util",
+        "//src/main/java/com/google/devtools/build/lib/util:detailed_exit_code",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//src/main/protobuf:failure_details_java_proto",
+        "//third_party:guava",
     ],
 )
 

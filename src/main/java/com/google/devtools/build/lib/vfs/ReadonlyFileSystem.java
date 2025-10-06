@@ -94,6 +94,12 @@ public abstract class ReadonlyFileSystem extends AbstractFileSystem {
   }
 
   @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    throw modificationException();
+  }
+
+  @Override
   public boolean delete(PathFragment path) throws IOException {
     throw modificationException();
   }

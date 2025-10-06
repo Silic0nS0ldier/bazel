@@ -292,6 +292,20 @@ Java_com_google_devtools_build_lib_unix_NativePosixFiles_chmod(JNIEnv *env,
   ReleaseStringLatin1Chars(path_chars);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_devtools_build_lib_unix_NativePosixFiles_reflink(JNIEnv *env,
+                                                   jclass clazz,
+                                                   jstring oldpath,
+                                                   jstring newpath) {
+  const char *oldpath_chars = GetStringLatin1Chars(env, oldpath);
+  const char *newpath_chars = GetStringLatin1Chars(env, newpath);
+  portable_reflink(oldpath_chars, newpath_chars);
+  // TODO figure out how and finish this
+  // on linux, ioctl with FICLONE to create a "reflink"
+  
+  // clonefile and clonefileat for macOS?
+}
+
 static void link_common(JNIEnv *env,
                         jstring oldpath,
                         jstring newpath,

@@ -223,6 +223,12 @@ public abstract class PathTransformingDelegateFileSystem extends FileSystem {
   }
 
   @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    delegateFs.copy(toDelegatePath(targetPath), toDelegatePath(originalPath));
+  }
+
+  @Override
   public void createFSDependentHardLink(PathFragment linkPath, PathFragment originalPath)
       throws IOException {
     delegateFs.createFSDependentHardLink(toDelegatePath(linkPath), toDelegatePath(originalPath));

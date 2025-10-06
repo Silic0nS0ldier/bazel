@@ -613,6 +613,10 @@ public class Path implements Comparable<Path>, FileType.HasFileType {
     fileSystem.createHardLink(link.asFragment(), asFragment());
   }
 
+  public void copyTo(Path target) throws IOException {
+    fileSystem.createHardLink(target.asFragment(), asFragment());
+  }
+
   /**
    * Returns the canonical path for this path, by repeatedly replacing symbolic links with their
    * referents. Analogous to realpath(3).

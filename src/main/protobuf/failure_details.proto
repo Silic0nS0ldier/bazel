@@ -151,6 +151,7 @@ message FailureDetail {
     BuildReport build_report = 184;
     Skyfocus skyfocus = 185;
     RemoteAnalysisCaching remote_analysis_caching = 186;
+    CopyAction copy_action = 189;
   }
 
   reserved 102; // For internal use
@@ -1236,6 +1237,14 @@ message TestAction {
     COMMAND_LINE_EXPANSION_FAILURE = 3 [(metadata) = { exit_code: 1 }];
     DUPLICATE_CPU_TAGS = 4 [(metadata) = { exit_code: 1 }];
     INVALID_CPU_TAG = 5 [(metadata) = { exit_code: 1 }];
+  }
+
+  Code code = 1;
+}
+
+message CopyAction {
+  enum Code {
+    IO_ERROR = 0 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;

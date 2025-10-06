@@ -415,6 +415,12 @@ public class InMemoryFileSystem extends AbstractFileSystem {
   }
 
   @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    throw new UnsupportedOperationException("copy not implemented");
+  }
+
+  @Override
   public boolean isReadable(PathFragment path) throws IOException {
     InMemoryContentInfo status = inodeStat(path, true);
     return status.isReadable();
