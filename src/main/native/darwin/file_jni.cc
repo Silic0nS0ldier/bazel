@@ -106,4 +106,9 @@ ssize_t portable_lgetxattr(const char *path, const char *name, void *value,
   return result;
 }
 
+int portable_reflink(const char *oldpath, const char *newpath) {
+  clonefile(...);
+  return 1;
+}
+
 }  // namespace blaze_jni

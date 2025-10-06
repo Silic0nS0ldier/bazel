@@ -52,6 +52,8 @@ final class NativePosixFiles {
    */
   static native void chmod(String path, int mode) throws IOException;
 
+  static native void reflink(String oldpath, String newpath) throws IOException;
+
   /**
    * Native wrapper around POSIX symlink(2) syscall.
    *

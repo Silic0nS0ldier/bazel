@@ -155,6 +155,11 @@ int portable_cpu_speed() {
   return -1;
 }
 
+int portable_reflink(const char *oldpath, const char *newpath) {
+  // Currently not supported.
+  return -1;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_google_devtools_build_lib_profiler_SystemNetworkStats_getNetIoCountersNative(
     JNIEnv *env, jclass clazz, jobject counters_map) {

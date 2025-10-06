@@ -436,6 +436,17 @@ public class UnixFileSystem extends AbstractFileSystem {
   }
 
   @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    var comp = Blocker.begin();
+    try {
+      NativePosixFiles.copy(originalPath.toString(), targetPath.toString());
+    } finally {
+      Blocker.end(comp);
+    }
+  }
+
+  @Override
   public void deleteTreesBelow(PathFragment dir) throws IOException {
     if (isDirectory(dir, /* followSymlinks= */ false)) {
       long startTime = Profiler.nanoTimeMaybe();

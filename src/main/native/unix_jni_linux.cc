@@ -130,6 +130,12 @@ int portable_cpu_speed() {
   return -1;
 }
 
+int portable_reflink(const char *oldpath, const char *newpath) {
+  int oldpath_fd = open(oldpath, O_RDONLY | PORTABLE_O_DIRECTORY);
+  ioctl(oldpath_fd, FICLONE, newpath);
+  return 1;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_google_devtools_build_lib_profiler_SystemNetworkStats_getNetIoCountersNative(
     JNIEnv *env, jclass clazz, jobject counters_map) {

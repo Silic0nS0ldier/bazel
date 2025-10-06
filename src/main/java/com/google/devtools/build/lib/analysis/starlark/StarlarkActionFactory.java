@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.starlark;
 
+import com.google.devtools.build.lib.analysis.actions.CopyAction;
 import static com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions.EXPERIMENTAL_SIBLING_REPOSITORY_LAYOUT;
 
 import com.google.common.base.Joiner;
@@ -1159,6 +1160,50 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
             ? getRuleContext().getBinDirectory()
             : (ArtifactRoot) artifactRoot;
     return getRuleContext().getShareableArtifact(PathFragment.create(path), root);
+  }
+
+  @Override
+  public void copy(
+      FileApi output,
+      FileApi input,
+      Boolean isExecutable,
+      Object /* String or None */ progressMessageUnchecked)
+      throws EvalException, InterruptedException {
+    context.checkMutable("actions.copy");
+
+    RuleContext ruleContext = getRuleContext();
+
+    String progressMessage =
+        (progressMessageUnchecked != Starlark.NONE)
+            ? (String) progressMessageUnchecked
+            : "Copying %{input} to %{output}";
+    
+    Artifact outputArtifact = (Artifact) output;
+    Artifact inputArtifact = (Artifact) input;
+
+    if (inputArtifact.isDirectory() != outputArtifact.isDirectory()) {
+      String inputType = inputArtifact.isDirectory() ? "directory" : "file";
+      String outputType = outputArtifact.isDirectory() ? "directory" : "file";
+      throw Starlark.errorf(
+          """
+          copy() with "input" %s param requires that "output" be declared as a %s \
+          (did you mean to use declare_%s() instead of declare_%s()?)
+          """,
+          inputType, inputType, inputType, outputType);
+    }
+
+    Action action;
+    if (outputArtifact.isDirectory()) {
+      if (isExecutable) {
+        throw Starlark.errorf("copy() with \"output\" directory param cannot be executable");
+      }
+      action = CopyAction.copyDirectory(
+          ruleContext.getActionOwner(), inputArtifact, outputArtifact, progressMessage);
+    } else {
+      action = CopyAction.copyFile(
+          ruleContext.getActionOwner(), inputArtifact, outputArtifact, isExecutable, progressMessage);
+    }
+    registerAction(action);
   }
 
   @Override

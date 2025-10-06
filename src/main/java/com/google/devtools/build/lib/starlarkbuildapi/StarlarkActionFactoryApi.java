@@ -1175,4 +1175,39 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
       String outputFileName,
       StarlarkThread thread)
       throws InterruptedException, EvalException;
+
+  @StarlarkMethod(
+      name = "copy",
+      documented = false,
+      doc = "Creates a copy action that copies a file to a new location.",
+      parameters = {
+        @Param(
+            name = "output",
+            doc = "The output file.",
+            positional = true,
+            named = true),
+        @Param(
+            name = "input",
+            doc = "The input file.",
+            positional = true,
+            named = true),
+        @Param(
+            name = "is_executable",
+            named = true,
+            positional = false,
+            defaultValue = "False",
+            doc = ""),
+        @Param(
+            name = "progress_message",
+            allowedTypes = {
+              @ParamType(type = String.class),
+              @ParamType(type = NoneType.class),
+            },
+            named = true,
+            positional = false,
+            defaultValue = "None",
+            doc = "Progress message to show to the user during the build."),
+      })
+  void copy(FileApi output, FileApi input, Boolean isExecutable, Object progressMessage)
+      throws EvalException, InterruptedException;
 }

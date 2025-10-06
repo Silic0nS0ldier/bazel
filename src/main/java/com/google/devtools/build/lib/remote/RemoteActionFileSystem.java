@@ -910,6 +910,12 @@ public class RemoteActionFileSystem extends AbstractFileSystem
     localFs.getPath(linkPath).createHardLink(getPath(originalPath));
   }
 
+  @Override
+  public void copy(PathFragment targetPath, PathFragment originalPath)
+      throws IOException {
+    getPath(originalPath).copyTo(localFs.getPath(targetPath));
+  }
+
   public void checkForLostInputs(Action action) throws LostInputsActionExecutionException {
     var mergedException =
         lostInputs.stream()
