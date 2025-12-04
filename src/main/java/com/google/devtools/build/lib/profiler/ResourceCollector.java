@@ -48,9 +48,19 @@ public class ResourceCollector {
 
   private Stopwatch stopwatch;
 
+  private int metricsBatchSize = 0;
+
   @Nullable private Collector collector = null;
 
   public ResourceCollector() {}
+
+  /**
+   * Sets the number of collection intervals to buffer before flushing counters to the profile. A
+   * value of 0 buffers until {@link #stop}.
+   */
+  public void setMetricsBatchSize(int metricsBatchSize) {
+    this.metricsBatchSize = metricsBatchSize;
+  }
 
   public void start() {
     Preconditions.checkState(collector == null);
@@ -81,6 +91,7 @@ public class ResourceCollector {
       }
 
       stopwatch = Stopwatch.createStarted();
+      int currentBatchSize = 0;
       Duration startTime = stopwatch.elapsed();
       Duration previousElapsed = stopwatch.elapsed();
       profilingStarted = true;
@@ -90,6 +101,7 @@ public class ResourceCollector {
         } catch (InterruptedException e) {
           return;
         }
+        currentBatchSize++;
         Duration nextElapsed = stopwatch.elapsed();
         double deltaNanos = nextElapsed.minus(previousElapsed).toNanos();
         Duration finalPreviousElapsed = previousElapsed;
@@ -101,12 +113,19 @@ public class ResourceCollector {
                     addRange(type, startTime, finalPreviousElapsed, nextElapsed, value));
           }
         }
+
+        if (metricsBatchSize > 0 && currentBatchSize >= metricsBatchSize) {
+          // need to join profiler thread
+          logCollectedData();
+          currentBatchSize = 0;
+        }
+
         previousElapsed = nextElapsed;
       }
     }
   }
 
-  public void stop() {
+  public synchronized void stop() {
     if (collector != null) {
       Preconditions.checkArgument(!stopCollection);
       stopCollection = true;
@@ -117,13 +136,11 @@ public class ResourceCollector {
         Thread.currentThread().interrupt();
       }
       logCollectedData();
+      collectors.clear();
       collector = null;
       stopCollection = false;
       profilingStarted = false;
-
-      synchronized (this) {
-        timeSeries = null;
-      }
+      timeSeries = null;
     }
   }
 
@@ -131,7 +148,6 @@ public class ResourceCollector {
     if (!profilingStarted) {
       return;
     }
-    Preconditions.checkArgument(stopCollection);
     long endTimeNanos = System.nanoTime();
     long elapsedNanos = stopwatch.elapsed(TimeUnit.NANOSECONDS);
     long startTimeNanos = endTimeNanos - elapsedNanos;
@@ -145,14 +161,13 @@ public class ResourceCollector {
       ImmutableMap.Builder<CounterSeriesTask, double[]> stackedCounters =
           ImmutableMap.builderWithExpectedSize(taskGroup.size());
       for (var task : taskGroup) {
-        stackedCounters.put(task.getKey(), task.getValue().toDoubleArray(len));
+        var series = task.getValue();
+        stackedCounters.put(task.getKey(), series.toDoubleArray(len));
+        series.clear();
       }
       Profiler.instance()
           .logCounters(stackedCounters.buildOrThrow(), profileStart, BUCKET_DURATION);
     }
-
-    collectors.clear();
-    timeSeries = null;
   }
 
   private void addRange(
