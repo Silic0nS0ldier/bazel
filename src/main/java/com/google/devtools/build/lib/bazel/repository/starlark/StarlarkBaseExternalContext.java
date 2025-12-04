@@ -657,10 +657,14 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
       }
     } catch (IOException e) {
       if (pendingDownload.allowFail) {
+        // include failure reason
         ImmutableMap<String, Object> struct =
             ImmutableMap.of("success", false, "error", e.toString());
         return StarlarkInfo.create(StructProvider.STRUCT, struct);
       } else {
+        // transient download errors are discarded due to retries
+        // these need to be logged
+        // perhaps a "maybe transient" option is needed?
         throw new RepositoryFunctionException(e, Transience.TRANSIENT);
       }
     } catch (InvalidPathException e) {
