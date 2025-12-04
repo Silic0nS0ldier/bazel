@@ -87,6 +87,8 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
   private final boolean collectSkyframeCounts;
   private final SystemNetworkStatsService systemNetworkStatsService;
 
+  private final int metricsBatchSize;
+
   private Collector collector;
 
   public CollectLocalResourceUsage(
@@ -100,6 +102,7 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
       boolean collectResourceManagerEstimation,
       boolean collectPressureStallIndicators,
       boolean collectSkyframeCounts,
+      int metricsBatchSize,
       SystemNetworkStatsService systemNetworkStatsService) {
     this.bugReporter = checkNotNull(bugReporter);
     this.collectWorkerDataInProfiler = collectWorkerDataInProfiler;
@@ -109,6 +112,7 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
     this.collectResourceManagerEstimation = collectResourceManagerEstimation;
     this.resourceEstimator = resourceEstimator;
     this.collectPressureStallIndicators = collectPressureStallIndicators;
+    this.metricsBatchSize = metricsBatchSize;
     this.systemNetworkStatsService = systemNetworkStatsService;
     this.collector = new Collector();
 
@@ -183,6 +187,7 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
       }
 
       stopwatch = Stopwatch.createStarted();
+      int currentBatchSize = 0;
       Duration startTime = stopwatch.elapsed();
       Duration previousElapsed = stopwatch.elapsed();
       profilingStarted = true;
@@ -192,6 +197,7 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
         } catch (InterruptedException e) {
           return;
         }
+        currentBatchSize++;
         Duration nextElapsed = stopwatch.elapsed();
         double deltaNanos = nextElapsed.minus(previousElapsed).toNanos();
         Duration finalPreviousElapsed = previousElapsed;
@@ -203,13 +209,20 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
                     addRange(type, startTime, finalPreviousElapsed, nextElapsed, value));
           }
         }
+
+        if (metricsBatchSize > 0 && currentBatchSize >= metricsBatchSize) {
+          // need to join profiler thread
+          logCollectedData();
+          currentBatchSize = 0;
+        }
+
         previousElapsed = nextElapsed;
       }
     }
   }
 
   @Override
-  public void stop() {
+  public synchronized void stop() {
     if (collector != null) {
       Preconditions.checkArgument(!stopLocalUsageCollection);
       stopLocalUsageCollection = true;
@@ -220,6 +233,8 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
         Thread.currentThread().interrupt();
       }
       logCollectedData();
+      collectors.clear();
+      timeSeries = null;
       collector = null;
     }
   }
@@ -228,7 +243,6 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
     if (!profilingStarted) {
       return;
     }
-    Preconditions.checkArgument(stopLocalUsageCollection);
     long endTimeNanos = System.nanoTime();
     long elapsedNanos = stopwatch.elapsed(TimeUnit.NANOSECONDS);
     long startTimeNanos = endTimeNanos - elapsedNanos;
@@ -242,14 +256,13 @@ public class CollectLocalResourceUsage implements LocalResourceCollector {
       ImmutableMap.Builder<CounterSeriesTask, double[]> stackedCounters =
           ImmutableMap.builderWithExpectedSize(taskGroup.size());
       for (var task : taskGroup) {
-        stackedCounters.put(task.getKey(), task.getValue().toDoubleArray(len));
+        var v = task.getValue();
+        stackedCounters.put(task.getKey(), v.toDoubleArray(len));
+        v.clear();
       }
       Profiler.instance()
           .logCounters(stackedCounters.buildOrThrow(), profileStart, BUCKET_DURATION);
     }
-
-    collectors.clear();
-    timeSeries = null;
   }
 
   private void addRange(

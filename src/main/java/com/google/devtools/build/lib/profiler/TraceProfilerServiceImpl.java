@@ -367,6 +367,7 @@ public final class TraceProfilerServiceImpl implements TraceProfilerService {
     if (!active) {
       return;
     }
+    // could this also be logged as polled?
     collectActionCounts();
     localResourceCollector.stop();
     // Log a final event to update the duration of ProfilePhase.FINISH.

@@ -483,6 +483,7 @@ public final class BlazeRuntime implements BugReport.BlazeRuntimeInterface {
                     commandOptions.collectResourceEstimation,
                     commandOptions.collectPressureStallIndicators,
                     commandOptions.collectSkyframeCounts,
+                    commandOptions.metricsBatchSize,
                     getBlazeService(SystemNetworkStatsService.class)));
         // Instead of logEvent() we're calling the low level function to pass the timings we took in
         // the launcher. We're setting the INIT phase marker so that it follows immediately the

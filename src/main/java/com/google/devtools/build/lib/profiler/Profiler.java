@@ -357,6 +357,9 @@ public final class Profiler implements TraceProfilerService {
     public double[] toDoubleArray(int len) {
       return new double[len];
     }
+
+    @Override
+    public void clear() {}
   }
 
   private static class NoOpAsyncProfiler implements AsyncProfiler {

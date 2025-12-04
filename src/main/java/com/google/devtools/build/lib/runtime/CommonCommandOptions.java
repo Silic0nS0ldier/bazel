@@ -446,6 +446,20 @@ public class CommonCommandOptions extends OptionsBase {
   public boolean collectSkyframeCounts;
 
   @Option(
+      name = "experimental_metrics_batch_size",
+      defaultValue = "0",
+      documentationCategory = OptionDocumentationCategory.LOGGING,
+      effectTags = {OptionEffectTag.BAZEL_MONITORING},
+      help = """
+          Number of data points to collect before writing metrics to the profile. 0 (default) \
+          waits until the end, 1 writes after every data point.
+
+          Lower values reduce data loss in the event of a crash, but may hurt performance.
+      """
+  )
+  public int metricsBatchSize;
+
+  @Option(
       name = "memory_profile",
       defaultValue = "null",
       documentationCategory = OptionDocumentationCategory.LOGGING,

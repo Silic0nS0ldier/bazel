@@ -91,4 +91,9 @@ public class TimeSeriesImpl implements TimeSeries {
   public synchronized double[] toDoubleArray(int len) {
     return Arrays.copyOf(data, len);
   }
+
+  @Override
+  public synchronized void clear() {
+    data = new double[INITIAL_SIZE];
+  }
 }
