@@ -29,4 +29,6 @@ public interface TimeSeries {
   void addRange(Duration rangeStart, Duration rangeEnd, double value);
 
   double[] toDoubleArray(int len);
+
+  void clear();
 }

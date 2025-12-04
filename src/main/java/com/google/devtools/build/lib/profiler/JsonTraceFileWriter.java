@@ -260,6 +260,8 @@ class JsonTraceFileWriter implements Runnable {
         int eventCount = 0;
         TraceData data;
         while ((data = takeData()) != POISON_PILL) {
+          // TODO collectors run on different threads
+          // We need to initiate periodic rejoins to drain them
           Preconditions.checkNotNull(data);
           eventCount++;
 
