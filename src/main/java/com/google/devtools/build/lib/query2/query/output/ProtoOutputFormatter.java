@@ -516,7 +516,7 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
    */
   @Nullable
   @SuppressWarnings("unchecked")
-  private static Object getFlattenedAttributeValues(Type<?> attrType, Rule rule, Attribute attr) {
+  private static Object getFlattenedAttributeValues(Type<?> attrType, Rule rule, Attribute attr) {// TODO
     boolean treatMultipleAsNone = SCALAR_TYPES.contains(attrType);
     Iterable<Object> possibleValues =
         PossibleAttributeValues.forRuleAndAttribute(rule, attr, treatMultipleAsNone);

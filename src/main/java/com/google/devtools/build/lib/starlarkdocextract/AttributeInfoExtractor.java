@@ -108,7 +108,7 @@ public final class AttributeInfoExtractor {
     }
   }
 
-  static AttributeType getAttributeType(
+  static AttributeType getAttributeType(// TODO
       ExtractorContext context, Type<?> type, String attributePublicName) {
     if (type.equals(Type.INTEGER)) {
       return AttributeType.INT;
