@@ -4999,4 +4999,46 @@ public final class StarlarkRuleContextTest extends BuildViewTestCase {
     // Dependencies output path should have `-opt` after the transition.
     ((Iterable<?>) result).forEach(s -> assertThat(s.toString()).contains("-opt/"));
   }
+
+  @Test
+  public void testDataAttributePreservesInput() throws Exception {
+    scratch.file(
+        "my_rule.bzl",
+        """
+        def _impl(ctx):
+            return
+        my_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "data": attr.data(),
+            }
+        )
+        """);
+
+    scratch.file(
+        "BUILD",
+        """
+        load('//:my_rule.bzl', 'my_rule')
+        my_rule(
+            name = "r",
+            data = [
+                "foo",
+                {
+                    "key1": "value",
+                    "key2": [1, 2, 3],
+                }
+            ],
+        )
+        """);
+
+    invalidatePackages();
+    setRuleContext(createRuleContext("//:r"));
+    Object actual = ev.eval("ruleContext.attr.data");
+    Object expected = ev.eval(
+        """
+        ["foo", {"key1": "value", "key2": [1, 2, 3]}]
+        """);
+
+    assertThat(actual).isEqualTo(expected);
+  }
 }

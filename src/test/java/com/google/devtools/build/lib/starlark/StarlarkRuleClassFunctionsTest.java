@@ -709,6 +709,13 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   }
 
   @Test
+  public void testDataAttr() throws Exception {
+    Attribute attr = buildAttribute("a1", "attr.data()");
+    assertThat(attr.starlarkDefined()).isTrue();
+    assertThat(attr.getType()).isEqualTo(Types.DATA);
+  }
+
+  @Test
   public void testAttrAllowedFileTypesAnyFile() throws Exception {
     Attribute attr = buildAttribute("a1", "attr.label_list(allow_files = True)");
     assertThat(attr.starlarkDefined()).isTrue();
@@ -1641,7 +1648,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         ev,
         "attr.label(default=f)",
         "attr.label_list(default=f)",
-        "attr.label_keyed_string_dict(default=f)");
+        "attr.label_keyed_string_dict(default=f)");// TODO
     // For all other attribute types, the default value may not be a function.
     //
     // (This is a regression test for github.com/bazelbuild/bazel/issues/9463.

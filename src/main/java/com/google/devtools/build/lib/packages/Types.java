@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.packages;
 import com.google.devtools.build.lib.packages.Type.DictType;
 import com.google.devtools.build.lib.packages.Type.ListType;
 import com.google.devtools.build.lib.packages.Type.SetType;
+import com.google.devtools.build.lib.packages.Type.DataType;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import java.util.List;
 import net.starlark.java.eval.StarlarkInt;
@@ -50,6 +51,9 @@ public final class Types {
   @SerializationConstant
   public static final DictType<String, List<String>> STRING_LIST_DICT =
       DictType.create(Type.STRING, STRING_LIST);
+    
+  @SerializationConstant
+  public static final DataType DATA = new DataType();
 
   private Types() {}
 }

@@ -180,6 +180,7 @@ public class RuleDocumentationAttribute
       case LABEL_LIST_DICT -> BuildType.LABEL_LIST_DICT;
       case OUTPUT -> BuildType.OUTPUT;
       case OUTPUT_LIST -> BuildType.OUTPUT_LIST;
+      case DATA -> Types.DATA;
       default ->
           throw new BuildEncyclopediaDocException(
               location,
