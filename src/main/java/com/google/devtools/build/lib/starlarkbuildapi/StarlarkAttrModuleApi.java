@@ -1331,6 +1331,21 @@ public interface StarlarkAttrModuleApi extends StarlarkValue {
       throws EvalException;
 
   @StarlarkMethod(
+      name = "data",
+      doc = """
+        Creates a schema for a data-only attribute that accepts structured data.
+        Accepts;
+        <ul>
+          <li>All starlark data types except functions; such as <code>list</code>, <code>dict</code>, and <code>string</code>.</li>
+          <li><code>Label</code>s.</li>
+        </ul>
+        """,
+      useStarlarkThread = true)
+  Descriptor dataAttribute(
+      StarlarkThread thread)
+      throws EvalException;
+
+  @StarlarkMethod(
       name = "license",
       doc = "Creates a schema for a license attribute.",
       // TODO(bazel-team): Implement proper license support for Starlark.

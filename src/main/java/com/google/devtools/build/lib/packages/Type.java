@@ -38,9 +38,12 @@ import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.StarlarkInt;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkList;
 import net.starlark.java.eval.StarlarkSet;
+import net.starlark.java.eval.Tuple;
 
 /**
  * Root of Type symbol hierarchy for values in the build language.
@@ -855,6 +858,82 @@ public abstract class Type<T> {
         builder.addAll(set);
       }
       return builder.build();
+    }
+  }
+
+  /**
+   * A complex type representing a subset of Starlark values and built-in symbols.
+   * Essentially, anything without inherent context.
+   */
+  public static class DataType extends Type<Object> {
+    @Override
+    public Object cast(Object value) {
+      return value;
+    }
+
+    @Override
+    public Object getDefaultValue() {
+      return Starlark.NONE;
+    }
+
+    @Override
+    public void visitLabels(LabelVisitor visitor, Object value, @Nullable Attribute context) {
+
+    }
+
+    @Override
+    public String toString() {
+      return "data";
+    }
+
+    private boolean isValidType(Object x) {
+      // None, string, bool, int, float
+      if (x instanceof NoneType
+          || x instanceof String
+          || x instanceof Boolean
+          || x instanceof StarlarkInt
+          || x instanceof StarlarkFloat) {
+        return true;
+      }
+
+      // tuple, list, set
+      if (x instanceof Tuple
+         || x instanceof StarlarkList
+         || x instanceof StarlarkSet) {
+        var iterable = (Iterable<?>) x;
+        for (Object elem : iterable) {
+          if (!isValidType(elem)) {
+            return false;
+          }
+        }
+        return true;
+      }
+      
+      // dict
+      if (x instanceof Dict<?, ?> dict) {
+        for (var entry : dict.entrySet()) {
+          if (!isValidType(entry.getKey()) || !isValidType(entry.getValue())) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      // TODO Allow labels
+
+      return false;
+    }
+
+    @Override
+    public Object convert(Object x, Object what, LabelConverter labelConverter)
+        throws ConversionException {
+      // No conversion necessary, just need to verify value falls within allowed types.
+
+      if (!isValidType(x)) {
+        throw new ConversionException(this, x, what);
+      }
+
+      return x;
     }
   }
 }
