@@ -219,6 +219,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void symlink(Object target, Object linkName, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     StarlarkPath targetPath = getPath(target);
     StarlarkPath linkPath = getPath(linkName);
     WorkspaceRuleEvent w =
@@ -318,6 +321,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       String watchTemplate,
       StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     StarlarkPath p = getPath(path);
     StarlarkPath t = getPath(template);
     Map<String, String> substitutionMap =
@@ -365,6 +371,7 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
     return repoDefinition.repoRule().remotable();
   }
 
+  // TODO look at how this is used --experimental_granular_repository_caching
   @Override
   protected ImmutableMap<String, String> getRemoteExecProperties() throws EvalException {
     return ImmutableMap.copyOf(
@@ -392,6 +399,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public boolean delete(Object pathObject, StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    
     StarlarkPath starlarkPath = externalPath("delete()", pathObject);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newDeleteEvent(
@@ -443,6 +453,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void rename(Object srcName, Object dstName, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+      
     StarlarkPath srcPath = getPath(srcName);
     StarlarkPath dstPath = getPath(dstName);
     WorkspaceRuleEvent w =
@@ -521,6 +534,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void patch(Object patchFile, StarlarkInt stripI, String watchPatch, StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     int strip = Starlark.toInt(stripI, "strip");
     StarlarkPath starlarkPath = getPath(patchFile);
     WorkspaceRuleEvent w =

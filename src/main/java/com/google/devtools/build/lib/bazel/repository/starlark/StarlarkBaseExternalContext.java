@@ -803,6 +803,9 @@ When <code>sha256</code> or <code>integrity</code> is user specified, setting an
       Boolean block,
       StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+    
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     PendingDownload download = null;
     ImmutableMap<URI, Map<String, List<String>>> authHeaders =
         getAuthHeaders(getAuthContents(authUnchecked, "auth"));
@@ -1075,6 +1078,9 @@ Strip the given number of leading components from file paths on extraction. Only
       StarlarkInt stripComponentsI,
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     stripPrefix = renamedStripPrefix("download_and_extract", stripPrefix, oldStripPrefix);
     int stripComponents = Starlark.toInt(stripComponentsI, "strip_components");
     validateStripping("download_and_extract", stripPrefix, stripComponents);
@@ -1348,6 +1354,9 @@ Strip the given number of leading components from file paths on extraction. Only
       String type,
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     stripPrefix = renamedStripPrefix("extract", stripPrefix, oldStripPrefix);
     int stripComponents = Starlark.toInt(stripComponentsI, "strip_components");
     validateStripping("extract", stripPrefix, stripComponents);
@@ -1495,6 +1504,9 @@ Strip the given number of leading components from file paths on extraction. Only
   public void createFile(
       Object path, String content, Boolean executable, Boolean legacyUtf8, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    
     StarlarkPath p = getPath(path);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newFileEvent(
@@ -1954,7 +1966,7 @@ Strip the given number of leading components from file paths on extraction. Only
     return b.toString();
   }
 
-  @StarlarkMethod(
+  @StarlarkMethod(// here
       name = "execute",
       doc =
           """
@@ -2012,6 +2024,10 @@ Strip the given number of leading components from file paths on extraction. Only
       StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
     validateExecuteArguments(arguments);
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    
+
     int timeout = Starlark.toInt(timeoutI, "timeout");
 
     Map<String, Object> forceRepoEnvVariablesRaw =
