@@ -775,6 +775,9 @@ When <code>sha256</code> or <code>integrity</code> is user specified, setting an
       Boolean block,
       StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+    
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     PendingDownload download = null;
     ImmutableMap<URI, Map<String, List<String>>> authHeaders =
         getAuthHeaders(getAuthContents(authUnchecked, "auth"));
@@ -1030,6 +1033,9 @@ the same path on case-insensitive filesystems.
       String oldStripPrefix,
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     stripPrefix = renamedStripPrefix("download_and_extract", stripPrefix, oldStripPrefix);
     ImmutableMap<URI, Map<String, List<String>>> authHeaders =
         getAuthHeaders(getAuthContents(authUnchecked, "auth"));
@@ -1290,6 +1296,9 @@ the same path on case-insensitive filesystems.
       String type,
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
     stripPrefix = renamedStripPrefix("extract", stripPrefix, oldStripPrefix);
     StarlarkPath archivePath = getPath(archive);
 
@@ -1418,6 +1427,9 @@ the same path on case-insensitive filesystems.
   public void createFile(
       Object path, String content, Boolean executable, Boolean legacyUtf8, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    
     StarlarkPath p = getPath(path);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newFileEvent(
@@ -1896,7 +1908,7 @@ the same path on case-insensitive filesystems.
     return b.toString();
   }
 
-  @StarlarkMethod(
+  @StarlarkMethod(// here
       name = "execute",
       doc =
           """
@@ -1954,6 +1966,10 @@ the same path on case-insensitive filesystems.
       StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
     validateExecuteArguments(arguments);
+
+    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    
+
     int timeout = Starlark.toInt(timeoutI, "timeout");
 
     Map<String, Object> forceRepoEnvVariablesRaw =
