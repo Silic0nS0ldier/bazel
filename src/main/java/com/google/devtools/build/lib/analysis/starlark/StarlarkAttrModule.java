@@ -1169,6 +1169,19 @@ public final class StarlarkAttrModule implements StarlarkAttrModuleApi {
   }
 
   @Override
+  public Descriptor dataAttribute(
+      StarlarkThread thread)
+      throws EvalException {
+    checkContext(thread, "attr.data()");
+    return createAttrDescriptor(
+        "data",
+        Optional.empty(),
+        optionMap(),
+        Types.DATA,
+        thread);
+  }
+
+  @Override
   public Descriptor licenseAttribute(
       Object defaultValue, Object doc, Boolean mandatory, StarlarkThread thread)
       throws EvalException {

@@ -3025,7 +3025,7 @@ public class ModuleExtensionResolutionTest extends BuildViewTestCase {
   }
 
   @Test
-  public void extensionRepoMapping() throws Exception {
+  public void extensionRepoMapping() throws Exception {// TODO
     scratch.overwriteFile(
         "MODULE.bazel",
         """

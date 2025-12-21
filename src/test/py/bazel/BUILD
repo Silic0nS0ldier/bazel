@@ -51,6 +51,13 @@ py_test(
 )
 
 py_test(
+    name = "attributes_test",
+    size = "medium",
+    srcs = ["attributes_test.py"],
+    deps = [":test_base"],
+)
+
+py_test(
     name = "cc_import_test",
     size = "large",
     srcs = ["cc_import_test.py"],
