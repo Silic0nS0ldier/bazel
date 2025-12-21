@@ -97,6 +97,40 @@ public class RepositoryOptions extends OptionsBase {
   public Duration repoContentsCacheGcIdleDelay;
 
   @Option(
+      name = "experimental_granular_repository_caching",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
+      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      help =
+          """
+          Enables a more granular caching strategy for repository contents that is compatible with
+          remote caching setups where AC entries are only allowed from remotely executed actions.
+
+          When enabled, <code>repository_ctx</code> operations become synonmous with rule actions.
+          That is, operations like <code>execute</code> act more like <code>ctx.actions.run</code>
+          meaning they can be persisted in the action cache and executed remotely.
+
+          Note that repository rules with <code>local = True</code> will have their
+          <code>execute</code> operations still run locally and not participate in caching.
+
+          Note that <code>execute</code> operations that run outside of the repository (
+          e.g. absolute path or relative path outside of the repository) are excempt.
+          TODO Should this behaviour be made to require `local = True`?
+
+          Downloads without an integrity hash are likewise exempt.
+
+          The following operations are currently supported:
+          <ul>
+            <li><code>ctx.execute</code></li>
+            <li><code>ctx.download</code></li>
+            <li><code>ctx.download_and_extract</code></li>
+            <li><code>ctx.read</code></li>
+            <li><code>ctx.write</code></li>
+          </ul>
+          """)
+  public boolean useGranularRepositoryCaching;
+
+  @Option(
       name = "registry",
       defaultValue = "null",
       allowMultiple = true,
