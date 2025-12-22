@@ -109,7 +109,8 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
       Set<TestSummary> summaries,
       boolean showAllTests,
       boolean showNoStatusTests,
-      boolean showAllTestCases) {
+      boolean showAllTestCases,
+      boolean showCachedTests) {
     boolean withConfig = duplicateLabels(summaries);
     int numFailedToBuildReported = 0;
     for (TestSummary summary : summaries) {
@@ -127,6 +128,11 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
           continue;
         }
       }
+
+      if (!showCachedTests && summary.getStatus() == BlazeTestStatus.PASSED && !summary.actionRan()) {
+        continue;
+      }
+
       TestSummaryPrinter.print(
           summary,
           printer,
@@ -194,7 +200,7 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
       }
 
       stats.totalTestCases += summary.getTotalTestCases();
-      stats.totalUnknownTestCases += summary.getUnkownTestCases();
+      stats.totalUnknownTestCases += summary.getUnknownTestCases();
       stats.totalFailedTestCases += summary.getFailedTestCases().size();
       stats.totalSkippedTestCases += summary.getSkippedTestCases().size();
     }
@@ -208,7 +214,17 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
             summaries,
             /* showAllTests= */ true,
             /* showNoStatusTests= */ true,
-            /* showAllTestCases= */ true);
+            /* showAllTestCases= */ true,
+            /* showCachedTests= */ true);
+        break;
+
+      case DETAILED_UNCACHED:
+        printSummary(
+            summaries,
+            /* showAllTests= */ true,
+            /* showNoStatusTests= */ true,
+            /* showAllTestCases= */ true,
+            /* showCachedTests= */ false);
         break;
 
       case SHORT:
@@ -216,7 +232,17 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
             summaries,
             /* showAllTests= */ true,
             /* showNoStatusTests= */ false,
-            /* showAllTestCases= */ false);
+            /* showAllTestCases= */ false,
+            /* showCachedTests= */ true);
+        break;
+
+      case SHORT_UNCACHED:
+        printSummary(
+            summaries,
+            /* showAllTests= */ true,
+            /* showNoStatusTests= */ false,
+            /* showAllTestCases= */ false,
+            /* showCachedTests= */ false);
         break;
 
       case TERSE:
@@ -224,7 +250,8 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
             summaries,
             /* showAllTests= */ false,
             /* showNoStatusTests= */ false,
-            /* showAllTestCases= */ false);
+            /* showAllTestCases= */ false,
+            /* showCachedTests= */ false);
         break;
 
       case TESTCASE:
@@ -265,7 +292,7 @@ public class TerminalTestResultNotifier implements TestResultNotifier {
 
   private void printStats(TestResultStats stats) {
     TestSummaryFormat testSummaryFormat = options.getOptions(ExecutionOptions.class).testSummary;
-    if (testSummaryFormat == DETAILED || testSummaryFormat == TESTCASE) {
+    if (testSummaryFormat == DETAILED || testSummaryFormat == ExecutionOptions.TestSummaryFormat.DETAILED_UNCACHED || testSummaryFormat == TESTCASE) {
       int passCount =
           stats.totalTestCases
               - stats.totalFailedTestCases
