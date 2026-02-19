@@ -550,6 +550,29 @@ public final class RemoteOptions extends CommonRemoteOptions {
   public Void remoteOutputsAll;
 
   @Option(
+      name = "remote_download_stdouterr",
+      defaultValue = "all",
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = {OptionEffectTag.AFFECTS_OUTPUTS},
+      converter = RemoteOutErrModeConverter.class,
+      help =
+          """
+          Controls downloading of stdout and stderr for non-test remote actions.
+
+          - `failed`: Only download if the action failed.
+          - `uncached`: Only download if the action was not cached.
+          - `all`: The default, always download.
+          """
+  )
+  public RemoteOutErrMode remoteOutErrMode;
+
+  public static class RemoteOutErrModeConverter extends EnumConverter<RemoteOutErrMode> {
+    public RemoteOutErrModeConverter() {
+      super(RemoteOutErrMode.class, "remote stdout/stderr download mode");
+    }
+  }
+
+  @Option(
       name = "remote_result_cache_priority",
       defaultValue = "0",
       documentationCategory = OptionDocumentationCategory.REMOTE,
