@@ -1175,6 +1175,137 @@ validation_outputs_test = analysistest.make(_validation_outputs_test_impl)
 Running validation actions is controlled by the `--run_validations` command line
 flag, which defaults to true.
 
+## Rule extensibility {:#rule_extensibility}
+
+Several mechanisms for sharing logic and extending rules beyond
+what a single `rule()` definition offers.
+
+### Subrules {:#subrules}
+
+A *subrule* encapsulates a reusable piece of rule implementation logic —
+typically a set of actions that depend on private tools or files — so it can be
+shared across multiple rules and aspects without repeating attribute declarations
+or implementation code.
+
+#### Defining a subrule
+
+Use the [`subrule`](/rules/lib/globals/bzl#subrule) function in a `.bzl` file.
+A subrule has an `implementation` function and an optional `attrs` dictionary
+(label-typed attributes only, all private). It must be assigned to a global
+variable before it can be used:
+
+```python
+def _compile_impl(ctx, _compiler):
+    output = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.run(
+        executable = _compiler,
+        inputs = [],
+        outputs = [output],
+    )
+    return output
+
+_compile = subrule(
+    implementation = _compile_impl,
+    attrs = {
+        "_compiler": attr.label(
+            default = "//tools:compiler",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
+```
+
+#### Using a subrule from a rule or aspect
+
+Any rule or aspect that calls a subrule must declare it in its `subrules`
+parameter. The subrule's private attributes are automatically lifted onto the
+declaring rule or aspect and are invisible to its users:
+
+```python
+def _my_rule_impl(ctx):
+    out = _compile()
+    return [DefaultInfo(files = depset([out]))]
+
+my_rule = rule(
+    implementation = _my_rule_impl,
+    subrules = [_compile],
+)
+```
+
+The same applies to aspects:
+
+```python
+_my_aspect = aspect(
+    implementation = _my_aspect_impl,
+    subrules = [_compile],
+)
+```
+
+#### Composing subrules
+
+A subrule can depend on other subrules by listing them in its own `subrules`
+parameter. The transitive closure of subrule dependencies is collected
+automatically; only the top-level subrule needs to be declared in the consuming
+rule or aspect:
+
+```python
+_link = subrule(
+    implementation = _link_impl,
+    subrules = [_compile],  # _compile's attrs are lifted automatically
+)
+
+my_rule = rule(
+    implementation = _my_rule_impl,
+    subrules = [_link],  # no need to also list _compile
+)
+```
+
+### Rule inheritance {:#rule_inheritance}
+
+A rule can extend another rule using the `parent` parameter of
+[`rule`](/rules/lib/globals/bzl#rule). The child rule inherits the parent's public
+attributes and advertised providers. `executable` and `test` are matched from the
+parent. `fragments`, `toolchains`, `exec_compatible_with`, and `exec_groups` are
+merged between parent and child.
+
+```python
+# parent.bzl
+def _parent_impl(ctx):
+    ...
+
+parent_rule = rule(
+    implementation = _parent_impl,
+    extendable = True,
+    attrs = { "_tool": attr.label(default = "//tools:tool") },
+)
+```
+
+```python
+# child.bzl
+load(":parent.bzl", "parent_rule")
+
+def _child_impl(ctx):
+    providers = ctx.super()  # runs the parent implementation
+    # additional child logic here
+    ...
+
+child_rule = rule(
+    implementation = _child_impl,
+    parent = parent_rule,
+)
+```
+
+`ctx.super()` invokes the parent rule's implementation function and returns its
+providers. It may be called at most once per implementation function.
+
+A parent rule can control whether it may be extended via the `extendable`
+parameter: `True` (always extendable, the default), `False` (never extendable),
+or a label pointing to an allowlist of packages permitted to extend it.
+
+Note that subrules are *not* inherited: a child rule that wants to call a subrule
+used by the parent must redeclare it in its own `subrules` parameter.
+
 ## Deprecated features
 
 ### Deprecated predeclared outputs

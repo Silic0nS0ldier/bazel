@@ -727,14 +727,27 @@ declared.
             defaultValue = "None",
             positional = false,
             doc =
-                "Experimental: the Stalark rule that is extended. When set the public"
-                    + " attributes are merged as well as advertised providers. The rule matches"
-                    + " <code>executable</code> and <code>test</code> from the parent. Values of"
-                    + " <code>fragments</code>, <code>toolchains</code>,"
-                    + " <code>exec_compatible_with</code>, and <code>exec_groups</code> are"
-                    + " merged. Legacy or deprecated parameters may not be set. Incoming "
-                    + "configuration transition <code>cfg</code> of parent is applied after this"
-                    + "rule's incoming configuration."),
+                """
+                Experimental: A Starlark rule to extend. When set:
+                <ul>
+                <li>Public attributes declared on the parent are merged and accessible.</li>TODO what if there are conflicts?
+                <li>Providers advertised by the parent (<code>providers = [...]</code>) must be returned.</li>
+                <li><code>fragments</code>, <code>toolchains</code> and <code>exec_groups</code> are
+                merged and accessible.</li>TODO is this true?
+                <li>Execution platform constraints from the parent (<code>exec_compatible_with</code>
+                on <code>rule</code> and <code>exec_group</code>) are applied.</li>
+                <li>The incoming configuration transition (<code>cfg</code>) from the parent is applied
+                after the child rule's own incoming configuration transition.</li>
+                </ul>
+                <p><code>executable</code> and <code>test</code> must be the same as the parent rule.</p>
+                <p>The child rule's implementation can call <a href="../builtins/ctx.html#super">
+                <code>ctx.super()</code></a> to invoke the parent's implementation function and obtain
+                its providers. Note that the return value is a list of providers (not <code>Target</code>),
+                specific provider types cannot be accessed using index notation.</p>
+                <p>Legacy or deprecated <code>rule()</code> parameters may not be set on a child rule.
+                <p>See <a href="https://bazel.build/extending/rules#rule_inheritance">Rule
+                inheritance</a> for usage documentation.</p>
+                """),
         @Param(
             name = "extendable",
             named = true,
@@ -747,9 +760,17 @@ declared.
               @ParamType(type = NoneType.class),
             },
             doc =
-                "Experimental: A label of an allowlist defining which rules can extending this"
-                    + " rule. It can be set also to True/False to always allow/disallow extending."
-                    + " Bazel defaults to always allowing extensions."),
+                """
+                Experimental: Controls which other rules may extend this rule via the
+                <code>parent</code> parameter.
+                <ul>
+                  <li><code>True</code>: any rule may extend this one (the default).</li>
+                  <li><code>False</code>: this rule may not be extended.</li>
+                  <li>A label string or <code>Label</code>: points to a package-group or
+                      allowlist target; only rules in listed packages may extend this
+                      rule.</li>
+                </ul>
+                """),
         @Param(
             name = "subrules",
             allowedTypes = {
@@ -758,7 +779,11 @@ declared.
             named = true,
             defaultValue = "[]",
             positional = false,
-            doc = "Experimental: List of subrules used by this rule."),
+            doc =
+                """
+                Experimental: List of subrules used by this rule.
+                <p>See <a href="https://bazel.build/extending/rules#subrules">Subrules</a> for usage documentation.</p>
+                """),
       },
       useStarlarkThread = true)
   StarlarkCallable rule(
@@ -1084,12 +1109,31 @@ declared.
   @StarlarkMethod(
       name = "subrule",
       doc =
-          "Constructs a new instance of a subrule. The result of this function must be stored in "
-              + "a global variable before it can be used.",
+          """
+          Creates a new subrule. Subrules are a mechanism for sharing common implementation logic
+          between rules and aspects. A subrule encapsulates a piece of rule implementation
+          — typically actions that rely on private (implicit) tool or file dependencies —
+          that can be reused across multiple rules without duplicating attribute declarations.
+          <p>Rules and aspects that use a subrule must declare it in their
+          <code>subrules</code> parameter. The subrule's private attributes are
+          automatically lifted to the declaring rule or aspect, becoming invisible to
+          users of that rule.
+          <p>The result of this function must be assigned to a global variable in a .bzl
+          file before it can be called.
+          <p>See the
+          <a href="https://bazel.build/extending/rules#subrules">Rules page</a>
+          for usage documentation and examples.
+          """,
       parameters = {
         @Param(
             name = "implementation",
-            doc = "The Starlark function implementing this subrule",
+            doc =
+                """
+                The Starlark function implementing this subrule. It must accept a
+                <a href="../builtins/subrule_ctx.html">subrule_ctx</a> as its first
+                positional argument, followed by named parameters corresponding to each
+                entry in <code>attrs</code>.
+                """,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = StarlarkFunction.class)}),

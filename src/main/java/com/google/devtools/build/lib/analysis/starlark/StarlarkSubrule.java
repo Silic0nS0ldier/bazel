@@ -325,7 +325,16 @@ public class StarlarkSubrule implements StarlarkExportable, StarlarkCallable, St
   @StarlarkBuiltin(
       name = "subrule_ctx",
       category = DocCategory.BUILTIN,
-      doc = "A context object passed to the implementation function of a subrule.")
+      doc =
+          """
+          A context object passed to the implementation function of a subrule. It provides a
+          restricted API compared to the full rule context
+          (<a href="ctx.html">ctx</a>), with access only to the fields needed to
+          declare actions, access toolchains, read configuration fragments, and inspect
+          the label of the target being analyzed.
+          <p>The <code>subrule_ctx</code> is valid only during the execution of the
+          subrule's implementation function and cannot be used outside of it.
+          """)
   static class SubruleContext implements StarlarkActionContext {
     // these fields are effectively final, set to null once this instance is no longer usable by
     // Starlark
@@ -376,7 +385,14 @@ public class StarlarkSubrule implements StarlarkExportable, StarlarkCallable, St
 
     @StarlarkMethod(
         name = "toolchains",
-        doc = "Contains methods for declaring output files and the actions that produce them",
+        doc =
+            """
+            Provides access to the toolchains declared by this subrule. Only toolchains listed
+            in the <code>toolchains</code> parameter of the
+            <a href="../globals/bzl.html#subrule">subrule()</a> declaration are
+            accessible. Requires that the consuming rule has automatic exec-groups (AEGs)
+            enabled.
+            """,
         structField = true)
     public ToolchainContextApi toolchains() throws EvalException {
       checkMutable("toolchains");
