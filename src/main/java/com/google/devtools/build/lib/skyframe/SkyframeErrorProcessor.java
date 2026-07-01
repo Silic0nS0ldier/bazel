@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.skyframe.ActionArtifactCycleReporter.ACTION_OR_ARTIFACT_OR_TRANSITIVE_RDEP;
 import static java.util.Objects.requireNonNull;
 
@@ -599,14 +599,14 @@ public final class SkyframeErrorProcessor {
       AnalysisFailedCause analysisFailedCause =
           new AnalysisFailedCause(
               topLevelLabel,
-              configurationIdMessage(ctKey.getConfigurationKey()),
+              configurationChecksum(ctKey.getConfigurationKey()),
               ((NoSuchThingException) exception).getDetailedExitCode());
       analysisRootCauses = NestedSetBuilder.create(Order.STABLE_ORDER, analysisFailedCause);
     } else if (exception instanceof ExternalDepsException externalDepsException) {
       AnalysisFailedCause analysisFailedCause =
           new AnalysisFailedCause(
               topLevelLabel,
-              configurationIdMessage(ctKey.getConfigurationKey()),
+              configurationChecksum(ctKey.getConfigurationKey()),
               externalDepsException.getDetailedExitCode());
       analysisRootCauses = NestedSetBuilder.create(Order.STABLE_ORDER, analysisFailedCause);
     } else if (exception instanceof TargetCompatibilityCheckException) {

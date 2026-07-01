@@ -14,8 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.analysis.producers.TargetAndConfigurationProducer.createDetailedExitCode;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -396,7 +395,7 @@ public final class DependencyResolver {
         throw new ReportedException(
             new ConfiguredValueCreationException(
                 targetAndConfiguration.getTarget(),
-                configurationId(targetAndConfiguration.getConfiguration()),
+                configurationChecksum(targetAndConfiguration.getConfiguration()),
                 "Cannot compute config conditions",
                 causes,
                 getPrioritizedDetailedExitCode(causes)));
@@ -453,7 +452,7 @@ public final class DependencyResolver {
         throw new UnreportedException(
             new ConfiguredValueCreationException(
                 targetAndConfiguration.getTarget(),
-                configurationId(targetAndConfiguration.getConfiguration()),
+                configurationChecksum(targetAndConfiguration.getConfiguration()),
                 "Analysis failed",
                 causes,
                 getPrioritizedDetailedExitCode(causes)));
@@ -582,7 +581,7 @@ public final class DependencyResolver {
                 ? cvce
                 : new ConfiguredValueCreationException(
                     targetAndConfiguration.getTarget(),
-                    configurationId(targetAndConfiguration.getConfiguration()),
+                    configurationChecksum(targetAndConfiguration.getConfiguration()),
                     errorMessage,
                     null,
                     e.getDetailedExitCode()));
@@ -602,7 +601,7 @@ public final class DependencyResolver {
         yield new ReportedException(
             new ConfiguredValueCreationException(
                 targetAndConfiguration.getTarget(),
-                configurationId(targetAndConfiguration.getConfiguration()),
+                configurationChecksum(targetAndConfiguration.getConfiguration()),
                 e.getMessage(),
                 e.getCauses(),
                 e.getDetailedExitCode()));
@@ -621,7 +620,7 @@ public final class DependencyResolver {
         yield new ReportedException(
             new ConfiguredValueCreationException(
                 targetAndConfiguration.getTarget(),
-                configurationId(targetAndConfiguration.getConfiguration()),
+                configurationChecksum(targetAndConfiguration.getConfiguration()),
                 e.getMessage(),
                 /* rootCauses= */ null,
                 /* detailedExitCode= */ null));
@@ -631,7 +630,7 @@ public final class DependencyResolver {
         yield new ReportedException(
             new ConfiguredValueCreationException(
                 targetAndConfiguration.getTarget(),
-                configurationId(targetAndConfiguration.getConfiguration()),
+                configurationChecksum(targetAndConfiguration.getConfiguration()),
                 e.getMessage(),
                 /* rootCauses= */ null,
                 /* detailedExitCode= */ null));
@@ -892,14 +891,14 @@ public final class DependencyResolver {
     Cause cause =
         new AnalysisFailedCause(
             targetAndConfiguration.getLabel(),
-            configurationIdMessage(targetAndConfiguration.getConfiguration()),
+            configurationChecksum(targetAndConfiguration.getConfiguration()),
             createDetailedExitCode(message));
     return new DependencyEvaluationException(
         new ConfiguredValueCreationException(
             location,
             message,
             label,
-            configurationId(configuration),
+            configurationChecksum(configuration),
             NestedSetBuilder.create(Order.STABLE_ORDER, cause),
             cause.getDetailedExitCode()),
         // These errors occur in dependency resolution, which is attached to the current target.

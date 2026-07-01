@@ -321,7 +321,7 @@ final class PrerequisitesProducer
                 parameters.location(),
                 error.getMessage(),
                 parameters.label(),
-                parameters.eventId(),
+                parameters.configurationChecksum(),
                 /* rootCauses= */ null,
                 /* detailedExitCode= */ null),
             /* depReportedOwnError= */ false));

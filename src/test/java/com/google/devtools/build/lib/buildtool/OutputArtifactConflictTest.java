@@ -67,7 +67,7 @@ public class OutputArtifactConflictTest extends BuildIntegrationTestCase {
 
     @Subscribe
     public void onAnalysisFailure(AnalysisFailureEvent event) {
-      eventIds.add(event.getEventId().getTargetCompleted());
+      eventIds.add(event.getEventId().toProto().getTargetCompleted());
       analysisFailures.add(event.getFailedTarget().getLabel().toString());
     }
   }

@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.buildeventstream;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import java.util.Collection;
 
 /**
@@ -24,30 +23,30 @@ import java.util.Collection;
  * the common infrastructure for the infrastructural events.
  */
 public class GenericBuildEvent implements BuildEvent {
-  private final BuildEventId id;
-  private final Collection<BuildEventId> children;
+  private final BuildEventIdRepr id;
+  private final Collection<BuildEventIdRepr> children;
 
-  public GenericBuildEvent(BuildEventId id, Collection<BuildEventId> children) {
+  public GenericBuildEvent(BuildEventIdRepr id, Collection<BuildEventIdRepr> children) {
     this.id = id;
     this.children = children;
   }
 
   @Override
-  public BuildEventId getEventId() {
+  public BuildEventIdRepr getEventId() {
     return id;
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return children;
   }
 
   public static BuildEventStreamProtos.BuildEvent.Builder protoChaining(ChainableEvent event) {
     BuildEventStreamProtos.BuildEvent.Builder builder =
         BuildEventStreamProtos.BuildEvent.newBuilder();
-    builder.setId(event.getEventId());
-    for (BuildEventId childId : event.getChildrenEvents()) {
-      builder.addChildren(childId);
+    builder.setId(event.getEventId().toProto());
+    for (BuildEventIdRepr childId : event.getChildrenEvents()) {
+      builder.addChildren(childId.toProto());
     }
     return builder;
   }

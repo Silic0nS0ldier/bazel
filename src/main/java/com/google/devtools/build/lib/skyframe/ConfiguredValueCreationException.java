@@ -14,8 +14,6 @@
 package com.google.devtools.build.lib.skyframe;
 
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -37,7 +35,7 @@ import net.starlark.java.syntax.Location;
 public final class ConfiguredValueCreationException extends AbstractSaneAnalysisException {
 
   @Nullable private final Location location;
-  private final BuildEventId configuration;
+  private final String configuration;
   private final NestedSet<Cause> rootCauses;
   // TODO(b/138456686): if warranted by a need for finer-grained details, replace the constructors
   //  that specify the general Code.CONFIGURED_VALUE_CREATION_FAILED
@@ -47,7 +45,7 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
       @Nullable Location location,
       String message,
       Label label,
-      BuildEventId configuration,
+      String configuration,
       @Nullable NestedSet<Cause> rootCauses,
       @Nullable DetailedExitCode detailedExitCode) {
     super(message);
@@ -65,7 +63,7 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
 
   public ConfiguredValueCreationException(
       @Nullable Target target,
-      @Nullable BuildEventId configuration,
+      @Nullable String configuration,
       String message,
       @Nullable NestedSet<Cause> rootCauses,
       @Nullable DetailedExitCode detailedExitCode) {
@@ -97,7 +95,7 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
   }
 
   @Nullable
-  public BuildEventId getConfiguration() {
+  public String getConfiguration() {
     return configuration;
   }
 
@@ -115,12 +113,8 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
   }
 
   private static AnalysisFailedCause createRootCause(
-      Label label, BuildEventId configuration, DetailedExitCode detailedExitCode) {
+      Label label, String configuration, DetailedExitCode detailedExitCode) {
     return new AnalysisFailedCause(
-        label,
-        configuration == null
-            ? ConfigurationId.newBuilder().setId("none").build()
-            : configuration.getConfiguration(),
-        detailedExitCode);
+        label, configuration == null ? "none" : configuration, detailedExitCode);
   }
 }

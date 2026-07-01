@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.skyframe.ConflictCheckingMode.NONE;
 import static com.google.devtools.build.lib.skyframe.ConflictCheckingMode.UPON_CONFIGURED_OBJECT_CREATION;
 import static com.google.devtools.build.lib.skyframe.ConflictCheckingMode.WITH_TRAVERSAL;
@@ -1251,7 +1251,7 @@ public final class SkyframeBuildView {
           ((ConfiguredTargetKey) ace.getArtifact().getArtifactOwner()).getConfigurationKey();
     }
     return new AnalysisFailedCause(
-        causeLabel, configurationIdMessage(causeConfigKey), detailedExitCode);
+        causeLabel, configurationChecksum(causeConfigKey), detailedExitCode);
   }
 
   private boolean shouldCheckForConflicts(

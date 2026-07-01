@@ -21,10 +21,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -53,7 +51,7 @@ public final class AnalysisRootCauseEvent implements BuildEventWithConfiguration
    */
   @Nullable private final Optional<BuildConfigurationValue> configuration;
 
-  private final ConfigurationId configurationId;
+  private final String configurationId;
   private final Label label;
   private final String errorMessage;
 
@@ -61,20 +59,20 @@ public final class AnalysisRootCauseEvent implements BuildEventWithConfiguration
       @Nullable BuildConfigurationValue configuration, Label label, String errorMessage) {
     return new AnalysisRootCauseEvent(
         Optional.ofNullable(configuration),
-        BuildConfigurationValue.configurationIdMessage(configuration),
+        BuildConfigurationValue.configurationChecksum(configuration),
         label,
         errorMessage);
   }
 
   public static AnalysisRootCauseEvent withUnavailableConfiguration(
-      ConfigurationId configurationId, Label label, String errorMessage) {
+      String configurationId, Label label, String errorMessage) {
     return new AnalysisRootCauseEvent(
         /* configuration= */ null, configurationId, label, errorMessage);
   }
 
   private AnalysisRootCauseEvent(
       @Nullable Optional<BuildConfigurationValue> configuration,
-      ConfigurationId configurationId,
+      String configurationId,
       Label label,
       String errorMessage) {
     this.configuration = configuration;
@@ -89,13 +87,13 @@ public final class AnalysisRootCauseEvent implements BuildEventWithConfiguration
   }
 
   @Override
-  public BuildEventId getEventId() {
-    // This needs to match AnalysisFailedCause.getIdProto.
-    return BuildEventIdUtil.configuredLabelId(label, configurationId);
+  public BuildEventIdRepr getEventId() {
+    // This needs to match AnalysisFailedCause.getId.
+    return new BuildEventIdRepr.ConfiguredLabelId(label, configurationId);
   }
 
   @Override
-  public ImmutableList<BuildEventId> getChildrenEvents() {
+  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 

@@ -1073,7 +1073,7 @@ public final class ActionsTestUtil {
   public static void ensureMemoizedIsInitializedIsSet(ActionAnalysisMetadata action) {
     BuildConfigurationEvent buildConfigurationEvent =
         action.getOwner().getBuildConfigurationEvent();
-    assertThat(buildConfigurationEvent.getEventId().isInitialized()).isTrue();
+    assertThat(buildConfigurationEvent.getEventId().toProto().isInitialized()).isTrue();
     assertThat(buildConfigurationEvent.asStreamProto(/* unusedConverters= */ null).isInitialized())
         .isTrue();
   }
