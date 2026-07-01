@@ -42,8 +42,7 @@ import com.google.devtools.build.lib.analysis.util.TestAspects.AspectInfo;
 import com.google.devtools.build.lib.analysis.util.TestAspects.DummyRuleFactory;
 import com.google.devtools.build.lib.analysis.util.TestAspects.ExtraAttributeAspect;
 import com.google.devtools.build.lib.analysis.util.TestAspects.RuleInfo;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
@@ -925,14 +924,13 @@ public class AspectTest extends AnalysisTestCase {
 
     // Verifies that the AspectConfiguredEvent declares the corresponding AspectCompleteEvent.
     AspectConfiguredEvent configuredEvent = getOnlyElement(collector.events);
-    BuildEventId targetCompletedId = getOnlyElement(configuredEvent.getChildrenEvents());
+    BuildEventIdRepr targetCompletedId = getOnlyElement(configuredEvent.getChildrenEvents());
     AspectKey key = getOnlyElement(analysisResult.getAspectsMap().keySet());
+    String configId = key.getConfigurationKey() == null
+        ? "none"
+        : key.getConfigurationKey().getOptions().checksum();
     assertThat(targetCompletedId)
-        .isEqualTo(
-            BuildEventIdUtil.aspectCompleted(
-                label,
-                BuildEventIdUtil.configurationId(key.getConfigurationKey()),
-                "AspectApplyingToFiles"));
+        .isEqualTo(new BuildEventIdRepr.TargetCompletedId(label, configId, "AspectApplyingToFiles"));
   }
 
   @Test

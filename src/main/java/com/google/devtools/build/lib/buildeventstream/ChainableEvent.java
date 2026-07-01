@@ -14,7 +14,6 @@
 
 package com.google.devtools.build.lib.buildeventstream;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import java.util.Collection;
 
 /**
@@ -35,7 +34,7 @@ public interface ChainableEvent {
    * <p>Event identifiers have to be unique within the set of events belonging to the same build
    * invocation.
    */
-  BuildEventId getEventId();
+  BuildEventIdRepr getEventId();
 
   /**
    * Provide the children of the event.
@@ -47,5 +46,5 @@ public interface ChainableEvent {
    *
    * <p>A build-event stream is finished if and only if all announced children have occurred.
    */
-  Collection<BuildEventId> getChildrenEvents();
+  Collection<BuildEventIdRepr> getChildrenEvents();
 }

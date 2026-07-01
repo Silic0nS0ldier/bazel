@@ -16,9 +16,8 @@ package com.google.devtools.build.lib.buildtool.buildevent;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.ConvenienceSymlink;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import java.util.Collection;
@@ -39,12 +38,12 @@ public final class ConvenienceSymlinksIdentifiedEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.convenienceSymlinksIdentifiedId();
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.ConvenienceSymlinksIdentifiedId();
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 

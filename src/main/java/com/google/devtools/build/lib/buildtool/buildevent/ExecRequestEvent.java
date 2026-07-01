@@ -17,9 +17,8 @@ package com.google.devtools.build.lib.buildtool.buildevent;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.EnvironmentVariable;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.server.CommandProtos;
@@ -63,12 +62,12 @@ public class ExecRequestEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.execRequestId();
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.ExecRequestId();
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 }

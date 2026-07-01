@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.skyframe.toolchains;
 import com.google.common.base.Strings;
 import com.google.devtools.build.lib.analysis.TargetAndConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -70,7 +69,7 @@ public abstract class ToolchainException extends Exception implements DetailedEx
     Cause cause =
         new AnalysisFailedCause(
             targetAndConfiguration.getLabel(),
-            configurationIdMessage(targetAndConfiguration.getConfiguration()),
+            BuildConfigurationValue.configurationChecksum(targetAndConfiguration.getConfiguration()),
             createDetailedExitCode(
                 StringUtil.formatNested(
                     String.format(
@@ -79,20 +78,12 @@ public abstract class ToolchainException extends Exception implements DetailedEx
                     getMessage())));
     return new ConfiguredValueCreationException(
         targetAndConfiguration.getTarget(),
-        targetAndConfiguration.getConfiguration().getEventId(),
+        BuildConfigurationValue.configurationChecksum(targetAndConfiguration.getConfiguration()),
         StringUtil.formatNested(
             String.format("While resolving toolchains for target %s", targetAndConfiguration),
             getMessage()),
         NestedSetBuilder.create(Order.STABLE_ORDER, cause),
         getDetailedExitCode());
-  }
-
-  public static ConfigurationId configurationIdMessage(
-      @Nullable BuildConfigurationValue configuration) {
-    if (configuration == null) {
-      return ConfigurationId.newBuilder().setId("none").build();
-    }
-    return ConfigurationId.newBuilder().setId(configuration.checksum()).build();
   }
 
   private static DetailedExitCode createDetailedExitCode(String message) {

@@ -18,11 +18,10 @@ import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import javax.annotation.Nullable;
 
@@ -30,10 +29,10 @@ import javax.annotation.Nullable;
 @Immutable
 public final class TestProgress implements BuildEvent {
   /** The label of the target for the action. */
-  private final String label;
+  private final Label label;
 
-  /** The configuration under which the action is running. */
-  private final BuildEventId.ConfigurationId configId;
+  /** The configuration checksum under which the action is running. */
+  private final String configChecksum;
 
   /** The run number of the test action (e.g. for runs_per_test > 1). */
   private final int run;
@@ -51,15 +50,15 @@ public final class TestProgress implements BuildEvent {
   private final String uri;
 
   public TestProgress(
-      String label,
-      ConfigurationId configId,
+      Label label,
+      String configChecksum,
       int run,
       int shard,
       int attempt,
       int opaqueCount,
       String uri) {
     this.label = label;
-    this.configId = configId;
+    this.configChecksum = configChecksum;
     this.run = run;
     this.shard = shard;
     this.attempt = attempt;
@@ -68,12 +67,12 @@ public final class TestProgress implements BuildEvent {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.testProgressId(label, configId, run, shard, attempt, opaqueCount);
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.TestProgressId(label, configChecksum, run, shard, attempt, opaqueCount);
   }
 
   @Override
-  public ImmutableList<BuildEventId> getChildrenEvents() {
+  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -84,7 +83,7 @@ public final class TestProgress implements BuildEvent {
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(label, configId, run, shard, attempt, opaqueCount, uri);
+    return Objects.hashCode(label, configChecksum, run, shard, attempt, opaqueCount, uri);
   }
 
   @Override
@@ -93,7 +92,7 @@ public final class TestProgress implements BuildEvent {
       return false;
     }
     return label.equals(other.label)
-        && configId.equals(other.configId)
+        && configChecksum.equals(other.configChecksum)
         && run == other.run
         && shard == other.shard
         && attempt == other.attempt
@@ -105,7 +104,7 @@ public final class TestProgress implements BuildEvent {
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("label", label)
-        .add("configId", configId)
+        .add("configChecksum", configChecksum)
         .add("run", run)
         .add("shard", shard)
         .add("attempt", attempt)

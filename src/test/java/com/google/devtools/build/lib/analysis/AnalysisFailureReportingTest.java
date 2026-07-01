@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.analysis;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
@@ -24,7 +24,6 @@ import com.google.common.collect.Multimap;
 import com.google.common.eventbus.Subscribe;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.causes.LoadingFailedCause;
@@ -272,7 +271,7 @@ public class AnalysisFailureReportingTest extends AnalysisTestCase {
         .containsExactly(
             new AnalysisFailedCause(
                 Label.parseCanonical("//foo"),
-                configurationIdMessage(expectedConfig),
+                configurationChecksum(expectedConfig),
                 createAnalysisDetailedExitCode(message)));
   }
 
@@ -314,15 +313,17 @@ public class AnalysisFailureReportingTest extends AnalysisTestCase {
       events.putAll(failedTarget.getLabel(), event.getRootCauses().toList());
     }
 
-    private ConfigurationId getOnlyConfigurationId() {
+    private String getOnlyConfigurationId() {
       // Analysis errors after the target's configuration has been determined are reported using a
       // possibly transitioned ID which is hard to retrieve from the graph if analysis of that
       // target fails. This method simply extracts them from the event ID.
       return getOnlyElement(events.entries())
           .getValue()
-          .getIdProto()
+          .getId()
+          .toProto()
           .getConfiguredLabel()
-          .getConfiguration();
+          .getConfiguration()
+          .getId();
     }
   }
 

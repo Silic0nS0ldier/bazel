@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.buildeventstream;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
 import java.util.Collection;
 import javax.annotation.Nullable;
@@ -29,23 +28,26 @@ public final class AbortedEvent extends GenericBuildEvent {
   private final String description;
   @Nullable private final Label label;
 
-  public AbortedEvent(BuildEventId id, AbortReason reason, String description) {
+  public AbortedEvent(BuildEventIdRepr id, AbortReason reason, String description) {
     this(id, reason, description, /*label=*/ null);
   }
 
   public AbortedEvent(
-      BuildEventId id, AbortReason reason, String description, @Nullable Label label) {
+      BuildEventIdRepr id, AbortReason reason, String description, @Nullable Label label) {
     this(id, /*children=*/ ImmutableList.of(), reason, description, label);
   }
 
   public AbortedEvent(
-      BuildEventId id, Collection<BuildEventId> children, AbortReason reason, String description) {
+      BuildEventIdRepr id,
+      Collection<BuildEventIdRepr> children,
+      AbortReason reason,
+      String description) {
     this(id, children, reason, description, /*label=*/ null);
   }
 
   private AbortedEvent(
-      BuildEventId id,
-      Collection<BuildEventId> children,
+      BuildEventIdRepr id,
+      Collection<BuildEventIdRepr> children,
       AbortReason reason,
       String description,
       @Nullable Label label) {

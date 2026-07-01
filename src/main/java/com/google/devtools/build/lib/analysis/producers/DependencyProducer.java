@@ -673,7 +673,7 @@ final class DependencyProducer
                       parameters.location(),
                       message,
                       parameters.label(),
-                      parameters.eventId(),
+                      parameters.configurationChecksum(),
                       /* rootCauses= */ null,
                       /* detailedExitCode= */ null),
                   // This error originates in dependency resolution, attached to the current target,

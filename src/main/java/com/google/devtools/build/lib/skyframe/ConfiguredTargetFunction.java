@@ -14,8 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationIdMessage;
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.skyframe.SkyValueRetrieverUtils.retrieveRemoteSkyValue;
 
 import com.google.common.base.Preconditions;
@@ -499,7 +498,7 @@ public final class ConfiguredTargetFunction implements SkyFunction {
                       (event) ->
                           new AnalysisFailedCause(
                               target.getLabel(),
-                              configurationIdMessage(configuration),
+                              configurationChecksum(configuration),
                               createDetailedExitCode(event.getMessage())))
                   .collect(toImmutableList()));
       throw new ConfiguredValueCreationException(
@@ -588,7 +587,7 @@ public final class ConfiguredTargetFunction implements SkyFunction {
                   // configuration value by the build because it does not include the rule
                   // transition. It's therefore marked unavailable.
                   AnalysisRootCauseEvent.withUnavailableConfiguration(
-                      configurationIdMessage(configuredTargetKey.getConfigurationKey()),
+                      configurationChecksum(configuredTargetKey.getConfigurationKey()),
                       configuredTargetKey.getLabel(),
                       e.getMessage()));
               storedEvents.handle(Event.error(e.getLocation(), e.getMessage()));

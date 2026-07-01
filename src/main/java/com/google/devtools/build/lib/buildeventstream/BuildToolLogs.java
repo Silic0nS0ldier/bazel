@@ -18,7 +18,6 @@ import com.google.common.collect.Lists;
 import com.google.common.flogger.GoogleLogger;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.protobuf.ByteString;
 import java.util.Collection;
@@ -51,12 +50,12 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.buildToolLogs();
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.BuildToolLogsId();
   }
 
   @Override
-  public ImmutableList<BuildEventId> getChildrenEvents() {
+  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -110,8 +109,8 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventId> postedAfter() {
-    return ImmutableList.of(BuildEventIdUtil.buildFinished());
+  public Collection<BuildEventIdRepr> postedAfter() {
+    return ImmutableList.of(new BuildEventIdRepr.BuildFinishedId());
   }
 
   /** A local log file. */

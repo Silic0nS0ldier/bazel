@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.buildeventstream;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.FetchId.Downloader;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import java.util.Collection;
@@ -31,12 +30,12 @@ public record FetchEvent(String url, Downloader downloader, boolean success)
     implements BuildEvent, ExtendedEventHandler.Postable {
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.fetchId(url, downloader);
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.FetchId(url, downloader);
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 

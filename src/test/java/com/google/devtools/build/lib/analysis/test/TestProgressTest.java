@@ -15,32 +15,37 @@ package com.google.devtools.build.lib.analysis.test;
 
 import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.TestProgressId;
+import com.google.devtools.build.lib.cmdline.Label;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 @RunWith(JUnit4.class)
 public class TestProgressTest {
+  private static final Label LABEL = Label.parseCanonicalUnchecked("//some:alabel");
+  private static final String CONFIG_CHECKSUM = "configid";
+
   @Test
   public void testTestProgress_convertsToEventId() {
     TestProgress progress =
-        new TestProgress(
-            "alabel", ConfigurationId.newBuilder().setId("configid").build(), 1, 2, 3, 4, "auri");
+        new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
 
-    BuildEventId id = progress.getEventId();
+    BuildEventIdRepr id = progress.getEventId();
 
-    assertThat(id)
+    // Compare via proto since the expected value is most naturally expressed as proto.
+    assertThat(id.toProto())
         .isEqualTo(
             BuildEventId.newBuilder()
                 .setTestProgress(
                     TestProgressId.newBuilder()
-                        .setLabel("alabel")
-                        .setConfiguration(ConfigurationId.newBuilder().setId("configid"))
+                        .setLabel(LABEL.toString())
+                        .setConfiguration(ConfigurationId.newBuilder().setId(CONFIG_CHECKSUM))
                         .setRun(1)
                         .setShard(2)
                         .setAttempt(3)
@@ -51,8 +56,7 @@ public class TestProgressTest {
   @Test
   public void testTestProgress_convertsToEvent() {
     TestProgress progress =
-        new TestProgress(
-            "alabel", ConfigurationId.newBuilder().setId("configid").build(), 1, 2, 3, 4, "auri");
+        new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
 
     BuildEvent event = progress.asStreamProto(null);
 
@@ -63,8 +67,8 @@ public class TestProgressTest {
                     BuildEventId.newBuilder()
                         .setTestProgress(
                             TestProgressId.newBuilder()
-                                .setLabel("alabel")
-                                .setConfiguration(ConfigurationId.newBuilder().setId("configid"))
+                                .setLabel(LABEL.toString())
+                                .setConfiguration(ConfigurationId.newBuilder().setId(CONFIG_CHECKSUM))
                                 .setRun(1)
                                 .setShard(2)
                                 .setAttempt(3)

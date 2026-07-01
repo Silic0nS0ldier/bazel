@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TestStatus;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -47,9 +47,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, CONFIGURATION_KEY), false, false, null);
     assertThat(event.getEventId())
-        .isEqualTo(
-            BuildEventIdUtil.targetSummary(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.configurationId(CHECKSUM)));
+        .isEqualTo(new BuildEventIdRepr.TargetSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
   }
 
   @Test
@@ -57,9 +55,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, false, null);
     assertThat(event.getEventId())
-        .isEqualTo(
-            BuildEventIdUtil.targetSummary(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.nullConfigurationId()));
+        .isEqualTo(new BuildEventIdRepr.TargetSummaryId(Label.create(PATH, TARGET_NAME), "none"));
   }
 
   @Test
@@ -67,8 +63,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), false, false, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            BuildEventIdUtil.targetCompleted(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.configurationId(CHECKSUM)));
+            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), CHECKSUM, null));
   }
 
   @Test
@@ -76,10 +71,8 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), false, true, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            BuildEventIdUtil.targetCompleted(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.configurationId(CHECKSUM)),
-            BuildEventIdUtil.testSummary(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.configurationId(CHECKSUM)));
+            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), CHECKSUM, null),
+            new BuildEventIdRepr.TestSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
   }
 
   @Test
@@ -88,10 +81,8 @@ public final class TargetSummaryEventTest {
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, true, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            BuildEventIdUtil.targetCompleted(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.nullConfigurationId()),
-            BuildEventIdUtil.testSummary(
-                Label.create(PATH, TARGET_NAME), BuildEventIdUtil.nullConfigurationId()));
+            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), "none", null),
+            new BuildEventIdRepr.TestSummaryId(Label.create(PATH, TARGET_NAME), "none"));
   }
 
   @Test
@@ -99,7 +90,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(stubTarget(), true, true, BlazeTestStatus.FLAKY);
     BuildEvent proto = event.asStreamProto(null);
-    assertThat(proto.getId()).isEqualTo(event.getEventId());
+    assertThat(proto.getId()).isEqualTo(event.getEventId().toProto());
     assertThat(proto.getTargetSummary().getOverallBuildSuccess()).isTrue();
     assertThat(proto.getTargetSummary().getOverallTestStatus()).isEqualTo(TestStatus.FLAKY);
   }
@@ -108,7 +99,7 @@ public final class TargetSummaryEventTest {
   public void testAsStreamProto_forBuildSuccess() throws Exception {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), true, false, null);
     BuildEvent proto = event.asStreamProto(null);
-    assertThat(proto.getId()).isEqualTo(event.getEventId());
+    assertThat(proto.getId()).isEqualTo(event.getEventId().toProto());
     assertThat(proto.getTargetSummary().getOverallBuildSuccess()).isTrue();
     assertThat(proto.getTargetSummary().getOverallTestStatus()).isEqualTo(TestStatus.NO_STATUS);
   }
@@ -118,7 +109,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(stubTarget(), false, true, BlazeTestStatus.PASSED);
     BuildEvent proto = event.asStreamProto(null);
-    assertThat(proto.getId()).isEqualTo(event.getEventId());
+    assertThat(proto.getId()).isEqualTo(event.getEventId().toProto());
     assertThat(proto.getTargetSummary().getOverallBuildSuccess()).isFalse();
     assertThat(proto.getTargetSummary().getOverallTestStatus()).isEqualTo(TestStatus.NO_STATUS);
   }

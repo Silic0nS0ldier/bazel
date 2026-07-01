@@ -14,9 +14,7 @@
 package com.google.devtools.build.lib.causes;
 
 import com.google.common.base.MoreObjects;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import java.util.Objects;
@@ -27,11 +25,11 @@ import java.util.Objects;
  */
 public class AnalysisFailedCause implements Cause {
   private final Label label;
-  private final ConfigurationId configurationId;
+  private final String configurationId;
   private final DetailedExitCode detailedExitCode;
 
   public AnalysisFailedCause(
-      Label label, ConfigurationId configurationId, DetailedExitCode detailedExitCode) {
+      Label label, String configurationId, DetailedExitCode detailedExitCode) {
     this.label = label;
     this.configurationId = configurationId;
     this.detailedExitCode = detailedExitCode;
@@ -57,9 +55,9 @@ public class AnalysisFailedCause implements Cause {
   }
 
   @Override
-  public BuildEventStreamProtos.BuildEventId getIdProto() {
+  public BuildEventIdRepr getId() {
     // This needs to match AnalysisRootCauseEvent.getEventId.
-    return BuildEventIdUtil.configuredLabelId(label, configurationId);
+    return new BuildEventIdRepr.ConfiguredLabelId(label, configurationId);
   }
 
   @Override

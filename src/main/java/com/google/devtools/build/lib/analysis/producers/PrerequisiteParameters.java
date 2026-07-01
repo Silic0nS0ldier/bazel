@@ -13,15 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.producers;
 
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
-
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.ToolchainCollection;
 import com.google.devtools.build.lib.analysis.ToolchainContext;
 import com.google.devtools.build.lib.analysis.TransitiveDependencyState;
 import com.google.devtools.build.lib.analysis.config.StarlarkTransitionCache;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkAttributeTransitionProvider;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.packages.Aspect;
@@ -164,8 +162,8 @@ public final class PrerequisiteParameters {
     return target.getLocation();
   }
 
-  public BuildEventId eventId() {
-    return configurationId(configurationKey());
+  public String configurationChecksum() {
+    return BuildConfigurationValue.configurationChecksum(configurationKey());
   }
 
   @Nullable

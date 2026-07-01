@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
@@ -52,7 +52,7 @@ public final class AspectCreationException extends AbstractSaneAnalysisException
         NestedSetBuilder.<Cause>stableOrder()
             .add(
                 new AnalysisFailedCause(
-                    currentTarget, configurationIdMessage(configuration), detailedExitCode))
+                    currentTarget, configurationChecksum(configuration), detailedExitCode))
             .build(),
         detailedExitCode);
   }

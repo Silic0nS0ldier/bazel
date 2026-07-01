@@ -43,10 +43,9 @@ import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventArtifactUploader;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.File;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.NamedSetOfFiles;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -1081,8 +1080,8 @@ public abstract class AbstractBuildEventServiceTransportTest extends FoundationT
     }
 
     @Override
-    public BuildEventId getEventId() {
-      return BuildEventIdUtil.fromArtifactGroupName("list-of-files");
+    public BuildEventIdRepr getEventId() {
+      return new BuildEventIdRepr.NamedSetOfFilesId("list-of-files");
     }
 
     @Override
@@ -1091,7 +1090,7 @@ public abstract class AbstractBuildEventServiceTransportTest extends FoundationT
     }
 
     @Override
-    public Collection<BuildEventId> getChildrenEvents() {
+    public Collection<BuildEventIdRepr> getChildrenEvents() {
       return ImmutableSet.of();
     }
   }

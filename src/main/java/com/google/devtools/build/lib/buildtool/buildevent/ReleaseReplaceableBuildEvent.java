@@ -13,20 +13,20 @@
 // limitations under the License.
 package com.google.devtools.build.lib.buildtool.buildevent;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 
 /**
  * Posts a pending {@link ReplaceableBuildEvent} immediately. It no longer waits for either the
  * build to end or a non-replaceable version to replace it.
  */
 public final class ReleaseReplaceableBuildEvent {
-  private final BuildEventId eventId;
+  private final BuildEventIdRepr eventId;
 
-  public ReleaseReplaceableBuildEvent(BuildEventId eventId) {
+  public ReleaseReplaceableBuildEvent(BuildEventIdRepr eventId) {
     this.eventId = eventId;
   }
 
-  public BuildEventId getEventId() {
+  public BuildEventIdRepr getEventId() {
     return eventId;
   }
 }

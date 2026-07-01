@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.buildeventstream;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.ExitCode;
 import com.google.protobuf.util.Timestamps;
@@ -33,10 +32,10 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   private final ExitCode exitCode;
   private final long finishTimeMillis;
 
-  private final Collection<BuildEventId> children;
+  private final Collection<BuildEventIdRepr> children;
 
   public BuildCompletingEvent(
-      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventId> children) {
+      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventIdRepr> children) {
     this.detailedExitCode = null;
     this.exitCode = exitCode;
     this.finishTimeMillis = finishTimeMillis;
@@ -44,7 +43,9 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   }
 
   public BuildCompletingEvent(
-      DetailedExitCode detailedExitCode, long finishTimeMillis, Collection<BuildEventId> children) {
+      DetailedExitCode detailedExitCode,
+      long finishTimeMillis,
+      Collection<BuildEventIdRepr> children) {
     this.detailedExitCode = detailedExitCode;
     this.exitCode = detailedExitCode.getExitCode();
     this.finishTimeMillis = finishTimeMillis;
@@ -60,12 +61,12 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.buildFinished();
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.BuildFinishedId();
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return children;
   }
 
