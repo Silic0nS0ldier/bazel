@@ -45,6 +45,7 @@ import com.google.devtools.build.lib.analysis.LocationExpander;
 import com.google.devtools.build.lib.analysis.ResolvedToolchainContext;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.actions.DownloadAction;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.ShToolchain;
 import com.google.devtools.build.lib.analysis.SymlinkEntry;
@@ -105,6 +106,8 @@ import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.Dict.ImmutableKeyTrackingDict;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.Mutability;
+import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.Starlark;
@@ -168,6 +171,7 @@ public final class StarlarkRuleContext
   private StarlarkAttributesCollection ruleAttributesCollection;
   private StructImpl splitAttributes;
   private Outputs outputsObject;
+  private Dict<String, Artifact> downloads;
 
   /**
    * Counter for calls to {@code ctx.resolve_command} with a command longer than {@link
@@ -267,6 +271,13 @@ public final class StarlarkRuleContext
       this.attributesCollection = builder.build();
       this.splitAttributes = buildSplitAttributeInfo(attributes, ruleContext);
       this.ruleAttributesCollection = null;
+
+      // Populate ctx.downloads.
+      StarlarkFunction downloadsCallback = rule.getRuleClassObject().getDownloadsCallback();
+      this.downloads =
+          downloadsCallback == null
+              ? Dict.empty()
+              : createDownloads(ruleContext, downloadsCallback);
     } else { // ASPECT
       this.outputsObject = null;
       ImmutableCollection<Attribute> attributes =
@@ -317,7 +328,48 @@ public final class StarlarkRuleContext
       }
 
       this.ruleAttributesCollection = ruleBuilder.build();
+      this.downloads = Dict.empty();
     }
+  }
+
+  /**
+   * Evaluates the rule's {@code downloads} callback and registers a {@link DownloadAction} for
+   * each declared download.
+   *
+   * <p>The callback runs in a transient thread against a context exposing only non-configurable
+   * attributes, keeping the declared download set independent of the build configuration.
+   */
+  private static Dict<String, Artifact> createDownloads(
+      RuleContext ruleContext, StarlarkFunction downloadsCallback) throws RuleErrorException {
+    StarlarkDownloadsContext downloadsContext = new StarlarkDownloadsContext(ruleContext.getRule());
+    try (Mutability mu = Mutability.create("downloads callback")) {
+      StarlarkThread thread =
+          StarlarkThread.createTransient(
+              mu, ruleContext.getAnalysisEnvironment().getStarlarkSemantics());
+      Starlark.call(thread, downloadsCallback, Tuple.of(downloadsContext), ImmutableMap.of());
+    } catch (EvalException e) {
+      throw ruleContext.throwWithRuleError(
+          "error evaluating downloads callback: " + e.getMessageWithStack());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw ruleContext.throwWithRuleError("downloads callback was interrupted");
+    }
+    Dict.Builder<String, Artifact> downloads = Dict.builder();
+    for (StarlarkDownloadsContext.Declaration declaration :
+        downloadsContext.getDeclarations().values()) {
+      Artifact output =
+          ruleContext.getUniqueDirectoryArtifact(
+              "_downloads", PathFragment.create(declaration.getPath()));
+      ruleContext.registerAction(
+          new DownloadAction(
+              ruleContext.getActionOwner(),
+              output,
+              declaration.getUrls(),
+              declaration.getIntegrity(),
+              declaration.isExecutable()));
+      downloads.put(declaration.getPath(), output);
+    }
+    return downloads.buildImmutable();
   }
 
   /** Returns the subrules declared by the rule or aspect represented by this context. */
@@ -476,6 +528,7 @@ public final class StarlarkRuleContext
     ruleAttributesCollection = null;
     splitAttributes = null;
     outputsObject = null;
+    downloads = null;
   }
 
   /** Returns the {@link ArtifactRoot} for newly declared artifacts for use in actions. */
@@ -678,6 +731,12 @@ public final class StarlarkRuleContext
   public StructImpl getAttr() throws EvalException {
     checkMutable("attr");
     return attributesCollection.getAttr();
+  }
+
+  @Override
+  public Dict<String, Artifact> getDownloads() throws EvalException {
+    checkMutable("downloads");
+    return downloads;
   }
 
   @Override

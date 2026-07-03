@@ -33,6 +33,7 @@ import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.DownloadAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
@@ -48,6 +49,7 @@ import com.google.devtools.build.lib.query2.aquery.AqueryUtils;
 import com.google.devtools.build.lib.skyframe.RuleConfiguredTargetValue;
 import com.google.devtools.build.lib.util.Pair;
 import java.io.IOException;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -214,6 +216,15 @@ public class ActionGraphDump {
 
     if (action instanceof UnresolvedSymlinkAction) {
       actionBuilder.setUnresolvedSymlinkTarget(((UnresolvedSymlinkAction) action).getTarget());
+    }
+
+    if (action instanceof DownloadAction downloadAction) {
+      for (URI url : downloadAction.getUrls()) {
+        actionBuilder.addDownloadUrls(url.toString());
+      }
+      actionBuilder
+          .setDownloadIntegrity(downloadAction.getIntegrity())
+          .setIsExecutable(downloadAction.isExecutable());
     }
 
     // Include the content of param files in output.

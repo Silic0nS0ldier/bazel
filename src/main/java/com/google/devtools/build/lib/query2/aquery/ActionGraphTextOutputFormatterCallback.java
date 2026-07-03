@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.DownloadAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
@@ -51,6 +52,7 @@ import com.google.devtools.build.lib.util.ShellEscaper;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.net.URI;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -362,6 +364,19 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
           .append("  UnresolvedSymlinkTarget: ")
           .append(((UnresolvedSymlinkAction) action).getTarget())
           .append("\n");
+    }
+
+    if (action instanceof DownloadAction downloadAction) {
+      stringBuilder.append("  URLs: [\n");
+      for (URI url : downloadAction.getUrls()) {
+        stringBuilder.append("    ").append(url.toString()).append("\n");
+      }
+      stringBuilder
+          .append("  ]\n")
+          .append("  Integrity: ")
+          .append(downloadAction.getIntegrity())
+          .append("\n")
+          .append(String.format("  IsExecutable: %b\n", downloadAction.isExecutable()));
     }
 
     stringBuilder.append('\n');

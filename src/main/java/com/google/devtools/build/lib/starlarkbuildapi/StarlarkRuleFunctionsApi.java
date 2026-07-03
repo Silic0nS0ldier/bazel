@@ -759,6 +759,24 @@ declared.
             defaultValue = "[]",
             positional = false,
             doc = "Experimental: List of subrules used by this rule."),
+        @Param(
+            name = "downloads",
+            named = true,
+            defaultValue = "None",
+            positional = false,
+            enableOnlyWithFlag = BuildLanguageOptions.EXPERIMENTAL_LAZY_DOWNLOADS,
+            doc =
+                "Experimental: a Starlark function declaring the downloads of the rule."
+                    + "<p>The function is called with a single <code>ctx</code> argument exposing"
+                    + " only the attributes of the rule declared with"
+                    + " <code>configurable = False</code> (plus <code>name</code>). It declares"
+                    + " downloads by calling <code>ctx.download(path, urls, integrity)</code>."
+                    + " Declared downloads are available in the rule implementation function via"
+                    + " <code>ctx.downloads</code>, keyed by <code>path</code>."
+                    + "<p>Downloads are executed lazily: a declared download is only fetched when"
+                    + " the file is actually needed by the build. Because the declarations depend"
+                    + " only on non-configurable attributes, the set of downloads is independent"
+                    + " of the build configuration."),
       },
       useStarlarkThread = true)
   StarlarkCallable rule(
@@ -784,6 +802,7 @@ declared.
       Object parentUnchecked,
       Object extendableUnchecked,
       Sequence<?> subrules,
+      Object downloads,
       StarlarkThread thread)
       throws EvalException;
 

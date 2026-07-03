@@ -139,7 +139,8 @@ public class StarlarkTestingModule implements TestingModuleApi {
             /* buildSetting= */ Starlark.NONE,
             /* cfg= */ Starlark.NONE,
             /* execGroups= */ Starlark.NONE,
-            /* subrulesUnchecked= */ StarlarkList.empty());
+            /* subrulesUnchecked= */ StarlarkList.empty(),
+            /* downloads= */ null);
 
     // Export the rule.
     //

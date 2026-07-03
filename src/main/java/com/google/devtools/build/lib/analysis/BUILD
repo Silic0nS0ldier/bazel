@@ -82,6 +82,7 @@ java_library(
         "WindowsBatchCommandConstructor.java",
         "WindowsPowershellCommandConstructor.java",
         "actions/ActionConstructionContext.java",
+        "actions/DownloadAction.java",
         "actions/FileWriteAction.java",
         "actions/ShellCommand.java",
         "actions/SpawnAction.java",
@@ -106,6 +107,7 @@ java_library(
         "starlark/StarlarkAttrModule.java",
         "starlark/StarlarkAttributeTransitionProvider.java",
         "starlark/StarlarkAttributesCollection.java",
+        "starlark/StarlarkDownloadsContext.java",
         "starlark/StarlarkErrorReporter.java",
         "starlark/StarlarkGlobalsImpl.java",
         "starlark/StarlarkRuleClassFunctions.java",
@@ -136,6 +138,7 @@ java_library(
         ":actions/buildinfo_file_write_action",
         ":actions/compression",
         ":actions/custom_command_line",
+        ":actions/download_action_context",
         ":actions/lazy_write_nested_set_of_tuple_action",
         ":actions/parameter_file_write_action",
         ":actions/path_mappers",
@@ -1285,6 +1288,16 @@ java_library(
         "//third_party:auto_value",
         "//third_party:guava",
         "//third_party:jsr305",
+    ],
+)
+
+java_library(
+    name = "actions/download_action_context",
+    srcs = ["actions/DownloadActionContext.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//third_party:guava",
     ],
 )
 

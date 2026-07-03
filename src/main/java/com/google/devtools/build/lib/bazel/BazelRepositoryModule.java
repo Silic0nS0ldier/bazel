@@ -29,6 +29,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
+import com.google.devtools.build.lib.analysis.actions.DownloadActionContext;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.authandtls.GoogleAuthUtils;
@@ -71,6 +72,9 @@ import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.Reposito
 import com.google.devtools.build.lib.bazel.repository.RepositoryUtils;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManagerActionContext;
+import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.ModuleActionContextRegistry;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriter;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriterParseException;
 import com.google.devtools.build.lib.bazel.repository.starlark.StarlarkRepositoryModule;
@@ -133,6 +137,7 @@ public class BazelRepositoryModule extends BlazeModule {
       ImmutableMap.of();
 
   private final RepositoryCache repositoryCache = new RepositoryCache();
+  @Nullable private DownloadManager downloadManager;
   private final MutableSupplier<ImmutableMap<String, String>> repoEnvSupplier =
       new MutableSupplier<>();
   private final MutableSupplier<ImmutableMap<String, String>> nonstrictRepoEnvSupplier =
@@ -276,6 +281,7 @@ public class BazelRepositoryModule extends BlazeModule {
             env.getDownloaderDelegate(),
             env.getHttpDownloader(),
             env.getReporter());
+    this.downloadManager = downloadManager;
     this.repositoryFetchFunction.setDownloadManager(downloadManager);
     this.moduleFileFunction.setDownloadManager(downloadManager);
     this.repoSpecFunction.setDownloadManager(downloadManager);
@@ -723,6 +729,20 @@ public class BazelRepositoryModule extends BlazeModule {
     // getWorkspace(), which e.g. allows moves from the external directory under the output base to
     // the local repo contents cache without crossing FileSystems.
     return env.getDirectories().getWorkspace().getRelative(path);
+  }
+
+  @Override
+  public void registerActionContexts(
+      ModuleActionContextRegistry.Builder registryBuilder,
+      CommandEnvironment env,
+      BuildRequest buildRequest) {
+    if (downloadManager != null) {
+      // Lets lazily declared downloads (DownloadAction) share the download cache, distdir,
+      // authentication, and remote downloader configuration with repository fetches.
+      registryBuilder.register(
+          DownloadActionContext.class,
+          new DownloadManagerActionContext(downloadManager, env.getClientEnv()));
+    }
   }
 
   @Override
