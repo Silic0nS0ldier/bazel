@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.CopyAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
@@ -362,6 +363,10 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
           .append("  UnresolvedSymlinkTarget: ")
           .append(((UnresolvedSymlinkAction) action).getTarget())
           .append("\n");
+    }
+
+    if (action instanceof CopyAction copyAction && copyAction.getPath() != null) {
+      stringBuilder.append("  CopyPath: ").append(copyAction.getPath()).append("\n");
     }
 
     stringBuilder.append('\n');

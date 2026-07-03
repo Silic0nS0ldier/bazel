@@ -48,6 +48,7 @@ import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.FileStatusWithDigest;
 import com.google.devtools.build.lib.vfs.FileSystem;
+import com.google.devtools.build.lib.vfs.MetadataPropagatingFileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.SymlinkTargetType;
@@ -103,7 +104,8 @@ import javax.annotation.Nullable;
  * sources, such as the same path existing in multiple underlying sources with different type or
  * contents.
  */
-public class RemoteActionFileSystem extends FileSystem implements PathCanonicalizer.Resolver {
+public class RemoteActionFileSystem extends FileSystem
+    implements PathCanonicalizer.Resolver, MetadataPropagatingFileSystem {
   private final PathFragment execRoot;
   private final PathFragment outputBase;
   private final InputMetadataProvider inputArtifactData;
@@ -315,6 +317,27 @@ public class RemoteActionFileSystem extends FileSystem implements PathCanonicali
         FileArtifactValue.createForRemoteFileWithMaterializationData(
             digest, size, /* locationIndex= */ 1, expirationTime, inMemoryOutput);
     remoteOutputTree.injectFile(path, metadata);
+  }
+
+  @Override
+  public boolean copyFileByMetadata(PathFragment source, PathFragment target) throws IOException {
+    if (!isOutput(target)) {
+      return false;
+    }
+    var status = statInternal(source, FollowMode.FOLLOW_ALL, StatSources.IN_MEMORY_ONLY);
+    if (!(status instanceof FileStatusWithMetadata statWithMetadata)
+        || !statWithMetadata.isFile()
+        || !statWithMetadata.getMetadata().isRemote()) {
+      return false;
+    }
+    FileArtifactValue metadata = statWithMetadata.getMetadata();
+    injectRemoteFile(
+        target,
+        metadata.getDigest(),
+        metadata.getSize(),
+        metadata.getExpirationTime(),
+        /* inMemoryOutput= */ false);
+    return true;
   }
 
   @Override

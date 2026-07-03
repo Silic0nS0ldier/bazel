@@ -250,6 +250,62 @@ public final class RemoteActionFileSystemTest extends RemoteActionFileSystemTest
   }
 
   @Test
+  public void copyFileByMetadata_remoteSource_copiesWithoutBytes() throws Exception {
+    ActionInputMap inputs = new ActionInputMap(1);
+    Artifact source = createRemoteArtifact("remote-file", "remote contents", inputs);
+    RemoteActionFileSystem actionFs = (RemoteActionFileSystem) createActionFileSystem(inputs);
+    PathFragment targetPath = getOutputPath("target");
+
+    assertThat(actionFs.copyFileByMetadata(source.getPath().asFragment(), targetPath)).isTrue();
+
+    FileStatus st = actionFs.stat(targetPath, /* followSymlinks= */ true);
+    assertThat(st.isFile()).isTrue();
+    assertThat(st).isInstanceOf(FileStatusWithDigest.class);
+    assertThat(((FileStatusWithDigest) st).getDigest())
+        .isEqualTo(inputs.getInputMetadata(source).getDigest());
+    // The copy is metadata-only: no bytes are materialized locally.
+    assertThat(actionFs.getLocalFileSystem().getPath(targetPath).exists()).isFalse();
+  }
+
+  @Test
+  public void copyFileByMetadata_remoteTreeChild_copiesWithoutBytes() throws Exception {
+    ActionInputMap inputs = new ActionInputMap(1);
+    SpecialArtifact tree =
+        createRemoteTreeArtifact("tree", ImmutableMap.of("sub/file", "content"), inputs);
+    RemoteActionFileSystem actionFs = (RemoteActionFileSystem) createActionFileSystem(inputs);
+    PathFragment sourcePath = tree.getPath().asFragment().getRelative("sub/file");
+    PathFragment targetPath = getOutputPath("target");
+
+    assertThat(actionFs.copyFileByMetadata(sourcePath, targetPath)).isTrue();
+
+    FileStatus st = actionFs.stat(targetPath, /* followSymlinks= */ true);
+    assertThat(st.isFile()).isTrue();
+    assertThat(actionFs.getLocalFileSystem().getPath(targetPath).exists()).isFalse();
+  }
+
+  @Test
+  public void copyFileByMetadata_localSource_returnsFalse() throws Exception {
+    ActionInputMap inputs = new ActionInputMap(1);
+    Artifact source = createLocalArtifact("local-file", "local contents", inputs);
+    RemoteActionFileSystem actionFs = (RemoteActionFileSystem) createActionFileSystem(inputs);
+    PathFragment targetPath = getOutputPath("target");
+
+    assertThat(actionFs.copyFileByMetadata(source.getPath().asFragment(), targetPath)).isFalse();
+
+    assertThat(actionFs.exists(targetPath)).isFalse();
+  }
+
+  @Test
+  public void copyFileByMetadata_targetOutsideOutputTree_returnsFalse() throws Exception {
+    ActionInputMap inputs = new ActionInputMap(1);
+    Artifact source = createRemoteArtifact("remote-file", "remote contents", inputs);
+    RemoteActionFileSystem actionFs = (RemoteActionFileSystem) createActionFileSystem(inputs);
+    PathFragment targetPath = execRoot.getRelative("not-an-output").asFragment();
+
+    assertThat(actionFs.copyFileByMetadata(source.getPath().asFragment(), targetPath)).isFalse();
+  }
+
+  @Test
   public void statAndExists_fromLocalFilesystem() throws Exception {
     RemoteActionFileSystem actionFs = (RemoteActionFileSystem) createActionFileSystem();
     Artifact artifact = ActionsTestUtil.createArtifact(outputRoot, "out");

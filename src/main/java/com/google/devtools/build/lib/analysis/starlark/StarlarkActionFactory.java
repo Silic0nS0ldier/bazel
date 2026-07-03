@@ -44,6 +44,7 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.ShToolchain;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.BuildInfoFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.CopyAction;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.PathMappers;
@@ -253,6 +254,71 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
   @SerializationConstant @VisibleForSerialization
   static final GeneratedMessage.GeneratedExtension<ExtraActionInfo, SpawnInfo> SPAWN_INFO =
       SpawnInfo.spawnInfo;
+
+  @Override
+  public void copy(
+      FileApi input, FileApi output, Object pathUnchecked, Object progressMessageUnchecked)
+      throws EvalException {
+    context.checkMutable("actions.copy");
+    RuleContext ruleContext = getRuleContext();
+
+    Artifact inputArtifact = (Artifact) input;
+    Artifact outputArtifact = (Artifact) output;
+
+    String progressMessage =
+        (progressMessageUnchecked != Starlark.NONE)
+            ? (String) progressMessageUnchecked
+            : "Copying %{input} to %{output}";
+
+    if (pathUnchecked != Starlark.NONE) {
+      if (!inputArtifact.isTreeArtifact()) {
+        throw Starlark.errorf(
+            "copy() with \"path\" param requires that \"input\" be a directory, not a %s",
+            describeArtifactType(inputArtifact));
+      }
+      if (outputArtifact.isTreeArtifact() || outputArtifact.isSymlink()) {
+        throw Starlark.errorf(
+            "copy() with \"path\" param requires that \"output\" be declared as a file, not a %s"
+                + " (did you mean to use declare_file()?)",
+            describeArtifactType(outputArtifact));
+      }
+      PathFragment path = PathFragment.create((String) pathUnchecked);
+      if (path.isAbsolute() || path.containsUplevelReferences() || path.isEmpty()) {
+        throw Starlark.errorf(
+            "copy() \"path\" must be a non-empty relative path that does not escape the input"
+                + " directory, got \"%s\"",
+            pathUnchecked);
+      }
+      registerAction(
+          CopyAction.createExtracting(
+              ruleContext.getActionOwner(), inputArtifact, outputArtifact, path, progressMessage));
+      return;
+    }
+
+    if (inputArtifact.isSymlink() != outputArtifact.isSymlink()
+        || inputArtifact.isTreeArtifact() != outputArtifact.isTreeArtifact()) {
+      throw Starlark.errorf(
+          "copy() requires that \"input\" and \"output\" be of the same type, but \"input\" is a"
+              + " %s and \"output\" was declared as a %s (did you mean to use declare_%s()?)",
+          describeArtifactType(inputArtifact),
+          describeArtifactType(outputArtifact),
+          describeArtifactType(inputArtifact));
+    }
+
+    registerAction(
+        CopyAction.create(
+            ruleContext.getActionOwner(), inputArtifact, outputArtifact, progressMessage));
+  }
+
+  private static String describeArtifactType(Artifact artifact) {
+    if (artifact.isSymlink()) {
+      return "symlink";
+    } else if (artifact.isTreeArtifact()) {
+      return "directory";
+    } else {
+      return "file";
+    }
+  }
 
   @Override
   public void symlink(
