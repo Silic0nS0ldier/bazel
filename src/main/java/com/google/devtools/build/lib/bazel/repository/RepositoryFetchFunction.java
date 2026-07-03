@@ -52,6 +52,7 @@ import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue.F
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue.Success;
 import com.google.devtools.build.lib.runtime.ProcessWrapper;
 import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.skyframe.AlreadyReportedException;
 import com.google.devtools.build.lib.skyframe.IgnoredSubdirectoriesValue;
@@ -97,8 +98,10 @@ public final class RepositoryFetchFunction implements SkyFunction {
   @Nullable private DownloadManager downloadManager;
   @Nullable private ProcessWrapper processWrapper = null;
   @Nullable private RepositoryRemoteExecutor repositoryRemoteExecutor;
+  @Nullable private RepositoryCas repositoryCas;
   @Nullable private RemoteRepoContentsCache remoteRepoContentsCache;
   @Nullable private SyscallCache syscallCache;
+  private boolean useGranularRepositoryCaching;
 
   public RepositoryFetchFunction(
       Supplier<ImmutableMap<String, String>> repoEnvSupplier,
@@ -133,6 +136,14 @@ public final class RepositoryFetchFunction implements SkyFunction {
 
   public void setRemoteRepoContentsCache(RemoteRepoContentsCache remoteRepoContentsCache) {
     this.remoteRepoContentsCache = remoteRepoContentsCache;
+  }
+
+  public void setUseGranularRepositoryCaching(boolean useGranularRepositoryCaching) {
+    this.useGranularRepositoryCaching = useGranularRepositoryCaching;
+  }
+
+  public void setRepositoryCas(@Nullable RepositoryCas repositoryCas) {
+    this.repositoryCas = repositoryCas;
   }
 
   @Nullable
@@ -642,8 +653,10 @@ public final class RepositoryFetchFunction implements SkyFunction {
                 processWrapper,
                 starlarkSemantics,
                 repositoryRemoteExecutor,
+                repositoryCas,
                 syscallCache,
-                directories)) {
+                directories,
+                useGranularRepositoryCaching)) {
       StarlarkThread thread =
           StarlarkThread.create(
               mu,

@@ -42,6 +42,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/rules:repository/repo_recorded_input",
         "//src/main/java/com/google/devtools/build/lib/runtime:blaze_command_cluster",
         "//src/main/java/com/google/devtools/build/lib/runtime:process_wrapper",
+        "//src/main/java/com/google/devtools/build/lib/runtime:repository_cas",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_executor",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/starlarkbuildapi/repository",

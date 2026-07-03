@@ -20,9 +20,21 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.IOException;
 import java.time.Duration;
+import javax.annotation.Nullable;
 
 /** Interface to support remote execution in repository_ctx.execute(). */
 public interface RepositoryRemoteExecutor {
+
+  /**
+   * Thrown by {@link #executeCacheable} when the current repository directory state cannot be
+   * represented as an action input tree (e.g. it contains dangling symlinks). Callers should fall
+   * back to local execution.
+   */
+  final class NotCacheableException extends IOException {
+    public NotCacheableException(String message) {
+      super(message);
+    }
+  }
 
   /** The result of a remotely executed command. */
   final class ExecutionResult {
@@ -71,4 +83,40 @@ public interface RepositoryRemoteExecutor {
       String workingDirectory,
       Duration timeout)
       throws IOException, InterruptedException;
+
+  /**
+   * Executes a command as a cacheable action whose input tree contains the current state of the
+   * repository directory and whose declared output is the entire repository directory after the
+   * command ran (part of {@code --experimental_granular_repository_caching}).
+   *
+   * <p>On success (including an action cache hit), the contents of {@code repoDir} are replaced
+   * with the repository directory state captured by the action, reflecting any files the command
+   * created, modified or deleted. The action cache entry is produced by the remote execution
+   * service (or replayed from the disk/remote cache), never uploaded by this client.
+   *
+   * @param arguments the command arguments. Paths referring to files inside the repository must be
+   *     relative to the repository root (the action's working directory).
+   * @param repoDir the local repository directory to stage as the action's working directory and
+   *     to overwrite with the captured outputs.
+   * @param auxiliaryInputs additional input files staged outside the repository directory in the
+   *     input tree, e.g. files referenced by label arguments. The key is the path relative to the
+   *     input root, the value the local path.
+   * @param executionProperties the remote platform the command should run on.
+   * @param environment environment variables set in the command's environment.
+   * @param timeout execution timeout.
+   * @return the execution result, or null if this executor does not support cacheable execution.
+   * @throws NotCacheableException if the repository directory state cannot be represented as an
+   *     action input tree; the caller should fall back to local execution.
+   */
+  @Nullable
+  default ExecutionResult executeCacheable(
+      ImmutableList<String> arguments,
+      Path repoDir,
+      ImmutableSortedMap<PathFragment, Path> auxiliaryInputs,
+      ImmutableMap<String, String> executionProperties,
+      ImmutableMap<String, String> environment,
+      Duration timeout)
+      throws IOException, InterruptedException {
+    return null;
+  }
 }

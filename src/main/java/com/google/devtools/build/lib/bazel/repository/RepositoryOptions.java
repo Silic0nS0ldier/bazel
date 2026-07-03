@@ -103,34 +103,44 @@ public abstract class RepositoryOptions extends OptionsBase {
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
       effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
       help =
           """
           Enables a more granular caching strategy for repository contents that is compatible with
           remote caching setups where AC entries are only allowed from remotely executed actions.
 
-          When enabled, <code>repository_ctx</code> operations become synonmous with rule actions.
+          When enabled, <code>repository_ctx</code> operations become synonymous with rule actions.
           That is, operations like <code>execute</code> act more like <code>ctx.actions.run</code>
-          meaning they can be persisted in the action cache and executed remotely.
+          meaning they can be persisted in the action cache and executed remotely. The action
+          cache entry for such an operation is only ever produced by the remote execution service,
+          never uploaded by the client, so this remains sound in deployments where clients are not
+          trusted to write action results.
 
-          Note that repository rules with <code>local = True</code> will have their
-          <code>execute</code> operations still run locally and not participate in caching.
+          Repository rules with <code>local = True</code> are exempt: their operations run locally
+          and do not participate in caching, as they are expected to depend on the local system.
 
-          Note that <code>execute</code> operations that run outside of the repository (
-          e.g. absolute path or relative path outside of the repository) are excempt.
-          TODO Should this behaviour be made to require `local = True`?
+          <code>execute</code> operations are only cacheable when they run at the repository root
+          (the default working directory) and only reference files inside the repository or via
+          labels; otherwise they transparently fall back to local execution.
 
-          Downloads without an integrity hash are likewise exempt.
-
-          The following operations are currently supported:
+          The following operations currently participate:
           <ul>
-            <li><code>ctx.execute</code></li>
-            <li><code>ctx.download</code></li>
-            <li><code>ctx.download_and_extract</code></li>
-            <li><code>ctx.read</code></li>
-            <li><code>ctx.write</code></li>
+            <li><code>ctx.execute</code>: becomes an action executed remotely, with the repository
+            directory as its input tree and declared output.</li>
+            <li><code>ctx.download</code>/<code>ctx.download_and_extract</code>: downloads verified
+            against a user-provided integrity are inserted into the CAS (content-addressed, so
+            safe for clients to write). The CAS-based download read path is provided by
+            <code>--remote_downloader</code>.</li>
+            <li><code>ctx.extract</code>/<code>ctx.download_and_extract</code>: extractions into an
+            empty directory are cached, keyed by the archive digest and extraction parameters.
+            As extraction results are not self-verifying, they are only written to caches the
+            client is trusted to write action results to: always the local disk cache, and the
+            remote cache only when <code>--remote_upload_local_results</code> is enabled.</li>
+            <li><code>ctx.file</code>: the written content is inserted into the CAS.</li>
           </ul>
+          Planned: lazy materialization of repository contents.
           """)
-  public boolean useGranularRepositoryCaching;
+  public abstract boolean getUseGranularRepositoryCaching();
 
   @Option(
       name = "registry",

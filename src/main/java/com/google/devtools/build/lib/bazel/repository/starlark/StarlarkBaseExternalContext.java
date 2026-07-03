@@ -57,15 +57,18 @@ import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput.MaybeValue;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput.RepoCacheFriendlyPath;
 import com.google.devtools.build.lib.runtime.ProcessWrapper;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor.ExecutionResult;
 import com.google.devtools.build.lib.unsafe.StringUnsafe;
+import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.RootedPath;
+import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.skyframe.SkyFunction.Environment;
 import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
@@ -167,8 +170,10 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
   protected final Label.RepoMappingRecorder repoMappingRecorder;
   private final LinkedHashMap<RepoRecordedInput, String> recordedInputs = new LinkedHashMap<>();
   private final RepositoryRemoteExecutor remoteExecutor;
+  @Nullable private final RepositoryCas repositoryCas;
   private final List<AsyncTask> asyncTasks;
   private final boolean allowWatchingPathsOutsideWorkspace;
+  private final boolean granularCachingEnabled;
   private final ExecutorService executorService;
 
   private boolean wasSuccessful = false;
@@ -185,7 +190,9 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
       StarlarkSemantics starlarkSemantics,
       String identifyingStringForLogging,
       @Nullable RepositoryRemoteExecutor remoteExecutor,
-      boolean allowWatchingPathsOutsideWorkspace) {
+      @Nullable RepositoryCas repositoryCas,
+      boolean allowWatchingPathsOutsideWorkspace,
+      boolean granularCachingEnabled) {
     this.workingDirectory = workingDirectory;
     this.directories = directories;
     this.env = env;
@@ -198,8 +205,10 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
     this.starlarkSemantics = starlarkSemantics;
     this.identifyingStringForLogging = identifyingStringForLogging;
     this.remoteExecutor = remoteExecutor;
+    this.repositoryCas = repositoryCas;
     this.asyncTasks = new ArrayList<>();
     this.allowWatchingPathsOutsideWorkspace = allowWatchingPathsOutsideWorkspace;
+    this.granularCachingEnabled = granularCachingEnabled;
     this.executorService =
         Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual()
@@ -671,8 +680,160 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
     if (pendingDownload.checksumValidation != null) {
       throw pendingDownload.checksumValidation;
     }
+    if (pendingDownload.checksum.isPresent()) {
+      // The download was verified against a user-provided checksum.
+      maybeUploadToCas(downloadedPath);
+    }
 
     return calculateDownloadResult(pendingDownload.checksum, downloadedPath);
+  }
+
+  /**
+   * Opportunistically inserts a blob whose integrity has been established (a verified download or
+   * locally produced content) into the disk/remote CAS, as part of {@code
+   * --experimental_granular_repository_caching}. CAS entries are content-addressed and thus safe
+   * for clients to write even where action results may only be produced remotely.
+   *
+   * <p>Upload failures don't fail the fetch; the CAS insert is an optimization.
+   */
+  private void maybeUploadToCas(Path file) throws InterruptedException {
+    if (!granularCachingEnabled || repositoryCas == null) {
+      return;
+    }
+    try {
+      repositoryCas.upload(file);
+    } catch (IOException e) {
+      env.getListener()
+          .handle(
+              Event.warn(
+                  String.format(
+                      "%s: failed to insert %s into the CAS: %s",
+                      identifyingStringForLogging, file, e.getMessage())));
+    }
+  }
+
+  /** Entry cap for {@link #fingerprintDirectoryState}; beyond this, caching isn't worthwhile. */
+  private static final int MAX_FINGERPRINTED_DESTINATION_ENTRIES = 10_000;
+
+  /**
+   * Computes the extraction cache key for {@code --experimental_granular_repository_caching}, or
+   * null when extraction caching doesn't apply. Extraction merges into its destination, so the
+   * pre-extraction destination state is part of the key: the cached result (the merged tree) is
+   * only valid for an identical pre-state.
+   */
+  @Nullable
+  private RepositoryCas.ExtractionKey extractionKey(
+      Path archivePath,
+      Optional<Checksum> checksum,
+      String stripPrefix,
+      int stripComponents,
+      Map<String, String> renameFiles,
+      Path destination,
+      @Nullable Path ignoredDestinationEntry)
+      throws InterruptedException {
+    if (!granularCachingEnabled || repositoryCas == null) {
+      return null;
+    }
+    try {
+      Fingerprint fingerprint = new Fingerprint();
+      int entries =
+          fingerprintDirectoryState(
+              destination, PathFragment.EMPTY_FRAGMENT, ignoredDestinationEntry, fingerprint, 0);
+      if (entries > MAX_FINGERPRINTED_DESTINATION_ENTRIES) {
+        return null;
+      }
+      Checksum archiveChecksum = calculateChecksum(checksum, archivePath);
+      return new RepositoryCas.ExtractionKey(
+          archiveChecksum.getKeyType() + ":" + archiveChecksum,
+          archivePath.getBaseName(),
+          stripPrefix,
+          stripComponents,
+          ImmutableMap.copyOf(renameFiles),
+          fingerprint.hexDigestAndReset());
+    } catch (IOException e) {
+      return null;
+    }
+  }
+
+  /**
+   * Fingerprints the state of a directory tree: relative paths, entry types, file digests and
+   * executable bits, and symlink targets. Returns the number of entries seen, stopping early
+   * beyond {@link #MAX_FINGERPRINTED_DESTINATION_ENTRIES}.
+   */
+  private static int fingerprintDirectoryState(
+      Path dir,
+      PathFragment relativePath,
+      @Nullable Path ignoredEntry,
+      Fingerprint fingerprint,
+      int entries)
+      throws IOException, InterruptedException {
+    if (!dir.exists()) {
+      return entries;
+    }
+    for (Dirent dirent : dir.readdir(Symlinks.NOFOLLOW)) {
+      Path child = dir.getRelative(dirent.getName());
+      if (child.equals(ignoredEntry)) {
+        continue;
+      }
+      if (++entries > MAX_FINGERPRINTED_DESTINATION_ENTRIES) {
+        return entries;
+      }
+      PathFragment childRelativePath = relativePath.getRelative(dirent.getName());
+      fingerprint.addPath(childRelativePath);
+      switch (dirent.getType()) {
+        case FILE -> {
+          fingerprint.addInt(1);
+          fingerprint.addBoolean(child.isExecutable());
+          fingerprint.addString(DownloadCache.getChecksum(KeyType.SHA256, child));
+        }
+        case DIRECTORY -> {
+          fingerprint.addInt(2);
+          entries =
+              fingerprintDirectoryState(
+                  child, childRelativePath, ignoredEntry, fingerprint, entries);
+        }
+        case SYMLINK -> {
+          fingerprint.addInt(3);
+          fingerprint.addPath(child.readSymbolicLink());
+        }
+        default -> fingerprint.addInt(4);
+      }
+    }
+    return entries;
+  }
+
+  private boolean tryReplayExtraction(
+      RepositoryCas.ExtractionKey key, Path destination, @Nullable Path preserveEntry)
+      throws InterruptedException {
+    boolean replayed = repositoryCas.tryReplayExtraction(key, destination, preserveEntry);
+    if (replayed) {
+      // TODO(Silic0nS0ldier): Demote or remove once the feature has matured; for now this is what
+      // makes cache hits observable (including to the integration tests).
+      env.getListener()
+          .handle(
+              Event.debug(
+                  String.format(
+                      "%s: replayed cached extraction of %s",
+                      identifyingStringForLogging, key.archiveBaseName())));
+    }
+    return replayed;
+  }
+
+  private void maybeStoreExtraction(@Nullable RepositoryCas.ExtractionKey key, Path destination)
+      throws InterruptedException {
+    if (key == null) {
+      return;
+    }
+    try {
+      repositoryCas.storeExtraction(key, destination);
+    } catch (IOException e) {
+      env.getListener()
+          .handle(
+              Event.warn(
+                  String.format(
+                      "%s: failed to store extraction of %s in the cache: %s",
+                      identifyingStringForLogging, key.archiveBaseName(), e.getMessage())));
+    }
   }
 
   @StarlarkMethod(
@@ -803,8 +964,11 @@ When <code>sha256</code> or <code>integrity</code> is user specified, setting an
       Boolean block,
       StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
-    
-    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+
+    // Granular caching (--experimental_granular_repository_caching): verified downloads are
+    // inserted into the CAS in completeDownload(). The read path (serving a download from the CAS
+    // by integrity) requires the Remote Asset API to map the hash to a full digest and is covered
+    // by --remote_downloader.
 
     PendingDownload download = null;
     ImmutableMap<URI, Map<String, List<String>>> authHeaders =
@@ -1079,7 +1243,9 @@ Strip the given number of leading components from file paths on extraction. Only
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
 
-    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
+    // Granular caching (--experimental_granular_repository_caching): the verified download is
+    // inserted into the CAS below (see also download()), and the extraction is cached/replayed
+    // via the extraction cache (see extractionKey()).
 
     stripPrefix = renamedStripPrefix("download_and_extract", stripPrefix, oldStripPrefix);
     int stripComponents = Starlark.toInt(stripComponentsI, "strip_components");
@@ -1173,7 +1339,31 @@ Strip the given number of leading components from file paths on extraction. Only
     if (checksumValidation != null) {
       throw checksumValidation;
     }
+    if (checksum.isPresent()) {
+      // The download was verified against a user-provided checksum. Insert before extraction, as
+      // the downloaded archive is deleted afterwards.
+      maybeUploadToCas(downloadedPath);
+    }
     env.getListener().post(w);
+
+    RepositoryCas.ExtractionKey extractionKey =
+        extractionKey(
+            downloadedPath,
+            checksum,
+            stripPrefix,
+            stripComponents,
+            renameFilesMap,
+            outputPath.getPath(),
+            // The temporary download directory lives inside the destination.
+            /* ignoredDestinationEntry= */ downloadDirectory);
+    if (extractionKey != null
+        && tryReplayExtraction(
+            extractionKey, outputPath.getPath(), /* preserveEntry= */ downloadDirectory)) {
+      StructImpl downloadResult = calculateDownloadResult(checksum, downloadedPath);
+      deleteTreeWithRetries(downloadDirectory);
+      return downloadResult;
+    }
+
     try (SilentCloseable c =
         Profiler.instance().profile("extracting: " + identifyingStringForLogging)) {
       env.getListener()
@@ -1197,7 +1387,10 @@ Strip the given number of leading components from file paths on extraction. Only
     }
 
     StructImpl downloadResult = calculateDownloadResult(checksum, downloadedPath);
+    // Store only after the temporary download directory is gone so that the destination holds
+    // nothing but the extraction result.
     deleteTreeWithRetries(downloadDirectory);
+    maybeStoreExtraction(extractionKey, outputPath.getPath());
     return downloadResult;
   }
 
@@ -1355,8 +1548,6 @@ Strip the given number of leading components from file paths on extraction. Only
       StarlarkThread thread)
       throws RepositoryFunctionException, InterruptedException, EvalException {
 
-    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
-
     stripPrefix = renamedStripPrefix("extract", stripPrefix, oldStripPrefix);
     int stripComponents = Starlark.toInt(stripComponentsI, "strip_components");
     validateStripping("extract", stripPrefix, stripComponents);
@@ -1387,6 +1578,21 @@ Strip the given number of leading components from file paths on extraction. Only
             thread.getCallerLocation());
     env.getListener().post(w);
 
+    RepositoryCas.ExtractionKey extractionKey =
+        extractionKey(
+            archivePath.getPath(),
+            /* checksum= */ Optional.empty(),
+            stripPrefix,
+            stripComponents,
+            renameFilesMap,
+            outputPath.getPath(),
+            /* ignoredDestinationEntry= */ null);
+    if (extractionKey != null
+        && tryReplayExtraction(extractionKey, outputPath.getPath(), /* preserveEntry= */ null)) {
+      env.getListener().post(new ExtractProgress(outputPath.getPath().toString()));
+      return;
+    }
+
     env.getListener()
         .post(
             new ExtractProgress(
@@ -1402,6 +1608,7 @@ Strip the given number of leading components from file paths on extraction. Only
             .build(),
         Optional.ofNullable(type).filter(s -> !s.isBlank()));
     env.getListener().post(new ExtractProgress(outputPath.getPath().toString()));
+    maybeStoreExtraction(extractionKey, outputPath.getPath());
   }
 
   /** A progress event that reports about archive extraction. */
@@ -1505,8 +1712,6 @@ Strip the given number of leading components from file paths on extraction. Only
       Object path, String content, Boolean executable, Boolean legacyUtf8, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
 
-    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
-    
     StarlarkPath p = getPath(path);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newFileEvent(
@@ -1526,6 +1731,8 @@ Strip the given number of leading components from file paths on extraction. Only
       if (executable) {
         p.getPath().setExecutable(true);
       }
+      // The content is known and produced locally.
+      maybeUploadToCas(p.getPath());
     } catch (IOException e) {
       throw new RepositoryFunctionException(e, Transience.TRANSIENT);
     } catch (InvalidPathException e) {
@@ -1926,6 +2133,109 @@ Strip the given number of leading components from file paths on extraction. Only
     }
   }
 
+  /**
+   * Whether {@code execute()} should attempt to run as a cacheable action (part of {@code
+   * --experimental_granular_repository_caching}).
+   */
+  private boolean canExecuteCacheable(String overrideWorkingDirectory) {
+    // TODO(Silic0nS0ldier): Support working directories below the repository root. REAPI output
+    // capture is relative to the action's working directory, so a command running in a
+    // subdirectory cannot capture the whole repository.
+    return granularCachingEnabled
+        && remoteExecutor != null
+        && overrideWorkingDirectory.isEmpty();
+  }
+
+  /**
+   * Executes the command as a cacheable action: the repository directory is the action's input
+   * tree and its declared output, so the result (including all file changes) can be replayed from
+   * the disk/remote action cache or produced by remote execution.
+   *
+   * <p>Returns null when the command cannot be represented as a cacheable action (e.g. it
+   * references paths outside the repository directory); callers should fall back to local
+   * execution.
+   *
+   * <p>Note that like {@link #executeRemote}, the command only sees explicitly passed environment
+   * variables, not the inherited repository environment, as the latter would defeat caching.
+   */
+  @Nullable
+  private StarlarkExecutionResult executeCacheable(
+      Sequence<?> argumentsUnchecked, // <String> or <Label> or <StarlarkPath> expected
+      int timeout,
+      Map<String, String> environment,
+      boolean quiet)
+      throws EvalException, InterruptedException {
+    ImmutableSortedMap.Builder<PathFragment, Path> auxiliaryInputsBuilder =
+        ImmutableSortedMap.naturalOrder();
+    ImmutableList.Builder<String> argumentsBuilder = ImmutableList.builder();
+    for (Object argumentUnchecked : argumentsUnchecked) {
+      switch (argumentUnchecked) {
+        case Label label -> {
+          Map.Entry<PathFragment, Path> remotePath = getRemotePathFromLabel(label);
+          // Label files are staged in the input root, outside the repository directory (the
+          // action's working directory), hence the leading "..".
+          argumentsBuilder.add("../" + remotePath.getKey());
+          auxiliaryInputsBuilder.put(remotePath);
+        }
+        case StarlarkPath starlarkPath -> {
+          Path path = starlarkPath.getPath();
+          if (!path.startsWith(workingDirectory)) {
+            // References the local system outside the repository directory; not cacheable.
+            return null;
+          }
+          PathFragment relativePath = path.relativeTo(workingDirectory);
+          // "./" keeps a single-segment argv[0] (e.g. a script at the repo root) resolving
+          // relative to the working directory instead of triggering a PATH lookup.
+          argumentsBuilder.add(
+              relativePath.segmentCount() == 1 ? "./" + relativePath : relativePath.toString());
+        }
+        default -> argumentsBuilder.add(argumentUnchecked.toString());
+      }
+    }
+
+    ImmutableList<String> arguments = argumentsBuilder.build();
+
+    try (SilentCloseable c =
+        Profiler.instance()
+            .profile(
+                ProfilerTask.STARLARK_REPOSITORY_FN,
+                () -> profileArgsDesc("cacheable", arguments))) {
+      ExecutionResult result =
+          remoteExecutor.executeCacheable(
+              arguments,
+              workingDirectory,
+              auxiliaryInputsBuilder.buildOrThrow(),
+              getRemoteExecProperties(),
+              ImmutableMap.copyOf(environment),
+              Duration.ofSeconds(timeout));
+      if (result == null) {
+        return null;
+      }
+
+      String stdout = new String(result.stdout(), StandardCharsets.US_ASCII);
+      String stderr = new String(result.stderr(), StandardCharsets.US_ASCII);
+
+      if (!quiet) {
+        OutErr outErr = OutErr.SYSTEM_OUT_ERR;
+        outErr.printOut(stdout);
+        outErr.printErr(stderr);
+      }
+
+      return new StarlarkExecutionResult(result.exitCode(), stdout, stderr);
+    } catch (RepositoryRemoteExecutor.NotCacheableException e) {
+      // The current repository directory state cannot be represented as an action input tree.
+      env.getListener()
+          .handle(
+              Event.debug(
+                  String.format(
+                      "%s: execute() falling back to uncached local execution: %s",
+                      identifyingStringForLogging, e.getMessage())));
+      return null;
+    } catch (IOException e) {
+      throw Starlark.errorf("cacheable execute failed: %s", e.getMessage());
+    }
+  }
+
   private void validateExecuteArguments(Sequence<?> arguments) throws EvalException {
     boolean isRemotable = isRemotable();
     for (int i = 0; i < arguments.size(); i++) {
@@ -1966,7 +2276,7 @@ Strip the given number of leading components from file paths on extraction. Only
     return b.toString();
   }
 
-  @StarlarkMethod(// here
+  @StarlarkMethod(
       name = "execute",
       doc =
           """
@@ -2025,9 +2335,6 @@ Strip the given number of leading components from file paths on extraction. Only
       throws EvalException, RepositoryFunctionException, InterruptedException {
     validateExecuteArguments(arguments);
 
-    // TODO(Silic0nS0ldier): --experimental_granular_repository_caching
-    
-
     int timeout = Starlark.toInt(timeoutI, "timeout");
 
     Map<String, Object> forceRepoEnvVariablesRaw =
@@ -2044,6 +2351,18 @@ Strip the given number of leading components from file paths on extraction. Only
       } else {
         throw Starlark.errorf("environment values must be strings or None, got %s", value);
       }
+    }
+
+    if (canExecuteCacheable(overrideWorkingDirectory)) {
+      // Like remote execution, the cacheable path only sees the explicitly set environment
+      // variables, so removing env vars isn't necessary.
+      StarlarkExecutionResult result =
+          executeCacheable(arguments, timeout, forceRepoEnvVariables, quiet);
+      if (result != null) {
+        return result;
+      }
+      // The command could not be represented as a cacheable action; fall back to uncached
+      // (local or remotable) execution.
     }
 
     if (canExecuteRemote()) {

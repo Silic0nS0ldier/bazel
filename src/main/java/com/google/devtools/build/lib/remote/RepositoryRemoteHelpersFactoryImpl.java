@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.remote;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.remote.common.RemoteExecutionClient;
 import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteHelpersFactory;
 import javax.annotation.Nullable;
@@ -86,5 +87,12 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
         acceptCached,
         uploadLocalResults,
         verboseFailures);
+  }
+
+  @Nullable
+  @Override
+  public RepositoryCas createCas() {
+    return new RemoteRepositoryCas(
+        cache, cache.digestUtil, buildRequestId, commandId, acceptCached, uploadLocalResults);
   }
 }
