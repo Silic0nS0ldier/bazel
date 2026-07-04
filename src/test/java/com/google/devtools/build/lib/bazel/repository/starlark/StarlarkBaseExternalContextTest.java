@@ -135,6 +135,7 @@ public class StarlarkBaseExternalContextTest {
           identifyingStringForLogging,
           remoteExecutor,
           /* repositoryCas= */ null,
+          /* linuxSandbox= */ null,
           allowWatchingPathsOutsideWorkspace,
           /* granularCachingEnabled= */ false);
     }

@@ -348,11 +348,18 @@ public final class RemoteModule extends BlazeModule {
     if (combinedCache == null) {
       return;
     }
+    // The bundled extraction utility, used to run repository archive extractions as remote
+    // actions under --experimental_granular_repository_caching.
+    Path repoExtractor = env.getBlazeWorkspace().getBinTools().getEmbeddedPath("repo-extractor");
+    if (repoExtractor != null && !repoExtractor.exists()) {
+      repoExtractor = null;
+    }
     repositoryRemoteHelpersFactoryDelegate.init(
         new RepositoryRemoteHelpersFactoryImpl(
             env.getDirectories(),
             combinedCache,
             actionContextProvider.getRemoteExecutionClient(),
+            repoExtractor,
             buildRequestId,
             invocationId,
             env.getWorkspaceName(),

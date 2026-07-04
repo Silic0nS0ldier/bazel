@@ -94,6 +94,7 @@ import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteHelpersFactory;
 import com.google.devtools.build.lib.runtime.ServerBuilder;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
+import com.google.devtools.build.lib.sandbox.LinuxSandboxUtil;
 import com.google.devtools.build.lib.server.FailureDetails.ExternalRepository;
 import com.google.devtools.build.lib.server.FailureDetails.ExternalRepository.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
@@ -665,6 +666,13 @@ public class BazelRepositoryModule extends BlazeModule {
       repositoryFetchFunction.setRepositoryRemoteExecutor(remoteExecutor);
       repositoryFetchFunction.setRemoteRepoContentsCache(remoteRepoContentsCache);
       repositoryFetchFunction.setRepositoryCas(repositoryCas);
+      // Used to sandbox local executions under --experimental_granular_repository_caching so that
+      // they only observe declared inputs, like their remotely executed counterparts.
+      Path linuxSandbox = null;
+      if (OS.getCurrent() == OS.LINUX && LinuxSandboxUtil.isSupported(env.getBlazeWorkspace())) {
+        linuxSandbox = LinuxSandboxUtil.getLinuxSandbox(env.getBlazeWorkspace());
+      }
+      repositoryFetchFunction.setLinuxSandbox(linuxSandbox);
       singleExtensionEvalFunction.setRepositoryRemoteExecutor(remoteExecutor);
 
       clock = env.getClock();

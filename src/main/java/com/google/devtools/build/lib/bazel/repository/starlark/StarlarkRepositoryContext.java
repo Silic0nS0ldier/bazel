@@ -97,6 +97,7 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       StarlarkSemantics starlarkSemantics,
       @Nullable RepositoryRemoteExecutor remoteExecutor,
       @Nullable RepositoryCas repositoryCas,
+      @Nullable Path linuxSandbox,
       SyscallCache syscallCache,
       BlazeDirectories directories,
       boolean useGranularRepositoryCaching)
@@ -115,6 +116,7 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
             RepositoryName.createUnvalidated(repoDefinition.name())),
         remoteExecutor,
         repositoryCas,
+        linuxSandbox,
         /* allowWatchingPathsOutsideWorkspace= */ true,
         // Rules with local = True explicitly rely on the local system, so their operations must
         // not be cached or run remotely.

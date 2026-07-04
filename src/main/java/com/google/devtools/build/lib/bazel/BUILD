@@ -63,6 +63,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_cas",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_executor",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_helpers_factory",
+        "//src/main/java/com/google/devtools/build/lib/sandbox:linux_sandbox_util",
         "//src/main/java/com/google/devtools/build/lib/skyframe:mutable_supplier",
         "//src/main/java/com/google/devtools/build/lib/skyframe:precomputed_value",
         "//src/main/java/com/google/devtools/build/lib/skyframe:sky_functions",

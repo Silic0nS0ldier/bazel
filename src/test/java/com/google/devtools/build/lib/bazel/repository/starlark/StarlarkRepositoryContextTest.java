@@ -199,6 +199,7 @@ public final class StarlarkRepositoryContextTest {
             starlarkSemantics,
             repoRemoteExecutor,
             /* repositoryCas= */ null,
+            /* linuxSandbox= */ null,
             SyscallCache.NO_CACHE,
             directories,
             /* useGranularRepositoryCaching= */ false);

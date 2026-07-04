@@ -220,9 +220,12 @@ public abstract class CompressedTarFunction implements Decompressor {
 
     @Override
     public Iterator<Charset> charsets() {
-      // This charset is only meant for internal use within CompressedTarFunction and thus should
-      // not be discoverable.
-      return Collections.emptyIterator();
+      // This charset is only meant for internal use within CompressedTarFunction. Exposing it
+      // here is harmless (its name is an unguessable UUID), and necessary for GraalVM native
+      // images of the decompressors (see //src/main/tools:repo-extractor): the image's charset
+      // registry is populated at build time by enumerating available charsets, and named lookup
+      // through this provider does not happen at run time.
+      return Collections.singleton(CHARSET).iterator();
     }
 
     @Override
@@ -287,7 +290,27 @@ public abstract class CompressedTarFunction implements Decompressor {
 
     @Override
     public CharsetEncoder newEncoder() {
-      throw new UnsupportedOperationException();
+      // Nothing encodes with this charset in practice; a working encoder is only provided so
+      // that the charset can be enumerated by GraalVM's native image builder, which caches an
+      // encoder per available charset.
+      return new CharsetEncoder(this, 1, 1) {
+        @Override
+        protected CoderResult encodeLoop(CharBuffer in, ByteBuffer out) {
+          // A simple unoptimized ISO-8859-1 encoder.
+          while (in.hasRemaining()) {
+            if (!out.hasRemaining()) {
+              return CoderResult.OVERFLOW;
+            }
+            char c = in.get();
+            if (c > 0xFF) {
+              in.position(in.position() - 1);
+              return CoderResult.unmappableForLength(1);
+            }
+            out.put((byte) c);
+          }
+          return CoderResult.UNDERFLOW;
+        }
+      };
     }
 
     @Override

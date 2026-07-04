@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
 import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteHelpersFactory;
+import com.google.devtools.build.lib.vfs.Path;
 import javax.annotation.Nullable;
 
 /** Factory for {@link RemoteRepositoryRemoteExecutor} and {@link RemoteRepoContentsCacheImpl}. */
@@ -27,6 +28,7 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
   private final BlazeDirectories directories;
   private final CombinedCache cache;
   @Nullable private final RemoteExecutionClient remoteExecutor;
+  @Nullable private final Path repoExtractor;
   private final String buildRequestId;
   private final String commandId;
   private final String workspaceName;
@@ -40,6 +42,7 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
       BlazeDirectories directories,
       CombinedCache cache,
       @Nullable RemoteExecutionClient remoteExecutor,
+      @Nullable Path repoExtractor,
       String buildRequestId,
       String commandId,
       String workspaceName,
@@ -50,6 +53,7 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
     this.directories = directories;
     this.cache = cache;
     this.remoteExecutor = remoteExecutor;
+    this.repoExtractor = repoExtractor;
     this.buildRequestId = buildRequestId;
     this.commandId = commandId;
     this.workspaceName = workspaceName;
@@ -93,6 +97,15 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
   @Override
   public RepositoryCas createCas() {
     return new RemoteRepositoryCas(
-        cache, cache.digestUtil, buildRequestId, commandId, acceptCached, uploadLocalResults);
+        cache,
+        cache.digestUtil,
+        buildRequestId,
+        commandId,
+        acceptCached,
+        uploadLocalResults,
+        remoteExecutor,
+        repoExtractor,
+        remoteInstanceName,
+        workspaceName);
   }
 }

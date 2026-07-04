@@ -85,6 +85,7 @@ public class ModuleExtensionContext extends StarlarkBaseExternalContext {
         ModuleExtensionEvaluationProgress.moduleExtensionEvaluationContextString(extensionId),
         remoteExecutor,
         /* repositoryCas= */ null,
+        /* linuxSandbox= */ null,
         /* allowWatchingPathsOutsideWorkspace= */ false,
         // Module extensions don't have a defined output directory that could serve as the action
         // input/output tree, so they don't participate in granular caching (yet).

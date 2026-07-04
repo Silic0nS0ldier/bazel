@@ -126,16 +126,21 @@ public abstract class RepositoryOptions extends OptionsBase {
           The following operations currently participate:
           <ul>
             <li><code>ctx.execute</code>: becomes an action executed remotely, with the repository
-            directory as its input tree and declared output.</li>
+            directory as its input tree and declared output. When executed locally instead (no
+            remote executor, or not representable remotely), the command runs in a hermetic
+            sandbox where the platform offers one, so that only declared inputs are visible.</li>
             <li><code>ctx.download</code>/<code>ctx.download_and_extract</code>: downloads verified
             against a user-provided integrity are inserted into the CAS (content-addressed, so
             safe for clients to write). The CAS-based download read path is provided by
             <code>--remote_downloader</code>.</li>
-            <li><code>ctx.extract</code>/<code>ctx.download_and_extract</code>: extractions into an
-            empty directory are cached, keyed by the archive digest and extraction parameters.
-            As extraction results are not self-verifying, they are only written to caches the
-            client is trusted to write action results to: always the local disk cache, and the
-            remote cache only when <code>--remote_upload_local_results</code> is enabled.</li>
+            <li><code>ctx.extract</code>/<code>ctx.download_and_extract</code>: with a remote
+            executor, extraction runs as a remote action using an extraction utility bundled with
+            Bazel (assuming the default remote platform matches the host OS), so the action cache
+            entry is produced by the remote service. Otherwise, extractions are cached client-side
+            keyed by the archive digest, extraction parameters and destination state; such entries
+            are only written to caches the client is trusted to write action results to: always
+            the local disk cache, and the remote cache only when
+            <code>--remote_upload_local_results</code> is enabled.</li>
             <li><code>ctx.file</code>: the written content is inserted into the CAS.</li>
           </ul>
           Planned: lazy materialization of repository contents.

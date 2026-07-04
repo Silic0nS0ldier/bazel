@@ -99,6 +99,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
   @Nullable private ProcessWrapper processWrapper = null;
   @Nullable private RepositoryRemoteExecutor repositoryRemoteExecutor;
   @Nullable private RepositoryCas repositoryCas;
+  @Nullable private Path linuxSandbox;
   @Nullable private RemoteRepoContentsCache remoteRepoContentsCache;
   @Nullable private SyscallCache syscallCache;
   private boolean useGranularRepositoryCaching;
@@ -144,6 +145,10 @@ public final class RepositoryFetchFunction implements SkyFunction {
 
   public void setRepositoryCas(@Nullable RepositoryCas repositoryCas) {
     this.repositoryCas = repositoryCas;
+  }
+
+  public void setLinuxSandbox(@Nullable Path linuxSandbox) {
+    this.linuxSandbox = linuxSandbox;
   }
 
   @Nullable
@@ -654,6 +659,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
                 starlarkSemantics,
                 repositoryRemoteExecutor,
                 repositoryCas,
+                linuxSandbox,
                 syscallCache,
                 directories,
                 useGranularRepositoryCaching)) {

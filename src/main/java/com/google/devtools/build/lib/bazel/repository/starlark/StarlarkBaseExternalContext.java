@@ -62,6 +62,7 @@ import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor.ExecutionResult;
 import com.google.devtools.build.lib.unsafe.StringUnsafe;
 import com.google.devtools.build.lib.util.Fingerprint;
+import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.util.io.OutErr;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -171,6 +172,7 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
   private final LinkedHashMap<RepoRecordedInput, String> recordedInputs = new LinkedHashMap<>();
   private final RepositoryRemoteExecutor remoteExecutor;
   @Nullable private final RepositoryCas repositoryCas;
+  @Nullable private final Path linuxSandbox;
   private final List<AsyncTask> asyncTasks;
   private final boolean allowWatchingPathsOutsideWorkspace;
   private final boolean granularCachingEnabled;
@@ -191,6 +193,7 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
       String identifyingStringForLogging,
       @Nullable RepositoryRemoteExecutor remoteExecutor,
       @Nullable RepositoryCas repositoryCas,
+      @Nullable Path linuxSandbox,
       boolean allowWatchingPathsOutsideWorkspace,
       boolean granularCachingEnabled) {
     this.workingDirectory = workingDirectory;
@@ -206,6 +209,7 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
     this.identifyingStringForLogging = identifyingStringForLogging;
     this.remoteExecutor = remoteExecutor;
     this.repositoryCas = repositoryCas;
+    this.linuxSandbox = linuxSandbox;
     this.asyncTasks = new ArrayList<>();
     this.allowWatchingPathsOutsideWorkspace = allowWatchingPathsOutsideWorkspace;
     this.granularCachingEnabled = granularCachingEnabled;
@@ -802,6 +806,44 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
     return entries;
   }
 
+  /**
+   * Attempts the extraction as a remote execution action (see {@link
+   * RepositoryCas#extractRemotely}): the action cache entry is produced by the remote service, so
+   * this works even where clients may not upload action results.
+   */
+  private boolean tryRemoteExtraction(
+      Path archive,
+      Path destination,
+      @Nullable Path preserveEntry,
+      String stripPrefix,
+      int stripComponents,
+      Map<String, String> renameFiles)
+      throws EvalException, InterruptedException {
+    if (!granularCachingEnabled || repositoryCas == null) {
+      return false;
+    }
+    boolean extracted =
+        repositoryCas.extractRemotely(
+            archive,
+            destination,
+            preserveEntry,
+            stripPrefix,
+            stripComponents,
+            ImmutableMap.copyOf(renameFiles),
+            getRemoteExecProperties());
+    if (extracted) {
+      // TODO(Silic0nS0ldier): Demote or remove once the feature has matured; for now this is what
+      // makes the remote extraction path observable (including to the integration tests).
+      env.getListener()
+          .handle(
+              Event.debug(
+                  String.format(
+                      "%s: extracted %s via remote action",
+                      identifyingStringForLogging, archive.getBaseName())));
+    }
+    return extracted;
+  }
+
   private boolean tryReplayExtraction(
       RepositoryCas.ExtractionKey key, Path destination, @Nullable Path preserveEntry)
       throws InterruptedException {
@@ -1346,6 +1388,19 @@ Strip the given number of leading components from file paths on extraction. Only
     }
     env.getListener().post(w);
 
+    if (tryRemoteExtraction(
+        downloadedPath,
+        outputPath.getPath(),
+        // The temporary download directory lives inside the destination.
+        /* preserveEntry= */ downloadDirectory,
+        stripPrefix,
+        stripComponents,
+        renameFilesMap)) {
+      StructImpl remoteDownloadResult = calculateDownloadResult(checksum, downloadedPath);
+      deleteTreeWithRetries(downloadDirectory);
+      return remoteDownloadResult;
+    }
+
     RepositoryCas.ExtractionKey extractionKey =
         extractionKey(
             downloadedPath,
@@ -1577,6 +1632,17 @@ Strip the given number of leading components from file paths on extraction. Only
             identifyingStringForLogging,
             thread.getCallerLocation());
     env.getListener().post(w);
+
+    if (tryRemoteExtraction(
+        archivePath.getPath(),
+        outputPath.getPath(),
+        /* preserveEntry= */ null,
+        stripPrefix,
+        stripComponents,
+        renameFilesMap)) {
+      env.getListener().post(new ExtractProgress(outputPath.getPath().toString()));
+      return;
+    }
 
     RepositoryCas.ExtractionKey extractionKey =
         extractionKey(
@@ -2236,6 +2302,129 @@ Strip the given number of leading components from file paths on extraction. Only
     }
   }
 
+  /**
+   * Runs the command locally inside a hermetic sandbox so that, like a remotely executed command,
+   * it only observes declared inputs: the repository directory, paths passed as label or {@code
+   * path} arguments, explicitly passed environment variables, and the operating system. Part of
+   * {@code --experimental_granular_repository_caching}.
+   *
+   * <p>Returns null when sandboxing is unavailable (unsupported platform, no user namespaces) or
+   * the command isn't representable (e.g. working directory outside the repository); callers
+   * should fall back to unsandboxed local execution.
+   */
+  @Nullable
+  private StarlarkExecutionResult executeSandboxed(
+      Sequence<?> argumentsUnchecked, // <String> or <Label> or <StarlarkPath> expected
+      int timeout,
+      Map<String, String> environment,
+      boolean quiet,
+      String overrideWorkingDirectory,
+      StarlarkThread thread)
+      throws EvalException, RepositoryFunctionException, InterruptedException {
+    OS os = OS.getCurrent();
+    Path scratchBase = directories.getOutputBase().getRelative("granular-repo-sandbox");
+    if (!RepoExecutionSandbox.isAvailable(os, linuxSandbox, scratchBase)) {
+      return null;
+    }
+
+    PathFragment workingDirRelative = PathFragment.EMPTY_FRAGMENT;
+    if (overrideWorkingDirectory != null && !overrideWorkingDirectory.isEmpty()) {
+      Path overridePath = getPath(overrideWorkingDirectory).getPath();
+      if (!overridePath.startsWith(workingDirectory)) {
+        // The command runs against the local system outside the repository.
+        return null;
+      }
+      workingDirRelative = overridePath.relativeTo(workingDirectory);
+    }
+
+    // Label and path arguments are declared inputs: they are made visible (read-only) at their
+    // real paths. Plain strings are opaque, exactly as they are for remote execution.
+    List<String> args = new ArrayList<>(argumentsUnchecked.size());
+    Set<Path> readOnlyInputs = new LinkedHashSet<>();
+    for (Object argumentUnchecked : argumentsUnchecked) {
+      switch (argumentUnchecked) {
+        case Label label -> {
+          Path path = getPathFromLabel(label).getPath();
+          args.add(path.toString());
+          readOnlyInputs.add(path);
+        }
+        case StarlarkPath starlarkPath -> {
+          args.add(starlarkPath.toString());
+          readOnlyInputs.add(starlarkPath.getPath());
+        }
+        default -> args.add(argumentUnchecked.toString());
+      }
+    }
+
+    WorkspaceRuleEvent w =
+        WorkspaceRuleEvent.newExecuteEvent(
+            args,
+            timeout,
+            /* commonEnvironment= */ ImmutableMap.of(),
+            /* customEnvironment= */ environment,
+            workingDirectory.getPathString(),
+            quiet,
+            identifyingStringForLogging,
+            thread.getCallerLocation());
+    env.getListener().post(w);
+
+    long timeoutMillis = Math.round(timeout * 1000L * timeoutScaling);
+    RepoExecutionSandbox.Prepared prepared;
+    try {
+      prepared =
+          RepoExecutionSandbox.prepare(
+              os,
+              linuxSandbox,
+              scratchBase,
+              workingDirectory,
+              directories.getWorkspace(),
+              workingDirRelative,
+              readOnlyInputs,
+              args,
+              Duration.ofMillis(timeoutMillis));
+      if (prepared == null) {
+        return null;
+      }
+    } catch (IOException e) {
+      env.getListener()
+          .handle(
+              Event.warn(
+                  String.format(
+                      "%s: failed to prepare sandbox for execute(), running unsandboxed: %s",
+                      identifyingStringForLogging, e.getMessage())));
+      return null;
+    }
+    try {
+      env.getListener()
+          .handle(
+              Event.debug(
+                  String.format(
+                      "%s: execute() running in hermetic sandbox", identifyingStringForLogging)));
+      StarlarkExecutionResult result;
+      try (SilentCloseable c =
+          Profiler.instance()
+              .profile(ProfilerTask.STARLARK_REPOSITORY_FN, () -> profileArgsDesc("sandboxed", args))) {
+        // Like remote execution, the command only sees explicitly passed environment variables.
+        result =
+            StarlarkExecutionResult.builder(ImmutableMap.of())
+                .addArguments(prepared.commandLine())
+                .setDirectory(prepared.workingDirectory().getPathFile())
+                .addEnvironmentVariables(environment)
+                .setTimeout(timeoutMillis + Duration.ofSeconds(30).toMillis())
+                .setQuiet(quiet)
+                .execute();
+      }
+      try {
+        RepoExecutionSandbox.moveResultsBack(prepared, workingDirectory);
+      } catch (IOException e) {
+        throw new RepositoryFunctionException(e, Transience.TRANSIENT);
+      }
+      return result;
+    } finally {
+      RepoExecutionSandbox.cleanup(prepared);
+    }
+  }
+
   private void validateExecuteArguments(Sequence<?> arguments) throws EvalException {
     boolean isRemotable = isRemotable();
     for (int i = 0; i < arguments.size(); i++) {
@@ -2370,6 +2559,17 @@ Strip the given number of leading components from file paths on extraction. Only
       // isn't necessary.
       return executeRemote(
           arguments, timeout, forceRepoEnvVariables, quiet, overrideWorkingDirectory);
+    }
+
+    if (granularCachingEnabled) {
+      // Local execution under granular caching runs in a hermetic sandbox where possible, so the
+      // command observes the same declared inputs it would under remote execution.
+      StarlarkExecutionResult result =
+          executeSandboxed(
+              arguments, timeout, forceRepoEnvVariables, quiet, overrideWorkingDirectory, thread);
+      if (result != null) {
+        return result;
+      }
     }
 
     // Execute on the local/host machine

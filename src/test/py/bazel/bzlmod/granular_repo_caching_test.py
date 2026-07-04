@@ -391,6 +391,13 @@ class GranularRepoCachingTest(test_base.TestBase):
     self.AssertBlobInWorkerCas(checked_content, present=True)
     self.AssertBlobInWorkerCas(unchecked_content, present=False)
 
+  def SyntheticExtractionFlags(self):
+    """Flags forcing the client-side extraction cache (no remote execution)."""
+    return [
+        '--remote_executor=',
+        '--remote_cache=grpc://localhost:' + str(self.worker_port),
+    ]
+
   def MakeTestArchive(self):
     """Creates a tar.gz under served/ and returns its URL path and sha256."""
     buf = io.BytesIO()
@@ -453,14 +460,15 @@ class GranularRepoCachingTest(test_base.TestBase):
       self.ScratchExtractingRepoRule(server.getURL() + '/archive.tar.gz', sha256)
 
       # First fetch: the archive is actually extracted, and the result stored.
-      _, _, stderr = self.RunBazel(['build', '@my_repo//:haha'])
+      flags = self.SyntheticExtractionFlags()
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
       self.AssertExtractedContents(repo_dir)
 
       # After expunging: the extraction is replayed from the cache with full
       # fidelity (symlinks, executable bits, empty directories).
       self.RunBazel(['clean', '--expunge'])
-      _, _, stderr = self.RunBazel(['build', '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertIn(
           'replayed cached extraction of archive.tar.gz', '\n'.join(stderr)
       )
@@ -471,8 +479,7 @@ class GranularRepoCachingTest(test_base.TestBase):
       _, _, stderr = self.RunBazel([
           'build',
           '--noexperimental_granular_repository_caching',
-          '@my_repo//:haha',
-      ])
+      ] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
       self.AssertExtractedContents(repo_dir)
 
@@ -499,12 +506,13 @@ class GranularRepoCachingTest(test_base.TestBase):
           ],
       )
 
-      _, _, stderr = self.RunBazel(['build', '@my_repo//:haha'])
+      flags = self.SyntheticExtractionFlags()
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
       self.AssertExtractedContents(repo_dir)
 
       self.RunBazel(['clean', '--expunge'])
-      _, _, stderr = self.RunBazel(['build', '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertIn(
           'replayed cached extraction of archive.tar.gz', '\n'.join(stderr)
       )
@@ -520,30 +528,104 @@ class GranularRepoCachingTest(test_base.TestBase):
     served, sha256 = self.MakeTestArchive()
     repo_dir = self.RepoDir('my_repo')
     no_upload = '--noremote_upload_local_results'
+    flags = self.SyntheticExtractionFlags() + [no_upload]
 
     with StaticHTTPServer(served) as server:
       self.ScratchExtractingRepoRule(server.getURL() + '/archive.tar.gz', sha256)
 
       # Without a disk cache, the extraction is never replayed: the client may
       # not write the entry to the remote cache.
-      _, _, stderr = self.RunBazel(['build', no_upload, '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
       self.RunBazel(['clean', '--expunge'])
-      _, _, stderr = self.RunBazel(['build', no_upload, '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build'] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
 
       # With a disk cache, the extraction is replayed from disk.
       disk_cache = tempfile.mkdtemp(dir=os.environ['TEST_TMPDIR'])
       disk = '--disk_cache=' + disk_cache
       self.RunBazel(['clean', '--expunge'])
-      _, _, stderr = self.RunBazel(['build', no_upload, disk, '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build', disk] + flags + ['@my_repo//:haha'])
       self.assertNotIn('replayed cached extraction', '\n'.join(stderr))
       self.RunBazel(['clean', '--expunge'])
-      _, _, stderr = self.RunBazel(['build', no_upload, disk, '@my_repo//:haha'])
+      _, _, stderr = self.RunBazel(['build', disk] + flags + ['@my_repo//:haha'])
       self.assertIn(
           'replayed cached extraction of archive.tar.gz', '\n'.join(stderr)
       )
       self.AssertExtractedContents(repo_dir)
+
+  def testRemoteExtraction(self):
+    # With a remote executor, extraction runs as a remote action using the
+    # bundled extractor: the action cache entry is produced by the remote
+    # service, so this works even in deployments where clients may not upload
+    # action results (--noremote_upload_local_results).
+    served, sha256 = self.MakeTestArchive()
+    repo_dir = self.RepoDir('my_repo')
+    no_upload = '--noremote_upload_local_results'
+
+    with StaticHTTPServer(served) as server:
+      self.ScratchExtractingRepoRule(server.getURL() + '/archive.tar.gz', sha256)
+
+      _, _, stderr = self.RunBazel(['build', no_upload, '@my_repo//:haha'])
+      self.assertIn(
+          'extracted archive.tar.gz via remote action', '\n'.join(stderr)
+      )
+      self.AssertExtractedContents(repo_dir)
+
+      # After expunging, the remote action cache serves the extraction.
+      self.RunBazel(['clean', '--expunge'])
+      _, _, stderr = self.RunBazel(['build', no_upload, '@my_repo//:haha'])
+      self.assertIn(
+          'extracted archive.tar.gz via remote action', '\n'.join(stderr)
+      )
+      self.AssertExtractedContents(repo_dir)
+
+  def testSandboxedExecuteHidesUndeclaredInputs(self):
+    # Local execute() under granular caching runs in a hermetic sandbox where
+    # possible: only declared inputs (the repo directory, label/path arguments,
+    # explicit environment) and the OS are visible. A plain-string absolute
+    # path is opaque — exactly as it would be under remote execution.
+    secret = self.ScratchFile('secret.txt', ['undeclared'])
+    self.ScratchFile(
+        'repo.bzl',
+        [
+            'def _repo_impl(rctx):',
+            '  rctx.file("BUILD", "filegroup(name=\'haha\')")',
+            '  res = rctx.execute(["/bin/cat", "%s"])' % secret,
+            '  print("CAT_RC: %d" % res.return_code)',
+            'repo = repository_rule(_repo_impl)',
+        ],
+    )
+
+    # Clear the remote executor to force the local path.
+    _, _, stderr = self.RunBazel(
+        ['build', '--remote_executor=', '@my_repo//:haha']
+    )
+    stderr_text = '\n'.join(stderr)
+    if 'execute() running in hermetic sandbox' not in stderr_text:
+      # E.g. user namespaces are unavailable in this environment.
+      self.skipTest('hermetic sandboxing not available in this environment')
+    match = re.search(r'CAT_RC: (\d+)', stderr_text)
+    self.assertIsNotNone(match, stderr_text)
+    self.assertNotEqual('0', match.group(1))
+
+    # The same file passed as a path argument is a declared input and visible.
+    self.ScratchFile(
+        'repo.bzl',
+        [
+            'def _repo_impl(rctx):',
+            '  rctx.file("BUILD", "filegroup(name=\'haha\')")',
+            '  res = rctx.execute(["/bin/cat", rctx.path("%s")])' % secret,
+            '  print("CAT_RC: %d" % res.return_code)',
+            'repo = repository_rule(_repo_impl)',
+        ],
+    )
+    _, _, stderr = self.RunBazel(
+        ['build', '--remote_executor=', '@my_repo//:haha']
+    )
+    match = re.search(r'CAT_RC: (\d+)', '\n'.join(stderr))
+    self.assertIsNotNone(match, '\n'.join(stderr))
+    self.assertEqual('0', match.group(1))
 
   def testNoRemoteExecutorFallsBackToLocal(self):
     # With only a remote cache configured, there is nothing that could soundly

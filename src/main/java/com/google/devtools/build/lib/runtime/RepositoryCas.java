@@ -82,4 +82,26 @@ public interface RepositoryCas {
    * {@code destination} as the result.
    */
   void storeExtraction(ExtractionKey key, Path destination) throws IOException, InterruptedException;
+
+  /**
+   * Attempts to perform the extraction as a remote execution action, using the extraction utility
+   * bundled with Bazel and assuming the default remote platform matches the host OS. The action's
+   * inputs are the extractor, the archive and the pre-extraction destination contents; its output
+   * is the post-extraction destination, which is staged into {@code destination} on success
+   * (replacing its contents, except {@code preserveEntry}). The action cache entry is produced by
+   * the remote execution service, never the client, so this works in deployments where clients
+   * may not upload action results.
+   *
+   * <p>Returns whether the extraction was performed (or replayed from the cache); on false, the
+   * destination is left untouched and the caller should extract by other means.
+   */
+  boolean extractRemotely(
+      Path archive,
+      Path destination,
+      @Nullable Path preserveEntry,
+      String stripPrefix,
+      int stripComponents,
+      ImmutableMap<String, String> renameFiles,
+      ImmutableMap<String, String> executionProperties)
+      throws InterruptedException;
 }

@@ -85,7 +85,16 @@ public class RemoteRepositoryCasTest {
 
   private RemoteRepositoryCas newRepositoryCas(boolean acceptCached, boolean uploadLocalResults) {
     return new RemoteRepositoryCas(
-        combinedCache, DIGEST_UTIL, "none", "none", acceptCached, uploadLocalResults);
+        combinedCache,
+        DIGEST_UTIL,
+        "none",
+        "none",
+        acceptCached,
+        uploadLocalResults,
+        /* remoteExecutor= */ null,
+        /* repoExtractor= */ null,
+        /* remoteInstanceName= */ "",
+        /* workspaceName= */ "test");
   }
 
   @Test

@@ -87,7 +87,8 @@ mechanism whose trust requirements it can actually satisfy:
 | `ctx.execute` | Real REAPI action: repository directory in, repository directory out | Only by the remote execution service | Yes (AC) |
 | `ctx.download`, download half of `download_and_extract` | CAS blob insert of integrity-verified content | Yes — content-addressed, self-verifying | Via `--remote_downloader` (Remote Asset API) |
 | `ctx.file` | CAS blob insert of locally-known content | Yes — content-addressed | (future: lazy materialization) |
-| `ctx.extract`, extraction half of `download_and_extract` | AC entry for a synthetic action keyed by archive digest + parameters | Only with `--remote_upload_local_results` | Yes (AC) |
+| `ctx.extract`, extraction half of `download_and_extract` (remote executor available) | Real REAPI action running a bundled portable extractor | Only by the remote execution service | Yes (AC) |
+| `ctx.extract`, extraction half of `download_and_extract` (no remote executor) | AC entry for a synthetic action keyed by archive digest + parameters | Only with `--remote_upload_local_results` | Yes (AC) |
 
 Repository rules with `local = True` are exempt from all of the above: they declare a
 dependency on the local system, so their operations run locally and uncached, as today.
@@ -124,7 +125,8 @@ caching and leak host state.
 
 ### Fallbacks
 
-The following cases fall back to local, uncached execution:
+The following cases fall back to local (sandboxed where possible, see below) uncached
+execution:
 
 * `local = True` repository rules (never even attempted).
 * A working directory other than the repository root (REAPI output capture is relative to the
@@ -139,6 +141,33 @@ The following cases fall back to local, uncached execution:
   symlinks, special files.
 * No remote executor configured. (A future refinement could execute locally and write the
   result to the disk cache only, mirroring the extraction cache below.)
+
+### Local execution is sandboxed
+
+When a granular-caching-eligible `ctx.execute` runs locally — no remote executor, or one of
+the fallbacks above — it runs inside a sandbox where the platform offers one, so that it
+maintains the same basic property as its remotely executed counterpart: only declared inputs
+are visible. Declared inputs are the repository directory, paths passed as label or `path`
+arguments (made visible read-only at their real paths), explicitly passed environment
+variables, and the operating system. Plain-string arguments are opaque, exactly as they are
+for remote execution: a command that reads an absolute path smuggled in as a string fails the
+same way locally as it would remotely, instead of silently depending on undeclared state.
+
+* **Linux** uses the hermetic `linux-sandbox` (a true allow-list). The repository directory
+  is staged via hardlinks under the sandbox root *at its own absolute path*, so after the
+  sandbox pivots its root the repository is visible — and writable — at its real path, and
+  absolute references to it in arguments or the environment work unchanged. Results are moved
+  back afterwards. Because the sandbox operates on real files rather than an REAPI input
+  tree, it also covers states the remote path cannot represent (empty directories,
+  working-directory overrides).
+* **macOS** uses `sandbox-exec` operating on the repository directory in place: writes are
+  confined to it (and temporary directories), and reads of the workspace, the output base
+  (i.e. other repositories) and the user's home directory are denied except for declared
+  inputs. This is a deny-list rather than an allow-list — a fully hermetic default-deny
+  Seatbelt profile is not practical — but it hides the undeclared inputs that matter in
+  practice.
+* Elsewhere (or when sandboxing is unusable, e.g. no user namespaces in a container), the
+  command runs unsandboxed as today. Availability is probed once per server.
 
 ## Downloads and file writes as CAS inserts
 
@@ -160,20 +189,49 @@ integrity hash to a digest is the Remote Asset API. Client-side CAS inserts cann
 cold client to fetch by hash alone; see *Future work* for the Remote Asset Push option.
 Downloads without an integrity are unverified and never inserted.
 
-## Extraction as a cached (but not remotely executed) operation
+## Extraction as a remotely executed action
 
 Extraction is a deterministic function of the archive contents and the extraction parameters
 (`strip_prefix`, `strip_components`, `rename_files`, and the archive file name, which selects
-the decompressor). It is also, unlike `execute`, impossible to run remotely in practice: there
-is no extractor executable to ship for arbitrary remote platforms, and repository operations
-have no access to execution platform selection.
+the decompressor). Running it remotely poses a bootstrapping problem: repository operations
+have no execution platform selection machinery, so there is no way to pick an extractor built
+for the remote platform.
 
-Instead, extraction results are recorded as action cache entries for a *synthetic action*
-(the same technique the remote repo contents cache uses): a constant `Command` that is never
-executed, with the extraction key embedded in the `Action`'s salt, and the extracted tree as
-the declared output directory. Because such entries map a key to output digests without any
-way to verify them, they are exactly as trustworthy as their producer. They are therefore only
-written to caches the client is trusted to write action results to:
+This is resolved by two decisions. First, Bazel bundles a **portable extraction utility**
+(`repo-extractor`) among its embedded binaries, exactly like `process-wrapper` and
+`linux-sandbox`. The utility is a **GraalVM native-image build of Bazel's own decompressors**
+(`DecompressorValue` and friends) behind a small argument-parsing entry point — not a
+reimplementation. Archive extraction of untrusted network input is a classic source of path
+traversal and memory-safety vulnerabilities; wrapping the extensively-exercised in-tree
+implementation means the remote action has byte-for-byte the semantics, the format support
+(zip family, tar with gzip/xz/zstd/bzip2/brotli compression, single-file compression, ar/deb,
+7z) and the hardening (escape and absolute-path rejection in `StripPrefixedPath`) of local
+extraction, by construction. Second, the default remote platform for repository rule spawns
+is **assumed to match the host OS** — the same assumption `--experimental_repo_remote_exec`
+already makes for commands with no `exec_properties`. Under those assumptions, extraction
+becomes an ordinary remote action:
+
+* inputs: the bundled extractor, the archive (already in the CAS from the download insert),
+  and the pre-extraction destination contents;
+* command: `./extractor --archive ... --dest ...` plus the extraction parameters;
+* output: the destination directory, captured as a `Tree`.
+
+The action cache entry is produced by the remote execution service — never the client — so
+remote extraction caching works in locked-down deployments, which the client-written entries
+below cannot. On a mismatch (unsupported archive format, remote platform that cannot run the
+host extractor, execution failure), extraction falls back to the local path below.
+`repository_ctx.extract`'s `exec_properties`-bearing rules pass those through, so deployments
+can route repository spawns to a matching worker pool explicitly.
+
+## Extraction as a locally cached operation (no remote executor)
+
+Without a remote executor, extraction runs locally and its results are recorded as action
+cache entries for a *synthetic action* (the same technique the remote repo contents cache
+uses): a constant `Command` that is never executed, with the extraction key embedded in the
+`Action`'s salt, and the extracted tree as the declared output directory. Because such
+entries map a key to output digests without any way to verify them, they are exactly as
+trustworthy as their producer. They are therefore only written to caches the client is
+trusted to write action results to:
 
 * the **disk cache**, always — the local machine trusts itself; and
 * the **remote cache**, only when `--remote_upload_local_results` is enabled — the same trust
@@ -256,6 +314,20 @@ No repository rule required modification. The fallback paths were exercised orga
 behave as designed. (Other incompatibilities encountered were unrelated ruleset-vs-Bazel@HEAD
 API issues.)
 
+With remote extraction and sandboxed local execution enabled, the same rulesets were
+revalidated in a fully locked-down configuration (`--noremote_upload_local_results`):
+
+* The Node.js 20 and LLVM 17 distributions (PAX-format `.tar.xz`) extract **via remote
+  action** through the bundled extractor; the resulting `node` and `clang` binaries run.
+  A post-expunge Node toolchain fetch completes in ~6 seconds (remote AC hit + tree
+  materialization).
+* A rules_js `npm_translate_lock` build shows the full decision matrix in one fetch: 21
+  operations as remote actions, 4 local executions inside the hermetic sandbox (including
+  `npm_import`'s `tar -C <empty dir>`, which the sandbox handles because it stages real
+  directories), and 3 explicit fallbacks with logged reasons.
+* The hermeticity property is tested end-to-end: a sandboxed command reading an undeclared
+  absolute path fails, while the same file passed as a `path()` argument is visible.
+
 # Performance considerations
 
 * **Repository contents are materialized eagerly.** Replays download the full tree from the
@@ -316,10 +388,22 @@ differences beyond caching are:
   whole-repository granularity also makes misses maximally expensive. The two features
   compose rather than compete: contents-cache hits skip the fetch entirely; granular caching
   accelerates the fetches that do run.
-* **Remote execution of extraction.** Rejected: it requires an extractor executable for every
-  possible remote platform, and repository operations have no execution platform selection
-  machinery to pick one. Client-side extraction with trusted-producer caching provides most
-  of the value with none of the deployment burden.
+* **Requiring the remote platform to provide an extractor** (e.g. `tar` on `PATH`). Rejected:
+  output determinism would depend on the worker image's tool versions, and format support
+  would be unknowable. Bundling a pinned extractor keeps the action's behavior a function of
+  its inputs. The residual host-OS/remote-platform match assumption is surfaced rather than
+  hidden: mismatched deployments fall back to local extraction (or route repository spawns
+  via `exec_properties`).
+* **A bespoke portable extractor** (a fresh C++ implementation of tar/zip was prototyped).
+  Rejected in favor of the native-image build of the existing Java decompressors: archive
+  parsing of untrusted input is a prime vulnerability class (path traversal, RCE), and the
+  in-tree implementation has years of hardening and real-world exposure. Reusing it also
+  makes local/remote semantic agreement a construction-time guarantee rather than a
+  conformance-testing obligation. The cost is a native-image step in Bazel's own build
+  (GraalVM is already a build dependency for turbine) and a ~30 MB embedded binary; three
+  small accommodations were needed (build-time initialization of the `String`-internals
+  helpers, making the tar marker charset enumerable so the image builder can bake it, and a
+  JNI configuration for zstd-jni).
 * **A bespoke extraction cache outside the REAPI model** (e.g. files under
   `--repository_cache`). Storing REAPI `Tree`s in the standard disk/remote caches reuses
   existing storage, garbage collection, and the CAS blobs already present from downloads and
