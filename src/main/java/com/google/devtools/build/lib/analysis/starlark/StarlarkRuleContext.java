@@ -61,6 +61,7 @@ import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.Depset.TypeException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -106,7 +107,6 @@ import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.Dict.ImmutableKeyTrackingDict;
 import net.starlark.java.eval.EvalException;
-import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Sequence;
@@ -341,12 +341,13 @@ public final class StarlarkRuleContext
    */
   private static Dict<String, Artifact> createDownloads(
       RuleContext ruleContext, StarlarkFunction downloadsCallback) throws RuleErrorException {
-    StarlarkDownloadsContext downloadsContext = new StarlarkDownloadsContext(ruleContext.getRule());
-    try (Mutability mu = Mutability.create("downloads callback")) {
-      StarlarkThread thread =
-          StarlarkThread.createTransient(
-              mu, ruleContext.getAnalysisEnvironment().getStarlarkSemantics());
-      Starlark.call(thread, downloadsCallback, Tuple.of(downloadsContext), ImmutableMap.of());
+    ImmutableMap<String, StarlarkDownloadsContext.Declaration> declarations;
+    try {
+      declarations =
+          StarlarkDownloadsContext.evaluate(
+              ruleContext.getRule(),
+              downloadsCallback,
+              ruleContext.getAnalysisEnvironment().getStarlarkSemantics());
     } catch (EvalException e) {
       throw ruleContext.throwWithRuleError(
           "error evaluating downloads callback: " + e.getMessageWithStack());
@@ -354,12 +355,33 @@ public final class StarlarkRuleContext
       Thread.currentThread().interrupt();
       throw ruleContext.throwWithRuleError("downloads callback was interrupted");
     }
+    // Download artifacts live under a configuration-free root (bazel-out/downloads, or
+    // bazel-out/<repo>/downloads under the sibling repository layout). The exec path is derived
+    // from the declaring label plus the declared path only, so the same declaration analysed in
+    // any number of configurations yields the same artifact path and, via shared-action
+    // deduplication (DownloadAction keys are configuration-independent), a single action
+    // execution. The layout mirrors the other derived roots' repository conventions — an
+    // external/<repo> prefix in the root-relative path under the default layout, the repository
+    // name in the root under the sibling layout — which is what makes Artifact#getRunfilesPath
+    // place the artifact correctly in runfiles trees.
+    BuildConfigurationValue configuration = ruleContext.getConfiguration();
+    RepositoryName repository = ruleContext.getLabel().getRepository();
+    ArtifactRoot downloadsRoot = configuration.getDownloadsDirectory(repository);
+    PathFragment targetBase =
+        (configuration.isSiblingRepositoryLayout()
+                ? ruleContext.getLabel().getPackageFragment()
+                : ruleContext
+                    .getLabel()
+                    .getPackageIdentifier()
+                    .getExecPath(/* siblingRepositoryLayout= */ false))
+            .getRelative(ruleContext.getLabel().getName());
     Dict.Builder<String, Artifact> downloads = Dict.builder();
-    for (StarlarkDownloadsContext.Declaration declaration :
-        downloadsContext.getDeclarations().values()) {
+    for (StarlarkDownloadsContext.Declaration declaration : declarations.values()) {
       Artifact output =
-          ruleContext.getUniqueDirectoryArtifact(
-              "_downloads", PathFragment.create(declaration.getPath()));
+          ruleContext
+              .getAnalysisEnvironment()
+              .getDerivedArtifact(
+                  targetBase.getRelative(declaration.getPath()), downloadsRoot);
       ruleContext.registerAction(
           new DownloadAction(
               ruleContext.getActionOwner(),

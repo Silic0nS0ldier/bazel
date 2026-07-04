@@ -44,6 +44,12 @@ public class DelegatingDownloader implements Downloader {
     this.delegate = delegate;
   }
 
+  /** Returns the {@link Downloader} set via {@link #setDelegate}, or null if none is set. */
+  @Nullable
+  public Downloader getDelegate() {
+    return delegate;
+  }
+
   @Override
   public void download(
       List<URI> urls,

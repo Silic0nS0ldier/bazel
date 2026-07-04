@@ -19,9 +19,19 @@ import static com.google.devtools.build.lib.runtime.Command.BuildPhase.ANALYZES;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.util.concurrent.MoreExecutors;
+import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
+import com.google.devtools.build.lib.actions.ActionLookupData;
+import com.google.devtools.build.lib.actions.ActionLookupValue;
+import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.NoBuildEvent;
 import com.google.devtools.build.lib.analysis.NoBuildRequestFinishedEvent;
+import com.google.devtools.build.lib.analysis.RunfilesProvider;
+import com.google.devtools.build.lib.analysis.actions.DownloadAction;
+import com.google.devtools.build.lib.analysis.starlark.StarlarkDownloadsContext;
+import com.google.devtools.build.lib.bazel.bzlmod.BazelDepGraphValue;
 import com.google.devtools.build.lib.bazel.bzlmod.BazelFetchAllValue;
 import com.google.devtools.build.lib.bazel.bzlmod.BazelModuleResolutionValue;
 import com.google.devtools.build.lib.bazel.bzlmod.VendorManager;
@@ -33,8 +43,12 @@ import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager
 import com.google.devtools.build.lib.buildtool.BuildResult;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
+import com.google.devtools.build.lib.cmdline.TargetParsingException;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
+import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue.Failure;
@@ -53,6 +67,7 @@ import com.google.devtools.build.lib.server.FailureDetails.FetchCommand.Code;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.RepositoryMappingValue.RepositoryMappingResolutionException;
 import com.google.devtools.build.lib.skyframe.SkyFunctions;
+import com.google.devtools.build.lib.skyframe.TargetPatternPhaseValue;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.InterruptedFailureDetails;
 import com.google.devtools.build.lib.vfs.Path;
@@ -69,8 +84,11 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -79,8 +97,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.Future;
+import java.util.concurrent.Phaser;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
+import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.StarlarkFunction;
+import net.starlark.java.eval.StarlarkSemantics;
 
 /**
  * Fetches external repositories into a specified directory.
@@ -230,6 +254,27 @@ public final class VendorCommand implements BlazeCommand {
     BazelFetchAllValue fetchAllValue = (BazelFetchAllValue) evaluationResult.get(fetchKey);
     env.getReporter().handle(Event.info("Vendoring all external repositories..."));
     vendor(env, fetchAllValue.reposToVendor());
+
+    // Declared-set (loading) semantics: every download declared by any rule target in the main
+    // repository or any repository of the module graph, with no configuration involved. Module
+    // repositories excluded from repo vendoring (e.g. local path overrides) still declare
+    // downloads of remote content, so they are included here.
+    Set<RepositoryName> reposToLoad = new LinkedHashSet<>(fetchAllValue.reposToVendor());
+    BazelDepGraphValue depGraphValue =
+        (BazelDepGraphValue)
+            env.getSkyframeExecutor().getEvaluator().getExistingValue(BazelDepGraphValue.KEY);
+    if (depGraphValue != null) {
+      reposToLoad.addAll(depGraphValue.getCanonicalRepoNameLookup().keySet());
+    }
+    ImmutableList.Builder<String> patterns = ImmutableList.builder();
+    patterns.add("//...");
+    for (RepositoryName repo : reposToLoad) {
+      if (!repo.isMain()) {
+        patterns.add("@@" + repo.getName() + "//...");
+      }
+    }
+    vendorDownloads(env, collectDeclaredDownloads(env, patterns.build()).values());
+
     env.getReporter().handle(Event.info("All external dependencies vendored successfully."));
     return BlazeCommandResult.success();
   }
@@ -249,11 +294,13 @@ public final class VendorCommand implements BlazeCommand {
 
     // Split repos to found and not found, vendor found ones and report others
     ImmutableList.Builder<RepositoryName> reposToVendor = ImmutableList.builder();
+    ImmutableList.Builder<RepositoryName> resolvedRepos = ImmutableList.builder();
     List<String> notFoundRepoErrors = new ArrayList<>();
     for (Entry<RepositoryName, RepositoryDirectoryValue> entry :
         repositoryNamesAndValues.entrySet()) {
       switch (entry.getValue()) {
         case Success s -> {
+          resolvedRepos.add(entry.getKey());
           if (!s.excludeFromVendoring()) {
             reposToVendor.add(entry.getKey());
           }
@@ -264,6 +311,16 @@ public final class VendorCommand implements BlazeCommand {
 
     env.getReporter().handle(Event.info("Vendoring repositories..."));
     vendor(env, reposToVendor.build());
+
+    // Declared-set (loading) semantics, scoped to the requested repos: every download declared
+    // by any rule target defined in them. Repos excluded from repo vendoring (e.g. local path
+    // overrides) still declare downloads of remote content, so all resolved repos are loaded.
+    ImmutableList<String> patterns =
+        resolvedRepos.build().stream()
+            .map(repo -> "@@" + repo.getName() + "//...")
+            .collect(toImmutableList());
+    vendorDownloads(env, collectDeclaredDownloads(env, patterns).values());
+
     if (!notFoundRepoErrors.isEmpty()) {
       return createFailedBlazeCommandResult(
           env.getReporter(), "Vendoring some repos failed with errors: " + notFoundRepoErrors);
@@ -294,6 +351,12 @@ public final class VendorCommand implements BlazeCommand {
 
     env.getReporter().handle(Event.info("Vendoring dependencies for targets..."));
     vendor(env, reposToVendor.asList());
+
+    // Consumed-set (configured) semantics: exactly the downloads a build of the same targets
+    // with the same flags would execute — the download actions reachable in the action graph
+    // from the requested targets' default outputs and runfiles.
+    vendorDownloads(env, collectConsumedDownloads(env, buildResult).values());
+
     env.getReporter()
         .handle(
             Event.info(
@@ -321,6 +384,193 @@ public final class VendorCommand implements BlazeCommand {
       }
     }
     return repos.build();
+  }
+
+  /** A download to fetch into the vendor directory's content-addressed store. */
+  private record DownloadToVendor(
+      String integrity, ImmutableList<URI> urls, String canonicalId, String declaringLabel) {}
+
+  /**
+   * Collects the consumed download set of the analysed targets: the {@link DownloadAction}s
+   * reachable in the action graph from the targets' default outputs and runfiles. This is exactly
+   * the set a build of the same targets with the same flags would execute.
+   *
+   * <p>Generating actions are resolved from the already-evaluated {@link ActionLookupValue}s in
+   * the in-memory graph; nothing new is analysed.
+   */
+  private ImmutableMap<String, DownloadToVendor> collectConsumedDownloads(
+      CommandEnvironment env, BuildResult buildResult) throws InterruptedException {
+    InMemoryGraph inMemoryGraph = env.getSkyframeExecutor().getEvaluator().getInMemoryGraph();
+    Map<String, DownloadToVendor> downloads = new LinkedHashMap<>();
+    Set<Artifact> visited = new HashSet<>();
+    ArrayDeque<Artifact> queue = new ArrayDeque<>();
+    for (ConfiguredTarget configuredTarget : buildResult.getActualTargets()) {
+      FileProvider fileProvider = configuredTarget.getProvider(FileProvider.class);
+      if (fileProvider != null) {
+        queue.addAll(fileProvider.getFilesToBuild().toList());
+      }
+      RunfilesProvider runfilesProvider = configuredTarget.getProvider(RunfilesProvider.class);
+      if (runfilesProvider != null) {
+        queue.addAll(runfilesProvider.getDefaultRunfiles().getAllArtifacts().toList());
+      }
+    }
+    while (!queue.isEmpty()) {
+      Artifact artifact = queue.remove();
+      if (!(artifact instanceof Artifact.DerivedArtifact derived) || !visited.add(artifact)) {
+        continue;
+      }
+      ActionLookupData generatingActionKey = derived.getGeneratingActionKey();
+      NodeEntry nodeEntry =
+          inMemoryGraph.get(
+              null, Reason.VENDOR_EXTERNAL_REPOS, generatingActionKey.getActionLookupKey());
+      if (nodeEntry == null || !(nodeEntry.getValue() instanceof ActionLookupValue actions)) {
+        continue;
+      }
+      ActionAnalysisMetadata action = actions.getActions().get(generatingActionKey.getActionIndex());
+      if (action instanceof DownloadAction downloadAction) {
+        downloads.putIfAbsent(
+            downloadAction.getIntegrity(),
+            new DownloadToVendor(
+                downloadAction.getIntegrity(),
+                downloadAction.getUrls(),
+                downloadAction.getCanonicalId(),
+                downloadAction.getOwner().getLabel().toString()));
+      } else {
+        queue.addAll(action.getInputs().toList());
+      }
+    }
+    return ImmutableMap.copyOf(downloads);
+  }
+
+  /**
+   * Collects the declared download set of every rule target matched by the given patterns, by
+   * loading the packages and evaluating the rules' {@code downloads} callbacks. Requires no
+   * configuration and no analysis.
+   */
+  private ImmutableMap<String, DownloadToVendor> collectDeclaredDownloads(
+      CommandEnvironment env, ImmutableList<String> patterns)
+      throws IOException, InterruptedException {
+    OptionsParsingResult options = env.getOptions();
+    LoadingPhaseThreadsOption threadsOption = options.getOptions(LoadingPhaseThreadsOption.class);
+    boolean keepGoing = options.getOptions(KeepGoingOption.class).getKeepGoing();
+    StarlarkSemantics semantics =
+        Objects.requireNonNull(options.getOptions(BuildLanguageOptions.class))
+            .toStarlarkSemantics();
+    TargetPatternPhaseValue patternValue;
+    try {
+      patternValue =
+          env.getSkyframeExecutor()
+              .loadTargetPatternsWithoutFilters(
+                  env.getReporter(),
+                  patterns,
+                  env.getRelativeWorkingDirectory(),
+                  threadsOption.getThreads(),
+                  keepGoing);
+    } catch (TargetParsingException e) {
+      throw new IOException(
+          "Failed to load targets while enumerating declared downloads: " + e.getMessage(), e);
+    }
+    Map<String, DownloadToVendor> downloads = new LinkedHashMap<>();
+    for (Target target : patternValue.getTargets(env.getReporter(), env.getPackageManager())) {
+      if (!(target instanceof Rule rule)) {
+        continue;
+      }
+      StarlarkFunction downloadsCallback = rule.getRuleClassObject().getDownloadsCallback();
+      if (downloadsCallback == null) {
+        continue;
+      }
+      ImmutableMap<String, StarlarkDownloadsContext.Declaration> declarations;
+      try {
+        declarations = StarlarkDownloadsContext.evaluate(rule, downloadsCallback, semantics);
+      } catch (EvalException e) {
+        throw new IOException(
+            String.format(
+                "error evaluating downloads callback of %s: %s",
+                rule.getLabel(), e.getMessageWithStack()),
+            e);
+      }
+      for (StarlarkDownloadsContext.Declaration declaration : declarations.values()) {
+        downloads.putIfAbsent(
+            declaration.getIntegrity(),
+            new DownloadToVendor(
+                declaration.getIntegrity(),
+                declaration.getUrls(),
+                declaration.getCanonicalId(),
+                rule.getLabel().toString()));
+      }
+    }
+    return ImmutableMap.copyOf(downloads);
+  }
+
+  /**
+   * Fetches the given downloads into the vendor directory's content-addressed store and records
+   * their provenance in the store's MANIFEST.
+   *
+   * <p>Blobs already present are skipped: the store is keyed by content, so presence implies
+   * identity. Fetching goes through the {@link DownloadManager}, sharing the download cache,
+   * URL rewriting, authentication, and remote downloader configuration with repository fetches.
+   */
+  private void vendorDownloads(CommandEnvironment env, Collection<DownloadToVendor> downloads)
+      throws IOException, InterruptedException {
+    if (downloads.isEmpty()) {
+      return;
+    }
+    Objects.requireNonNull(vendorManager);
+    Objects.requireNonNull(downloadManager);
+    env.getReporter()
+        .handle(Event.info(String.format("Vendoring %d download(s)...", downloads.size())));
+    List<String> manifestEntries = new ArrayList<>();
+    for (DownloadToVendor download : downloads) {
+      Checksum checksum;
+      try {
+        checksum = Checksum.fromSubresourceIntegrity(download.integrity());
+      } catch (Checksum.InvalidChecksumException e) {
+        throw new IOException(
+            String.format(
+                "invalid integrity checksum '%s' declared by %s: %s",
+                download.integrity(), download.declaringLabel(), e.getMessage()),
+            e);
+      }
+      manifestEntries.add(
+          download.integrity()
+              + " "
+              + download.declaringLabel()
+              + " "
+              + download.urls().stream().map(URI::toString).collect(Collectors.joining(" ")));
+      if (vendorManager.lookupDownload(checksum) != null) {
+        continue;
+      }
+      Path target = vendorManager.getDownloadPath(checksum);
+      Objects.requireNonNull(target.getParentDirectory()).createDirectoryAndParents();
+      Path temporary = target.replaceName(target.getBaseName() + ".fetching");
+      try {
+        Future<Path> future =
+            downloadManager.startDownload(
+                MoreExecutors.newDirectExecutorService(),
+                download.urls(),
+                /* headers= */ ImmutableMap.of(),
+                /* authHeaders= */ ImmutableMap.of(),
+                Optional.of(checksum),
+                download.canonicalId(),
+                /* type= */ Optional.empty(),
+                temporary,
+                env.getClientEnv(),
+                /* context= */ download.declaringLabel(),
+                new Phaser(),
+                /* mayHardlink= */ false);
+        Path unused = downloadManager.finalizeDownload(future);
+        vendorManager.vendorDownload(checksum, temporary);
+      } catch (IOException e) {
+        throw new IOException(
+            String.format(
+                "Failed to vendor download declared by %s (from %s): %s",
+                download.declaringLabel(), download.urls(), e.getMessage()),
+            e);
+      } finally {
+        temporary.delete();
+      }
+    }
+    vendorManager.updateDownloadManifest(manifestEntries);
   }
 
   /**

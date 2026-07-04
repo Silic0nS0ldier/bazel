@@ -15,7 +15,8 @@ package com.google.devtools.build.lib.analysis.actions;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.ActionContext;
-import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.Artifact;
 import java.io.IOException;
 import java.net.URI;
 
@@ -23,21 +24,28 @@ import java.net.URI;
 public interface DownloadActionContext extends ActionContext {
 
   /**
-   * Downloads the content identified by {@code integrity} from one of {@code urls} into {@code
-   * output}.
+   * Resolves the content identified by {@code integrity} into {@code output}.
    *
-   * <p>Implementations must verify the downloaded content against {@code integrity} (a Subresource
-   * Integrity checksum) and are expected to consult content-addressed caches before touching the
-   * network.
+   * <p>Implementations must verify the content against {@code integrity} (a Subresource Integrity
+   * checksum) at every network boundary and are expected to consult content-addressed stores (the
+   * vendor directory, the download cache) before touching the network. An implementation may
+   * resolve the output without materializing it locally by injecting metadata into the execution
+   * context's output metadata store (Build without the Bytes).
    *
    * @param urls candidate URLs, tried in order; all must serve identical content
    * @param integrity a Subresource Integrity checksum pinning the content
    * @param canonicalId if non-empty, restrict download cache hits to entries recorded with the
    *     same canonical ID
-   * @param output the path to materialize the content at
-   * @param context a human-readable description of the requester, for progress reporting
+   * @param executable whether the output is marked executable
+   * @param output the artifact to resolve
+   * @param actionExecutionContext the executing action's context
    */
   void download(
-      ImmutableList<URI> urls, String integrity, String canonicalId, Path output, String context)
+      ImmutableList<URI> urls,
+      String integrity,
+      String canonicalId,
+      boolean executable,
+      Artifact output,
+      ActionExecutionContext actionExecutionContext)
       throws IOException, InterruptedException;
 }

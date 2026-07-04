@@ -74,11 +74,13 @@ public final class DownloadAction extends AbstractAction {
       throw createException(
           "no download strategy is registered in this build environment", /* cause= */ null);
     }
-    Path outputPath = actionExecutionContext.getInputPath(getPrimaryOutput());
     try {
       downloadActionContext.download(
-          urls, integrity, canonicalId, outputPath, getOwner().getLabel().toString());
-      if (executable) {
+          urls, integrity, canonicalId, executable, getPrimaryOutput(), actionExecutionContext);
+      // The strategy may have resolved the output without materializing it locally (Build without
+      // the Bytes); the executable bit only applies to a file that exists.
+      Path outputPath = actionExecutionContext.getInputPath(getPrimaryOutput());
+      if (executable && outputPath.exists()) {
         outputPath.setExecutable(true);
       }
     } catch (IOException e) {

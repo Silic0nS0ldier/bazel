@@ -32,13 +32,21 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.util.Collection;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.TreeSet;
+import javax.annotation.Nullable;
 
 /** Class to manage the vendor directory. */
 public class VendorManager {
 
   private static final String REGISTRIES_DIR = "_registries";
+
+  /** Directory under the vendor directory holding the content-addressed download store. */
+  public static final String DOWNLOADS_DIR = "downloads";
+
+  private static final String DOWNLOADS_MANIFEST = "MANIFEST";
 
   public static final PathFragment EXTERNAL_ROOT_SYMLINK_NAME =
       PathFragment.create("bazel-external");
@@ -148,6 +156,70 @@ public class VendorManager {
    */
   public boolean isUrlVendored(URI url) throws UnsupportedEncodingException {
     return getVendorPathForUrl(url).isFile();
+  }
+
+  /**
+   * Returns the path of the given download in the content-addressed download store, whether or not
+   * it exists: {@code <vendor_dir>/downloads/<sri algorithm>/<hex digest>}.
+   */
+  public Path getDownloadPath(Checksum checksum) {
+    return vendorDirectory
+        .getRelative(DOWNLOADS_DIR)
+        .getRelative(checksum.getKeyType().getHashName())
+        .getRelative(checksum.toString());
+  }
+
+  /**
+   * Returns the vendored blob for the given checksum, or null if the store does not contain it.
+   *
+   * <p>The store is keyed by content, so the returned file's checksum is its name; callers that
+   * copy the blob out should verify the content against the checksum after the copy.
+   */
+  @Nullable
+  public Path lookupDownload(Checksum checksum) {
+    Path path = getDownloadPath(checksum);
+    return path.isFile() ? path : null;
+  }
+
+  /**
+   * Copies the given file into the content-addressed download store under its checksum.
+   *
+   * <p>No-op if the blob is already present: the store is keyed by content, so an existing entry
+   * is necessarily identical.
+   */
+  public void vendorDownload(Checksum checksum, Path source) throws IOException {
+    Path target = getDownloadPath(checksum);
+    if (target.isFile()) {
+      return;
+    }
+    Objects.requireNonNull(target.getParentDirectory()).createDirectoryAndParents();
+    Path temporary = target.replaceName(target.getBaseName() + ".tmp");
+    FileSystemUtils.copyFile(source, temporary);
+    temporary.renameTo(target);
+  }
+
+  /**
+   * Merges the given entries into the download store's {@code MANIFEST}.
+   *
+   * <p>The manifest records provenance (integrity, declaring label, URLs) for mirroring and
+   * supply-chain auditing; it is not consumed by resolution. Entries are one per line, kept
+   * sorted and deduplicated across vendor runs of any mode.
+   */
+  public void updateDownloadManifest(Collection<String> entries) throws IOException {
+    if (entries.isEmpty()) {
+      return;
+    }
+    Path manifest = vendorDirectory.getRelative(DOWNLOADS_DIR).getRelative(DOWNLOADS_MANIFEST);
+    TreeSet<String> lines = new TreeSet<>(entries);
+    if (manifest.isFile()) {
+      for (String line : FileSystemUtils.readContent(manifest, UTF_8).split("\n")) {
+        if (!line.isEmpty()) {
+          lines.add(line);
+        }
+      }
+    }
+    Objects.requireNonNull(manifest.getParentDirectory()).createDirectoryAndParents();
+    FileSystemUtils.writeContent(manifest, UTF_8, String.join("\n", lines) + "\n");
   }
 
   /**

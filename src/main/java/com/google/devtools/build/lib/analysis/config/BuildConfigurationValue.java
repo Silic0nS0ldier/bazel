@@ -422,6 +422,17 @@ public class BuildConfigurationValue
   }
 
   /**
+   * Returns the configuration-free root for download artifacts declared by targets of the given
+   * repository ({@code bazel-out/downloads}, or {@code bazel-out/<repo>/downloads} under the
+   * sibling repository layout). Identical for every configuration by construction, so that
+   * identical download declarations across configurations share one exec path and one action
+   * execution.
+   */
+  public ArtifactRoot getDownloadsDirectory(RepositoryName repositoryName) {
+    return outputDirectories.getDownloadsDirectory(repositoryName);
+  }
+
+  /**
    * @deprecated Use {@link #getGenfilesDirectory} instead.
    */
   @Override

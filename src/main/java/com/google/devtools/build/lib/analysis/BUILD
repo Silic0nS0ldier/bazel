@@ -1296,6 +1296,7 @@ java_library(
     srcs = ["actions/DownloadActionContext.java"],
     deps = [
         "//src/main/java/com/google/devtools/build/lib/actions",
+        "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//third_party:guava",
     ],

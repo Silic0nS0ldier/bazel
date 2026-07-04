@@ -13,7 +13,7 @@ discussion thread: TBD
 
 Today the only sanctioned way to bring remote files into a build is through repository rules and module extensions, which download eagerly during the fetch/loading phase and always materialise content on the local machine. This proposal introduces a first-class download primitive for regular rules: downloads are *declared* deterministically alongside the rule definition, and *executed* lazily during the execution phase like actions. A download that is not needed never happens; a download whose content is already present in the content-addressed download cache or a vendor directory is skipped; and with the [Remote Asset API](https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/asset/v1/remote_asset.proto) plus remote execution, downloaded content may never touch the local machine at all.
 
-Because download declarations are independent of build configuration, the complete set of downloads for any set of targets is computable from the loading phase alone. This makes vendoring cheap and sound: `bazel vendor` can enumerate and fetch every declared download into a directory, from which builds can then run entirely offline.
+Because download declarations are independent of build configuration, the complete set of downloads is computable from the loading phase alone. This makes vendoring cheap and sound: `bazel vendor` can enumerate and fetch every declared download into a directory without configuring or analysing anything, while targeted vendoring (`bazel vendor <patterns>`) fetches exactly the downloads the configured build would consume — either way, builds can then run entirely offline.
 
 # Background
 
@@ -93,19 +93,61 @@ def _impl(ctx):
     ...
 ```
 
-Laziness makes over-declaration free at build time — unconsumed variants are never fetched — while `bazel vendor` intentionally fetches all of them, which is exactly what an offline mirror needs. The flip side is accepted: a vendor run may fetch content no build of the current workspace ever consumes (all platform variants of a toolchain, say). That is the cost of a download set that is sound without analysis, and it is no worse than today's repository-granularity vendoring, which snapshots entire repositories ([#22684](https://github.com/bazelbuild/bazel/issues/22684)).
+Laziness makes over-declaration free at build time — unconsumed variants are never fetched. Vendoring extracts either set depending on the mode (see [Vendoring](#vendoring)): targeted vendoring fetches only what the configured build would consume, while full-mirror vendoring intentionally fetches every declared variant, which is exactly what an offline mirror needs.
 
 ## Download artifacts
 
 Each declaration produces a *download artifact*: an ordinary `File` usable as an action input, in runfiles, providers, `DefaultInfo`, etc. Conceptually it is a generated file whose generating action is a built-in `Download` action owned by the declaring target.
 
-Because declarations are configuration-independent, download artifacts live under a configuration-free output root, tentatively:
+Because declarations are configuration-independent, download artifacts live under a configuration-free output root. In the context of the execution root's existing layout — default layout first:
 
 ```
-bazel-out/downloads/<canonical repo>/<package>/<target name>/<path>
+<output base>/execroot/_main/                    ← the execroot ("_main" appears only here
+├── <main repository source files>                  and as the runfiles workspace directory)
+├── external/<canonical repo>/…                  ← external repository source files
+└── bazel-out/
+    ├── stable-status.txt                        ← workspace status files (configuration-free)
+    ├── volatile-status.txt
+    ├── _tmp/…                                   ← temporary directory
+    ├── <configuration mnemonic>/                ← e.g. k8-fastbuild; one per configuration
+    │   ├── bin/<package>/…                      ← configured derived artifacts
+    │   │   └── external/<canonical repo>/<package>/…
+    │   ├── genfiles/…
+    │   └── testlogs/…
+    └── downloads/                               ← download artifacts (configuration-free)
+        ├── <package>/<target name>/<path>
+        └── external/<canonical repo>/<package>/<target name>/<path>
 ```
 
-Physical storage is content-addressed (see [Caching](#caching-and-invalidation)); the exec-path location is a hardlink or symlink into that store. Identical declarations (same `integrity`) across any number of targets and configurations share one blob and at most one fetch. The exact layout is an implementation detail; the load-bearing requirements are that the exec path is stable across configurations and derived from the declaring label plus `path`. (The configuration-free root is a phase-2 item; see [Implementation phases](#implementation-phases) for what the current implementation does instead.)
+Under `--experimental_sibling_repository_layout`, external repository source files become siblings of the main repository's directory, and external derived roots move inside `bazel-out` under the repository name — download roots move with them:
+
+```
+<output base>/execroot/
+├── _main/                                       ← the main repository's execroot
+│   ├── <main repository source files>
+│   └── bazel-out/
+│       ├── stable-status.txt
+│       ├── volatile-status.txt
+│       ├── _tmp/…
+│       ├── <configuration mnemonic>/            ← main repository configured artifacts
+│       │   ├── bin/<package>/…
+│       │   ├── genfiles/…
+│       │   └── testlogs/…
+│       ├── <canonical repo>/                    ← external repositories' derived roots
+│       │   ├── <configuration mnemonic>/
+│       │   │   └── bin/<package>/…
+│       │   └── downloads/                       ← external download artifacts, no
+│       │       └── <package>/<target name>/<path>  external/ prefix (repo is in the root)
+│       └── downloads/                           ← main repository download artifacts
+│           └── <package>/<target name>/<path>
+└── <canonical repo>/…                           ← external repository source files (siblings)
+```
+
+Within their roots, download artifacts follow the same repository conventions as every other derived artifact under each layout: under the default layout no prefix for the main repository and an `external/<canonical repo>` prefix for external ones (mirroring `bin/`), under the sibling layout the repository name in the root itself. This is load-bearing for runfiles: `Artifact#getRunfilesPath` understands precisely these two shapes, so a download artifact in runfiles lands at `<workspace>/<package>/<target name>/<path>` (or under the declaring repository's own runfiles directory for external declarations) like any other derived file, identically under both layouts. A repository-first layout with a `_main` placeholder was considered and rejected: `_main` is not used anywhere inside `bazel-out` today, and no existing machinery (runfiles mapping, path stripping, tooling that parses exec paths) would understand it.
+
+The `downloads` directory name shares its namespace with configuration mnemonics, the status files, and (under the sibling layout) canonical repository names; collisions do not arise in practice because mnemonics always contain a `-` (e.g. `k8-fastbuild`) and canonical repository names always contain a `+` (e.g. `m+`, `rules_jvm_external++maven+maven`), the same argument by which `_tmp` and the status files already coexist there.
+
+Physical storage is content-addressed (see [Caching](#caching-and-invalidation)); the exec-path location is a hardlink or symlink into that store. Identical declarations (same `integrity`) across any number of targets and configurations share one blob and at most one fetch. The exact layout is an implementation detail; the load-bearing requirements are that the exec path is stable across configurations and derived from the declaring label plus `path`.
 
 In the rule implementation, `ctx.downloads` is an immutable string-keyed mapping from declared `path` to `File`.
 
@@ -118,7 +160,7 @@ When a `Download` action does execute, resolution proceeds in cost order, stoppi
 1. **Output tree / action cache** — artifact already materialised with matching digest: no-op.
 2. **Vendor directory** — if `--vendor_dir` is set and contains the blob (keyed by integrity), link it in.
 3. **Local download store** — the content-addressed store shared with the repository cache; hit means link, no network. A non-empty `canonical_id` restricts hits to entries recorded under the same ID, exactly as in the repository rule download API.
-4. **Remote Asset API** — when `--remote_downloader` is configured, issue `Fetcher.FetchBlob` with the declared `urls` and a `checksum.sri` qualifier carrying `integrity`. The service downloads into the remote CAS and returns the blob's `Digest`. Under Build without the Bytes the content never reaches the local machine; this is the intended steady state for remote-execution builds.
+4. **Remote Asset API** — when `--remote_downloader` is configured, issue `Fetcher.FetchBlob` with the declared `urls` and a `checksum.sri` qualifier carrying `integrity`. The service downloads into the remote CAS and returns the blob's `Digest`. Under Build without the Bytes (`--remote_download_outputs=minimal`) this step is hoisted ahead of step 3 and completes with metadata only — the content never reaches the local machine, which is the intended steady state for remote-execution builds; a failure here falls back to the materialising steps rather than failing the action.
 5. **Local HTTP download** — fall back to fetching `urls` in order with the existing downloader machinery (credential helpers, retries, proxies). Verify `integrity` and populate the local download store.
 
 The integrity checksum identifies *content*; it says nothing about the digest function a remote cache uses. Any REAPI `Digest` for the blob therefore comes only from the Remote Asset service (step 4), which responds in the server's digest function — resolution never attempts to derive or replay a CAS digest from `integrity` itself. (An earlier draft included a direct remote-CAS presence check keyed by a previously recorded digest; it was removed as a conflation of the two identities.)
@@ -133,26 +175,33 @@ Offline semantics follow existing conventions: with network-less operation reque
 
 ## Vendoring
 
-Because the download set is a loading-phase product, vendoring requires neither configuration nor analysis:
+A target's declarations define two distinct, well-defined download sets, and the vendor command extracts one or the other depending on the mode:
 
-```
-bazel vendor //some/...:all
-```
+* The **declared set** — everything passed to `ctx.download(...)`: a pure loading-phase product, independent of configuration, with all `select()` branches and platform variants included.
+* The **consumed set** — the download artifacts reachable in the action graph from the requested targets' default outputs and runfiles under a concrete configuration: an analysis product, exactly the downloads a `bazel build` of the same patterns with the same flags would execute.
 
-evaluates the `downloads` callbacks of every target in the pattern's transitive closure (all `select()` branches included — the closure is an over-approximation by construction) and fetches every declared download into:
+`bazel vendor` today has three modes, and lazy downloads slot into each with the semantics that mode already has for repositories:
+
+* **`bazel vendor <target patterns>` — consumed set (configured semantics).** The command already analyses the patterns under the current configuration to decide which *repositories* to vendor; the same analysis yields the download actions reachable from the requested outputs, and exactly those are fetched. Nothing unused is downloaded: unselected `select()` branches and unconsumed platform variants contribute nothing. The tradeoff is inherited from the mode itself: the result depends on build flags (the [#26107](https://github.com/bazelbuild/bazel/issues/26107) class), in exchange for exact parity with what a build would fetch. Because the store is content-addressed, targeted runs compose by accumulation — vendoring the same patterns once per platform (`--platforms=...`) merges into one store with nothing fetched twice, which replaces over-approximation as the multi-platform story.
+
+* **`bazel vendor` (no arguments) — declared set (loading semantics).** Today this mode vendors every repository in the module dependency graph without loading a single package. Covering rule downloads extends it: load every package of the main repository and of each vendored repository, evaluate the `downloads` callbacks of every rule target, and fetch the union of declared downloads. This is the full-mirror mode; it is configuration-free by construction and cannot be perturbed by rc files or command flags.
+
+* **`bazel vendor --repo=@foo` — declared set, scoped (loading semantics).** Vendors the repository itself as today, plus the declared downloads of every target defined in `@foo`.
+
+Both loading-semantics modes rest on the determinism property: because a `downloads` callback reads only non-configurable attributes, its declarations can be enumerated by loading packages alone, with no configuration and no analysis. Blobs land in a content-addressed store:
 
 ```
 <vendor_dir>/downloads/<sri algorithm>/<hex digest>
 <vendor_dir>/downloads/MANIFEST
 ```
 
-The store is keyed purely by content, so it is stable across target renames and refactors, deduplicates shared blobs, and cannot collide. The `MANIFEST` records, for each blob, the URLs and declaring labels observed at vendor time — provenance for mirroring and supply-chain auditing, not consumed by resolution.
+The store is keyed purely by content, so it is stable across target renames and refactors, deduplicates shared blobs, cannot collide, and merges across vendor runs of any mode. The `MANIFEST` records, for each blob, the URLs and declaring labels observed at vendor time — provenance for mirroring and supply-chain auditing, not consumed by resolution.
 
-A build with `--vendor_dir` set consults the store at step 2 of resolution. `--vendor_dir` plus offline mode yields a fully network-isolated build; a missing blob at that point is a clear, actionable error ("re-run `bazel vendor`").
+A build with `--vendor_dir` set consults the store at step 2 of resolution. `--vendor_dir` plus offline mode yields a fully network-isolated build; a missing blob at that point is a clear, actionable error ("re-run `bazel vendor`"). Note one consequence of consumed-set semantics: a download declared but consumed by no action and exposed by no requested output is only picked up by the loading-semantics modes.
 
 Vendoring composes with the Remote Asset path: an organisation can vendor for airgapped CI while developer builds resolve the same declarations against a Fetch service.
 
-Note that a serviceable form of this workflow is expressible without new commands: a rule can expose its declared downloads through an output group, and building that group with `--repository_cache` pointed at a workspace directory populates exactly this content-addressed layout; `--repository_disable_download` then yields the offline build. What dedicated `bazel vendor` support adds over that pattern is enumeration *without analysis* (no configuration required), coverage guaranteed by the loading-phase declaration set rather than by rule authors remembering to expose an output group, and the provenance `MANIFEST`.
+Note that a serviceable form of the consumed-set workflow is expressible without new commands: building the targets with `--repository_cache` pointed at a workspace directory populates a content-addressed layout, and `--repository_disable_download` then yields the offline build. What dedicated `bazel vendor` support adds is fetching without executing the build, the declared-set modes (which need no analysis at all), and the provenance `MANIFEST`.
 
 ## Caching and invalidation
 
@@ -257,24 +306,19 @@ With remote execution and Build without the Bytes, a clean build of a large `nod
 * **New authentication machinery.** Credential helpers and `--remote_downloader` authentication apply as-is.
 * **Configuration-dependent download sets.** Deliberately excluded; see [Alternatives](#alternatives).
 
-# Implementation phases
+# Implementation status
 
-The reference implementation deliberately ships the API surface first and the execution-engine integration second. The API contract above (declaration semantics, action key, cache identity, aquery output) is stable across phases; what changes is how much of the resolution chain is wired up.
+The reference implementation covers the full design, with one deliberate exception noted below. The API contract (declaration semantics, action key, cache identity, aquery output) is implemented as specified behind `--experimental_lazy_downloads`.
 
-**Phase 1 (the current implementation):**
+**API surface.** `rule(downloads = ...)`, `downloads_ctx.download(...)` (including `canonical_id`), `ctx.downloads`, and `Download` actions with full aquery support.
 
-* `rule(downloads = ...)`, `downloads_ctx.download(...)` (including `canonical_id`), `ctx.downloads`, and `Download` actions with full aquery support, behind `--experimental_lazy_downloads`.
-* Execution delegates to the existing `DownloadManager`, so downloads share the content-addressed download cache, `--distdir`, URL rewriting, netrc/credential-helper authentication, retries, `--repository_disable_download`, and `--experimental_remote_downloader` with repository fetches. Concurrent downloads of the same checksum are serialized inside the download manager, so the content is fetched once regardless of whether the requesters are download actions, repository fetches, or a mix.
-* Phase-1 simplifications, all invisible to the Starlark API:
-  * Download artifacts live under the configuration's output directory rather than the configuration-free root sketched above. The same declaration consumed in multiple configurations executes once per configuration; the network is still hit at most once (the download cache serves the rest), but the blob is materialised per configuration.
-  * Downloads execute synchronously on action-execution threads (bounded additionally by `--http_max_parallel_downloads`) rather than on a dedicated pool, so a slow download occupies a `--jobs` slot.
-  * A remote-downloader fetch still materialises the result locally; the Build-without-the-Bytes path (digest-only completion) is not yet wired up.
+**Execution.** Download artifacts live under the configuration-free root `bazel-out/downloads` (laid out as sketched in [Download artifacts](#download-artifacts), including correct runfiles placement); the same declaration analysed in any number of configurations yields one exec path and — `Download` action keys being configuration-independent — deduplicates through Bazel's shared-action machinery into a single execution. Resolution consults the vendor directory's content-addressed store first, then completes digest-only through the Remote Asset API when a remote downloader is configured under `--remote_download_outputs=minimal` (the blob lands in the remote CAS and the artifact's metadata is injected without the bytes reaching the local machine; failure falls back to a materialising download), then delegates to the shared `DownloadManager` — download cache, `--distdir`, URL rewriting, netrc/credential-helper authentication, retries, `--repository_disable_download`, and `--remote_downloader` behave exactly as for repository fetches. Concurrent downloads of the same checksum are serialized inside the download manager, so content is fetched once regardless of whether the requesters are download actions, repository fetches, or a mix.
 
-**Phase 2 (execution-engine integration):** the configuration-free artifact root with cross-configuration action sharing, the dedicated download pool, and digest-only completion under Build without the Bytes via the Remote Asset API.
+**Vendoring.** All three `bazel vendor` modes are implemented as specified in [Vendoring](#vendoring): target patterns vendor the consumed set (action-graph reachability from the analysed targets' outputs and runfiles), no-argument vendoring and `--repo` vendor the declared set by loading packages and evaluating `downloads` callbacks — no configuration involved. Fetches go through the same `DownloadManager`, and blobs land in `<vendor_dir>/downloads/<algorithm>/<hex>` with provenance recorded in `MANIFEST`.
 
-**Phase 3 (workflow integration):** `bazel vendor` enumeration from the loading phase, the vendor-directory resolution step, and the loading-phase introspection listed in [Open questions](#open-questions).
+**Deliberate exception — the dedicated download pool.** Downloads execute synchronously on action-execution threads (bounded additionally by `--http_max_parallel_downloads`), so a slow download occupies a `--jobs` slot. Freeing the slot requires asynchronous completion support for non-spawn actions in the execution engine, which does not exist today and is not worth building for this feature alone; if such support lands (e.g. for async spawns generally), downloads should adopt it. Until then, download-heavy builds can raise `--jobs` and `--http_max_parallel_downloads` together.
 
-The experimental phase exists precisely to validate that the phase-1 simplifications are unobservable through the API contract before any of it is stabilised.
+**Not yet specified** (deferred with the [Open questions](#open-questions)): loading-phase introspection (`bazel query` output, BEP/SBOM reporting), aspects, and rule extension.
 
 # Backward-compatibility
 

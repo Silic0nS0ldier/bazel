@@ -614,6 +614,373 @@ EOF
   expect_log 'download_canonical_id: "aquery-canonical-id"'
 }
 
+# Prints the hex sha256 digest of the given file (the download store key).
+function hex_sha256() {
+  python3 -c "
+import hashlib, sys
+print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())
+" "$1"
+}
+
+function test_download_artifacts_use_config_free_root() {
+  write_fetch_rule
+  cat > BUILD <<'EOF'
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:1/payload.txt"],
+    integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+)
+EOF
+
+  # Download artifacts live under the configuration-free root bazel-out/downloads,
+  # derived from the declaring label plus the declared path only.
+  bazel aquery $LAZY_DOWNLOADS_FLAG 'mnemonic("Download", //:fetched)' \
+      >& $TEST_log || fail "expected aquery to succeed"
+  expect_log "Outputs: \[bazel-out/downloads/fetched/payload.txt\]"
+}
+
+function test_download_shared_across_configurations() {
+  echo "shared across configurations" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  write_fetch_rule
+  # //:fetched is built in the target configuration directly and in the exec
+  # configuration as a genrule tool. Both configured targets register the same
+  # Download action at the same configuration-free exec path; shared-action
+  # deduplication must accept this (an action conflict fails the build).
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:$nc_port/payload.txt"],
+    integrity = "$integrity",
+)
+
+genrule(
+    name = "use_exec",
+    outs = ["use_exec.out"],
+    cmd = "cat \$(location :fetched) > \$@",
+    tools = [":fetched"],
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG //:fetched //:use_exec >& $TEST_log \
+    || fail "expected build with the download in two configurations to succeed"
+  assert_contains "shared across configurations" bazel-bin/fetched.out
+  assert_contains "shared across configurations" bazel-bin/use_exec.out
+}
+
+function test_download_runfiles_placement() {
+  # A download artifact in runfiles must appear at the conventional location,
+  # <workspace>/<package>/<target name>/<declared path>, like any other
+  # derived file — not under a doubled or repo-mangled prefix.
+  echo "present in runfiles" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  mkdir -p pkg
+  cat > pkg/defs.bzl <<'EOF'
+def _dl_impl(ctx):
+    f = ctx.downloads["sub/payload.txt"]
+    return [DefaultInfo(files = depset([f]), runfiles = ctx.runfiles(files = [f]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "sub/payload.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+dl = rule(
+    implementation = _dl_impl,
+    attrs = {
+        "url": attr.string(mandatory = True, configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _downloads,
+)
+
+def _bin_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name)
+    ctx.actions.write(out, "#!/bin/sh\n", is_executable = True)
+    rf = ctx.runfiles(files = ctx.files.dep).merge(
+        ctx.attr.dep[DefaultInfo].default_runfiles,
+    )
+    return [DefaultInfo(executable = out, runfiles = rf)]
+
+bin = rule(implementation = _bin_impl, executable = True, attrs = {"dep": attr.label()})
+EOF
+  cat > pkg/BUILD <<EOF
+load("//pkg:defs.bzl", "bin", "dl")
+
+dl(
+    name = "dltarget",
+    url = "http://127.0.0.1:$nc_port/payload.txt",
+    integrity = "$integrity",
+)
+
+bin(
+    name = "runner",
+    dep = ":dltarget",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --enable_runfiles //pkg:runner >& $TEST_log \
+    || fail "expected build to succeed"
+  assert_contains "present in runfiles" \
+      "bazel-bin/pkg/runner.runfiles/_main/pkg/dltarget/sub/payload.txt"
+}
+
+function test_sibling_repository_layout() {
+  # Under --experimental_sibling_repository_layout the download root mirrors
+  # how the configured roots move: bazel-out/downloads for the main repository,
+  # bazel-out/<repo>/downloads for external repositories. Runfiles placement
+  # must be identical to the default layout.
+  echo "sibling layout payload" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  mkdir -p m
+  cat > m/MODULE.bazel <<'EOF'
+module(name = "m")
+EOF
+  cat > m/fetch.bzl <<'EOF'
+def _impl(ctx):
+    f = ctx.downloads["payload.txt"]
+    return [DefaultInfo(files = depset([f]), runfiles = ctx.runfiles(files = [f]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "payload.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+fetch_file = rule(
+    implementation = _impl,
+    attrs = {
+        "url": attr.string(mandatory = True, configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _downloads,
+)
+EOF
+  cat > m/BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    url = "http://127.0.0.1:$nc_port/payload.txt",
+    integrity = "$integrity",
+    visibility = ["//visibility:public"],
+)
+EOF
+  cat > MODULE.bazel <<'EOF'
+bazel_dep(name = "m")
+local_path_override(module_name = "m", path = "m")
+EOF
+  mkdir -p pkg
+  cat > pkg/defs.bzl <<'EOF'
+def _bin_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name)
+    ctx.actions.write(out, "#!/bin/sh\n", is_executable = True)
+    rf = ctx.runfiles(files = ctx.files.dep).merge(
+        ctx.attr.dep[DefaultInfo].default_runfiles,
+    )
+    return [DefaultInfo(executable = out, runfiles = rf)]
+
+bin = rule(implementation = _bin_impl, executable = True, attrs = {"dep": attr.label()})
+EOF
+  cat > pkg/BUILD <<'EOF'
+load("//pkg:defs.bzl", "bin")
+
+bin(
+    name = "runner",
+    dep = "@m//:fetched",
+)
+EOF
+  touch BUILD
+
+  bazel aquery $LAZY_DOWNLOADS_FLAG --experimental_sibling_repository_layout \
+      'mnemonic("Download", @m//:fetched)' >& $TEST_log \
+    || fail "expected aquery to succeed"
+  expect_log "Outputs: \[bazel-out/m+/downloads/fetched/payload.txt\]"
+
+  bazel build $LAZY_DOWNLOADS_FLAG --experimental_sibling_repository_layout \
+      --enable_runfiles //pkg:runner >& $TEST_log \
+    || fail "expected sibling-layout build to succeed"
+  assert_contains "sibling layout payload" \
+      "bazel-bin/pkg/runner.runfiles/m+/fetched/payload.txt"
+}
+
+function test_vendor_dir_resolution() {
+  # A hand-populated content-addressed store must satisfy the download without
+  # any network: the URL is dead and the download cache is disabled.
+  echo "from the vendor store" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  local hex="$(hex_sha256 payload.txt)"
+  mkdir -p vdir/downloads/sha256
+  cp payload.txt "vdir/downloads/sha256/$hex"
+
+  write_fetch_rule
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:1/payload.txt"],
+    integrity = "$integrity",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --vendor_dir=vdir --repository_cache= \
+      //:fetched >& $TEST_log \
+    || fail "expected build to succeed from the vendor download store"
+  assert_contains "from the vendor store" bazel-bin/fetched.out
+}
+
+function test_vendor_targets_vendors_consumed_set_only() {
+  # Consumed-set (configured) semantics: `bazel vendor <targets>` fetches
+  # exactly what a build of the targets would fetch. The unconsumed download
+  # points at a dead address and must be neither fetched nor vendored.
+  echo "the good file" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  local good_hex="$(hex_sha256 payload.txt)"
+  serve_file payload.txt
+
+  cat > variants.bzl <<'EOF'
+def _impl(ctx):
+    downloaded = ctx.downloads["good.txt"]
+    out = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.run_shell(
+        inputs = [downloaded],
+        outputs = [out],
+        command = "cp '{}' '{}'".format(downloaded.path, out.path),
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "good.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+    ctx.download(
+        path = "bad.txt",
+        urls = ["http://127.0.0.1:1/unreachable.txt"],
+        integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    )
+
+variants = rule(
+    implementation = _impl,
+    attrs = {
+        "url": attr.string(mandatory = True, configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<EOF
+load("//:variants.bzl", "variants")
+
+variants(
+    name = "variants",
+    url = "http://127.0.0.1:$nc_port/payload.txt",
+    integrity = "$integrity",
+)
+EOF
+
+  bazel vendor $LAZY_DOWNLOADS_FLAG --vendor_dir=vdir //:variants >& $TEST_log \
+    || fail "expected vendoring the target to succeed"
+
+  [[ -f "vdir/downloads/sha256/$good_hex" ]] \
+    || fail "expected the consumed download to be vendored"
+  local bad_hex="$(python3 -c "
+import base64
+print(base64.b64decode('C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=').hex())
+")"
+  [[ ! -e "vdir/downloads/sha256/$bad_hex" ]] \
+    || fail "expected the unconsumed download not to be vendored"
+  assert_contains "//:variants" vdir/downloads/MANIFEST
+  assert_contains "payload.txt" vdir/downloads/MANIFEST
+
+  # The vendored store must satisfy a fully offline build from scratch.
+  shutdown_server
+  bazel clean --expunge >& $TEST_log
+  bazel build $LAZY_DOWNLOADS_FLAG --vendor_dir=vdir --repository_cache= \
+      //:variants >& $TEST_log \
+    || fail "expected offline build from the vendored store to succeed"
+  assert_contains "the good file" bazel-bin/variants.out
+}
+
+# Note: no-argument `bazel vendor` (declared-set semantics over the main repo
+# and the whole module graph) is not tested here because it inherently fetches
+# every repository of the module graph — including this test environment's
+# implicit module dependencies, whose extensions (e.g. maven) require
+# unsandboxable network access. Its download collection shares the code path
+# exercised by test_vendor_repo_vendors_declared_set_of_repo.
+
+function test_vendor_repo_vendors_declared_set_of_repo() {
+  # Declared-set semantics scoped to one repo: `bazel vendor --repo=@m`
+  # vendors the downloads declared by targets defined in @m.
+  echo "from the module repo" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  local hex="$(hex_sha256 payload.txt)"
+  serve_file payload.txt
+
+  mkdir -p m
+  cat > m/MODULE.bazel <<'EOF'
+module(name = "m")
+EOF
+  cat > m/fetch.bzl <<'EOF'
+def _impl(ctx):
+    return [DefaultInfo(files = depset([ctx.downloads["payload.txt"]]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "payload.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+fetch_file = rule(
+    implementation = _impl,
+    attrs = {
+        "url": attr.string(mandatory = True, configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _downloads,
+)
+EOF
+  cat > m/BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    url = "http://127.0.0.1:$nc_port/payload.txt",
+    integrity = "$integrity",
+)
+EOF
+  cat > MODULE.bazel <<'EOF'
+bazel_dep(name = "m")
+local_path_override(module_name = "m", path = "m")
+EOF
+  touch BUILD
+
+  bazel vendor $LAZY_DOWNLOADS_FLAG --vendor_dir=vdir --repo=@m >& $TEST_log \
+    || fail "expected vendoring the repo to succeed"
+  [[ -f "vdir/downloads/sha256/$hex" ]] \
+    || fail "expected the repo's declared download to be vendored"
+  assert_contains "@@.*//:fetched" vdir/downloads/MANIFEST
+}
+
 function test_downloads_parameter_requires_flag() {
   write_fetch_rule
   cat > BUILD <<'EOF'

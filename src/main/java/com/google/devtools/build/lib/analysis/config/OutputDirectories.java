@@ -97,6 +97,7 @@ public class OutputDirectories {
   private final ArtifactRoot binDirectory;
   private final ArtifactRoot genfilesDirectory;
   private final ArtifactRoot testlogsDirectory;
+  private final ArtifactRoot downloadsDirectory;
 
   private final boolean mergeGenfilesDirectory;
 
@@ -118,6 +119,15 @@ public class OutputDirectories {
     this.binDirectory = OutputDirectory.BIN.getRoot(mnemonic, directories, workspaceName);
     this.genfilesDirectory = OutputDirectory.GENFILES.getRoot(mnemonic, directories, workspaceName);
     this.testlogsDirectory = OutputDirectory.TESTLOGS.getRoot(mnemonic, directories, workspaceName);
+    // Deliberately excludes the configuration mnemonic: download artifacts are declared from
+    // non-configurable attributes only, so identical declarations across configurations share one
+    // exec path (and, through shared-action deduplication, one execution).
+    this.downloadsDirectory =
+        ArtifactRoot.asDerivedRoot(
+            directories.getExecRoot(workspaceName),
+            RootType.OUTPUT,
+            directories.getRelativeOutputPath(),
+            "downloads");
 
     this.mergeGenfilesDirectory = options.getMergeGenfilesDirectory();
     this.siblingRepositoryLayout = siblingRepositoryLayout;
@@ -162,6 +172,24 @@ public class OutputDirectories {
     return siblingRepositoryLayout
         ? buildDerivedRoot("testlogs", repositoryName)
         : testlogsDirectory;
+  }
+
+  /**
+   * Returns the configuration-free root for download artifacts declared by targets of the given
+   * repository: {@code bazel-out/downloads} under the default layout (where external declarations
+   * use an {@code external/<repo>} prefix in the root-relative path), or the per-repository
+   * {@code bazel-out/<repo>/downloads} under {@code --experimental_sibling_repository_layout},
+   * mirroring how the configured roots move. The same for every configuration by construction.
+   */
+  ArtifactRoot getDownloadsDirectory(RepositoryName repositoryName) {
+    return siblingRepositoryLayout && !repositoryName.isMain()
+        ? ArtifactRoot.asDerivedRoot(
+            execRoot,
+            RootType.SIBLING_EXTERNAL_OUTPUT,
+            directories.getRelativeOutputPath(),
+            repositoryName.getName(),
+            "downloads")
+        : downloadsDirectory;
   }
 
   /** Returns a relative path to the genfiles directory at execution time. */

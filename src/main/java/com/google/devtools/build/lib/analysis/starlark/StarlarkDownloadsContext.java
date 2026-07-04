@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.analysis.starlark;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
@@ -30,11 +31,15 @@ import net.starlark.java.annot.Param;
 import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.StarlarkSemantics;
+import net.starlark.java.eval.StarlarkThread;
 import net.starlark.java.eval.StarlarkValue;
+import net.starlark.java.eval.Tuple;
 
 /**
  * The context object passed to a rule's {@code downloads} callback.
@@ -264,6 +269,26 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
   /** Returns the declarations recorded so far, keyed by path, in declaration order. */
   public Map<String, Declaration> getDeclarations() {
     return declarations;
+  }
+
+  /**
+   * Evaluates a rule's {@code downloads} callback and returns the declarations, keyed by path.
+   *
+   * <p>Requires only the {@link Rule} (a loading-phase product) and the Starlark semantics: the
+   * declared download set is a pure function of loading-phase information, so this is usable both
+   * during analysis (to register {@code DownloadAction}s) and from loading-phase-only tooling such
+   * as {@code bazel vendor}.
+   */
+  public static ImmutableMap<String, Declaration> evaluate(
+      Rule rule, StarlarkFunction downloadsCallback, StarlarkSemantics semantics)
+      throws EvalException, InterruptedException {
+    StarlarkDownloadsContext downloadsContext = new StarlarkDownloadsContext(rule);
+    try (Mutability mu = Mutability.create("downloads callback")) {
+      StarlarkThread thread = StarlarkThread.createTransient(mu, semantics);
+      Starlark.call(
+          thread, downloadsCallback, Tuple.of(downloadsContext), ImmutableMap.of());
+    }
+    return ImmutableMap.copyOf(downloadsContext.getDeclarations());
   }
 
   @Override

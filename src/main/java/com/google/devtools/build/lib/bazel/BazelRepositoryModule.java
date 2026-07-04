@@ -72,7 +72,6 @@ import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.Reposito
 import com.google.devtools.build.lib.bazel.repository.RepositoryUtils;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
-import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManagerActionContext;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.exec.ModuleActionContextRegistry;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriter;
@@ -86,6 +85,9 @@ import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.remote.RemoteExternalOverlayFileSystem;
+import com.google.devtools.build.lib.remote.downloader.GrpcRemoteDownloader;
+import com.google.devtools.build.lib.remote.options.RemoteOptions;
+import com.google.devtools.build.lib.remote.options.RemoteOutputsMode;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
@@ -737,11 +739,23 @@ public class BazelRepositoryModule extends BlazeModule {
       CommandEnvironment env,
       BuildRequest buildRequest) {
     if (downloadManager != null) {
+      // Under Build without the Bytes with a remote downloader configured, downloads resolve to
+      // a digest via the Remote Asset API without materializing content locally.
+      GrpcRemoteDownloader digestOnlyDownloader = null;
+      RemoteOptions remoteOptions = buildRequest.getOptions(RemoteOptions.class);
+      if (remoteOptions != null
+          && remoteOptions.getRemoteOutputsMode() == RemoteOutputsMode.MINIMAL
+          && env.getDownloaderDelegate().getDelegate()
+              instanceof GrpcRemoteDownloader remoteDownloader) {
+        digestOnlyDownloader = remoteDownloader;
+      }
       // Lets lazily declared downloads (DownloadAction) share the download cache, distdir,
-      // authentication, and remote downloader configuration with repository fetches.
+      // authentication, and remote downloader configuration with repository fetches, and
+      // resolve from the vendor directory's download store when --vendor_dir is set.
       registryBuilder.register(
           DownloadActionContext.class,
-          new DownloadManagerActionContext(downloadManager, env.getClientEnv()));
+          new DownloadManagerActionContext(
+              downloadManager, env.getClientEnv(), vendorDirectory, digestOnlyDownloader));
     }
   }
 
