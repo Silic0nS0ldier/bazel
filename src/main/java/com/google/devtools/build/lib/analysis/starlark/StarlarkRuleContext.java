@@ -759,6 +759,15 @@ public final class StarlarkRuleContext
     return downloads;
   }
 
+  /**
+   * Returns the declared download artifacts, for the {@code _downloads} output group. Unlike
+   * {@link #getDownloads}, this is usable while the configured target is being assembled, after
+   * the implementation function has returned.
+   */
+  public ImmutableList<Artifact> getDownloadArtifacts() {
+    return downloads == null ? ImmutableList.of() : ImmutableList.copyOf(downloads.values());
+  }
+
   @Override
   public StructImpl getSplitAttr() throws EvalException {
     checkMutable("split_attr");

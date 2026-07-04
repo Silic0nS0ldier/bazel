@@ -362,7 +362,36 @@ action 'Downloading node_modules/left-pad/left-pad'
 
 Because declarations are an analysis-time product, querying requires no fetching.
 The details are reported for every declared download, including ones the build would never execute.
-Loading-phase enumeration, without configuring at all, is what vendoring adds (see [Open questions](#open-questions) for `bazel query` output and SBOM/BEP reporting built on it).
+Loading-phase enumeration, without configuring at all, is what vendoring adds: the `MANIFEST` is the no-analysis textual product of the declared set.
+
+### The `_downloads` output group
+
+Every target with declarations carries an implicit hidden output group, `_downloads`, containing its declared download artifacts.
+It follows the conventions of core-managed groups like `_validation`: not built by default, requested with `--output_groups=_downloads`, and merged with any rule-supplied group of the same name.
+
+Because declarations are configuration-independent, requesting this group under any single configuration fetches a target's _complete_ declared set — the loading-phase property matters for cost, not completeness.
+This gives artifact-level enumeration and prefetching with existing machinery;
+
+```sh
+# Warm caches with everything //app/... might download, without building anything else.
+bazel build --output_groups=_downloads //app/...
+
+# Enumerate the download artifacts.
+bazel cquery --output=files --output_groups=_downloads //app/...
+```
+
+### BEP
+
+BEP receives one `Fetch` event per network attempt and one action execution event per executed `Download`; cache and vendor resolutions emit no `Fetch` event, matching the event's documented semantics.
+A limitation worth stating: `Fetch` events carry only a URL and a success bit, so they cannot be associated with the download action (or repository fetch) that caused them.
+The only join available is matching the URL against aquery's `download_urls`, which URL rewriting and mirror fallback can defeat.
+Closing this would take an additive `context` field on the `Fetch` event, benefiting repository fetches equally; it is left for a separate change since the schema is shared.
+
+### SBOM generation
+
+SBOM generation is delegated to the dedicated [Better SBOMs: annotated rule attributes](https://docs.google.com/document/d/1ReiTFz5N98D9bGPgL45ziQnGT8xJAunug9JJ89gZsm8/edit) proposal and the `package_metadata` ecosystem ([#29242](https://github.com/bazelbuild/bazel/issues/29242)): package identity (purl, version, licence) is domain knowledge the declaring rule has and this primitive does not.
+Acquisition facts (URLs, integrity) reach SBOM tooling through community-defined providers: a ruleset's declarations derive from its own non-configurable attributes, so the ruleset can expose exactly the provider its SBOM integration needs.
+If common requirements emerge across rulesets, a builtin provider (e.g. `DownloadsInfo`) can be added then.
 
 ## Example: `npm_import`
 
@@ -443,6 +472,8 @@ This proposal does not seek to solve;
   Such content needs a stable artifact (a release asset, a mirror) before it can be declared as a download.
 - **Optional downloads.**
   No `allow_fail` equivalent; see [Execution semantics](#execution-semantics).
+- **SBOM generation.**
+  Delegated to the dedicated SBOM proposal; see [Introspection](#introspection).
 - **New authentication machinery.**
   Credential helpers and `--remote_downloader` authentication apply as-is.
 - **Configuration-dependent download sets.**
@@ -469,7 +500,7 @@ The reference implementation covers the full design, with one exception noted be
 The API contract (declaration semantics, action key, cache identity, aquery output) is implemented as specified behind `--experimental_lazy_downloads`.
 
 **API surface.**
-`rule(downloads = ...)`, `downloads_ctx.download(...)` (including `canonical_id`), `ctx.downloads`, and `Download` actions with full aquery support.
+`rule(downloads = ...)`, `downloads_ctx.download(...)` (including `canonical_id`), `ctx.downloads`, the implicit `_downloads` output group, and `Download` actions with full aquery support.
 Rule extension composes as specified: callbacks run child to ancestor after all initializers, declarations merge into one namespace, and duplicate paths across the chain are rejected.
 Progress reporting is action-scoped as specified: fetch progress (URL, byte counts) renders on the download action's own progress line, with BEP receiving per-attempt `Fetch` events.
 
@@ -540,8 +571,3 @@ Rejected as a conflation of two identities.
 The SRI checksum identifies content and may use a hash function (e.g. sha512, the npm lockfile default) that differs from the remote cache's digest function, so a `Digest` can never be derived from `integrity`; it would have to be persisted and trusted from earlier runs, adding a cache-consistency problem for marginal benefit.
 The Remote Asset service already fills this role: `FetchBlob` is cheap when the service has the blob cached, and its response carries the authoritative `Digest` in the server's digest function.
 
-# Open questions
-
-1. **Loading-phase introspection.**
-   Action-graph introspection is specified above, but the deterministic download set also invites loading-phase tooling that needs no analysis: `bazel query` output for declared downloads, BEP reporting, and SBOM generation.
-   Worth specifying once the core lands.

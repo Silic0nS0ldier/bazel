@@ -125,6 +125,13 @@ public abstract class OutputGroupInfo extends StructImpl
    */
   public static final String VALIDATION = HIDDEN_OUTPUT_GROUP_PREFIX + "validation";
 
+  /**
+   * This output group contains a target's declared download artifacts (the lazy downloads API).
+   * Because download declarations are configuration-independent, requesting this group under any
+   * single configuration fetches a target's complete declared download set.
+   */
+  public static final String DOWNLOADS = HIDDEN_OUTPUT_GROUP_PREFIX + "downloads";
+
   /** Helper output group used to request {@link #VALIDATION} outputs from top-level aspect. */
   public static final String VALIDATION_TOP_LEVEL =
       HIDDEN_OUTPUT_GROUP_PREFIX + "validation_top_level" + INTERNAL_SUFFIX;

@@ -737,6 +737,49 @@ EOF
       "bazel-bin/pkg/runner.runfiles/_main/pkg/dltarget/sub/payload.txt"
 }
 
+function test_downloads_output_group() {
+  # Declared downloads are exposed through the implicit _downloads output
+  # group: not fetched by default, fetched (completely, thanks to
+  # configuration-independence) when the group is requested.
+  echo "output group payload" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  cat > lazy.bzl <<EOF
+def _impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.write(out, "built without downloading")
+    return [DefaultInfo(files = depset([out]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "unused.txt",
+        urls = ["http://127.0.0.1:$nc_port/payload.txt"],
+        integrity = "$integrity",
+    )
+
+lazy_rule = rule(
+    implementation = _impl,
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<'EOF'
+load("//:lazy.bzl", "lazy_rule")
+
+lazy_rule(name = "lazy")
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache= //:lazy >& $TEST_log \
+    || fail "expected default build to succeed"
+  [[ ! -e "bazel-out/downloads/lazy/unused.txt" ]] \
+    || fail "expected the unconsumed download not to be fetched by default"
+
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache= \
+      --output_groups=_downloads //:lazy >& $TEST_log \
+    || fail "expected build of the _downloads output group to succeed"
+  assert_contains "output group payload" bazel-out/downloads/lazy/unused.txt
+}
+
 function test_rule_extension_composes_downloads() {
   # The downloads callbacks of a rule class and its ancestors all run and
   # share one declaration namespace; ctx.downloads exposes the merged map to
