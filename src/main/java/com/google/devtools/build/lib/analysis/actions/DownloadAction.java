@@ -48,6 +48,7 @@ public final class DownloadAction extends AbstractAction {
 
   private final ImmutableList<URI> urls;
   private final String integrity;
+  private final String canonicalId;
   private final boolean executable;
 
   public DownloadAction(
@@ -55,10 +56,12 @@ public final class DownloadAction extends AbstractAction {
       Artifact output,
       ImmutableList<URI> urls,
       String integrity,
+      String canonicalId,
       boolean executable) {
     super(owner, NestedSetBuilder.emptySet(Order.STABLE_ORDER), ImmutableSet.of(output));
     this.urls = urls;
     this.integrity = integrity;
+    this.canonicalId = canonicalId;
     this.executable = executable;
   }
 
@@ -74,7 +77,7 @@ public final class DownloadAction extends AbstractAction {
     Path outputPath = actionExecutionContext.getInputPath(getPrimaryOutput());
     try {
       downloadActionContext.download(
-          urls, integrity, outputPath, getOwner().getLabel().toString());
+          urls, integrity, canonicalId, outputPath, getOwner().getLabel().toString());
       if (executable) {
         outputPath.setExecutable(true);
       }
@@ -104,12 +107,11 @@ public final class DownloadAction extends AbstractAction {
       ActionKeyContext actionKeyContext,
       @Nullable InputMetadataProvider inputMetadataProvider,
       Fingerprint fp) {
+    // The integrity checksum is the identity of the download; urls are acquisition hints only.
+    // Deliberately excluded from the key so that changing mirrors invalidates nothing.
     fp.addString(GUID);
-    fp.addInt(urls.size());
-    for (URI url : urls) {
-      fp.addString(url.toString());
-    }
     fp.addString(integrity);
+    fp.addString(canonicalId);
     fp.addBoolean(executable);
   }
 
@@ -126,6 +128,14 @@ public final class DownloadAction extends AbstractAction {
   /** Returns the Subresource Integrity checksum pinning the content of this download. */
   public String getIntegrity() {
     return integrity;
+  }
+
+  /**
+   * Returns the canonical ID restricting download cache hits, or the empty string if cache hits
+   * are unrestricted.
+   */
+  public String getCanonicalId() {
+    return canonicalId;
   }
 
   /** Returns whether the output is marked executable after the download. */

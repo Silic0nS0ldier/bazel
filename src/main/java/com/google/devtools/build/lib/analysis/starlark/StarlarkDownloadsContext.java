@@ -54,12 +54,19 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
     private final String path;
     private final ImmutableList<URI> urls;
     private final String integrity;
+    private final String canonicalId;
     private final boolean executable;
 
-    private Declaration(String path, ImmutableList<URI> urls, String integrity, boolean executable) {
+    private Declaration(
+        String path,
+        ImmutableList<URI> urls,
+        String integrity,
+        String canonicalId,
+        boolean executable) {
       this.path = path;
       this.urls = urls;
       this.integrity = integrity;
+      this.canonicalId = canonicalId;
       this.executable = executable;
     }
 
@@ -73,6 +80,10 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
 
     public String getIntegrity() {
       return integrity;
+    }
+
+    public String getCanonicalId() {
+      return canonicalId;
     }
 
     public boolean isExecutable() {
@@ -144,14 +155,25 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
             named = true,
             doc =
                 "A Subresource Integrity checksum (<code>sha256-</code>, <code>sha384-</code> or"
-                    + " <code>sha512-</code>) pinning the content of the download."),
+                    + " <code>sha512-</code>) pinning the content of the download. Exactly one"
+                    + " checksum must be given; the multi-checksum form of the SRI specification"
+                    + " is not accepted."),
+        @Param(
+            name = "canonical_id",
+            named = true,
+            defaultValue = "''",
+            doc =
+                "If non-empty, restrict download cache hits to entries that were added to the"
+                    + " cache with the same canonical ID. Matches the semantics of the"
+                    + " repository rule download API."),
         @Param(
             name = "executable",
             named = true,
             defaultValue = "False",
             doc = "Whether the downloaded file is marked executable."),
       })
-  public void download(String path, Sequence<?> urls, String integrity, boolean executable)
+  public void download(
+      String path, Sequence<?> urls, String integrity, String canonicalId, boolean executable)
       throws EvalException {
     PathFragment pathFragment = PathFragment.create(path);
     if (path.isEmpty()
@@ -162,6 +184,18 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
     }
     if (declarations.containsKey(path)) {
       throw Starlark.errorf("download path '%s' is declared more than once", path);
+    }
+    // Each declared path becomes a file in the same output directory, so no path may also be
+    // needed as a directory. Detect it here rather than letting the artifact prefix conflict
+    // check produce a less actionable error at the end of analysis.
+    for (String existing : declarations.keySet()) {
+      PathFragment existingFragment = PathFragment.create(existing);
+      if (pathFragment.startsWith(existingFragment) || existingFragment.startsWith(pathFragment)) {
+        throw Starlark.errorf(
+            "download path '%s' conflicts with download path '%s': no download path may be a"
+                + " prefix of another",
+            path, existing);
+      }
     }
     ImmutableList<String> urlStrings =
         ImmutableList.copyOf(Sequence.cast(urls, String.class, "urls"));
@@ -182,10 +216,17 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
       uris.add(uri);
     }
     validateIntegrity(integrity);
-    declarations.put(path, new Declaration(path, uris.build(), integrity, executable));
+    declarations.put(
+        path, new Declaration(path, uris.build(), integrity, canonicalId, executable));
   }
 
   private static void validateIntegrity(String integrity) throws EvalException {
+    if (integrity.chars().anyMatch(Character::isWhitespace)) {
+      throw Starlark.errorf(
+          "invalid integrity '%s': exactly one checksum must be given (the multi-checksum form of"
+              + " the SRI specification is not supported)",
+          integrity);
+    }
     int dash = integrity.indexOf('-');
     if (dash <= 0) {
       throw Starlark.errorf(

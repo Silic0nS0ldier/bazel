@@ -47,10 +47,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.Phaser;
+import java.util.concurrent.locks.ReentrantLock;
 import javax.annotation.Nullable;
 
 /**
@@ -67,6 +69,11 @@ public class DownloadManager {
   private final HttpDownloader bzlmodHttpDownloader;
   private final ExtendedEventHandler eventHandler;
   private boolean disableDownload = false;
+
+  // Serializes concurrent downloads of identical content (keyed by checksum) so that the first
+  // fetch populates the download cache and the rest are served from it. See downloadInExecutor.
+  private final ConcurrentHashMap<String, ReentrantLock> inflightDownloads =
+      new ConcurrentHashMap<>();
   private int retries = 0;
   @Nullable private Credentials netrcCreds;
   private CredentialFactory credentialFactory = StaticCredentials::new;
@@ -175,6 +182,11 @@ public class DownloadManager {
    * the {@link RepositoryCache}. If it doesn't exist, proceed to download the file and load it into
    * the cache prior to returning the value.
    *
+   * <p>Concurrent downloads of identical content (same checksum) are serialized, so that the first
+   * one populates the download cache and the others are served from it rather than fetching the
+   * same bytes again. This covers every consumer of this download manager: repository fetches and
+   * download actions deduplicate against each other.
+   *
    * @param originalUrls list of mirror URLs with identical content
    * @param checksum valid checksum which is checked, or absent to disable
    * @param type extension, e.g. "tar.gz" to force on downloaded filename, or empty to not do this
@@ -188,6 +200,53 @@ public class DownloadManager {
    * @throws InterruptedException if this thread is being cast into oblivion
    */
   private Path downloadInExecutor(
+      List<URI> originalUrls,
+      Map<String, List<String>> headers,
+      Map<URI, Map<String, List<String>>> authHeaders,
+      Optional<Checksum> checksum,
+      String canonicalId,
+      Optional<String> type,
+      Path output,
+      Map<String, String> clientEnv,
+      String context,
+      boolean mayHardlink)
+      throws IOException, InterruptedException {
+    if (checksum.isEmpty()) {
+      // Without a checksum the download has no content identity to deduplicate on.
+      return downloadUnderLock(
+          originalUrls,
+          headers,
+          authHeaders,
+          checksum,
+          canonicalId,
+          type,
+          output,
+          clientEnv,
+          context,
+          mayHardlink);
+    }
+    ReentrantLock lock =
+        inflightDownloads.computeIfAbsent(
+            checksum.get().getKeyType() + ":" + checksum.get(), unused -> new ReentrantLock());
+    lock.lockInterruptibly();
+    try {
+      return downloadUnderLock(
+          originalUrls,
+          headers,
+          authHeaders,
+          checksum,
+          canonicalId,
+          type,
+          output,
+          clientEnv,
+          context,
+          mayHardlink);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private Path downloadUnderLock(
       List<URI> originalUrls,
       Map<String, List<String>> headers,
       Map<URI, Map<String, List<String>>> authHeaders,

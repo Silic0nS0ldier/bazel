@@ -30,8 +30,9 @@ import java.util.concurrent.Phaser;
  *
  * <p>Delegating to the {@link DownloadManager} means download actions transparently benefit from
  * the download cache (content-addressed by checksum), {@code --distdir}, URL rewriting, netrc and
- * credential-helper authentication, retries, and — when configured — the remote downloader
- * (Remote Asset API).
+ * credential-helper authentication, retries, deduplication of concurrent downloads of identical
+ * content (against repository fetches too), and — when configured — the remote downloader (Remote
+ * Asset API).
  */
 public final class DownloadManagerActionContext implements DownloadActionContext {
   private final DownloadManager downloadManager;
@@ -44,7 +45,8 @@ public final class DownloadManagerActionContext implements DownloadActionContext
   }
 
   @Override
-  public void download(ImmutableList<URI> urls, String integrity, Path output, String context)
+  public void download(
+      ImmutableList<URI> urls, String integrity, String canonicalId, Path output, String context)
       throws IOException, InterruptedException {
     Checksum checksum;
     try {
@@ -63,7 +65,7 @@ public final class DownloadManagerActionContext implements DownloadActionContext
             /* headers= */ ImmutableMap.of(),
             /* authHeaders= */ ImmutableMap.of(),
             Optional.of(checksum),
-            /* canonicalId= */ "",
+            canonicalId,
             /* type= */ Optional.empty(),
             output,
             clientEnv,

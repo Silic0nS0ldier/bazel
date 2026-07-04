@@ -135,6 +135,10 @@ message Action {
   // The Subresource Integrity checksum pinning the content of a Download
   // action's output.
   string download_integrity = 22;
+
+  // The canonical ID restricting download cache hits for a Download action,
+  // if any. (downloads_ctx.download(canonical_id=...))
+  string download_canonical_id = 23;
 }
 
 // Represents a single target (without configuration information) that is

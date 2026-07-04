@@ -64,6 +64,7 @@ def _downloads(ctx):
         path = ctx.attr.path,
         urls = ctx.attr.urls,
         integrity = ctx.attr.integrity,
+        canonical_id = ctx.attr.canonical_id,
     )
 
 fetch_file = rule(
@@ -72,6 +73,7 @@ fetch_file = rule(
         "path": attr.string(mandatory = True, configurable = False),
         "urls": attr.string_list(mandatory = True, configurable = False),
         "integrity": attr.string(mandatory = True, configurable = False),
+        "canonical_id": attr.string(configurable = False),
     },
     downloads = _downloads,
 )
@@ -241,6 +243,136 @@ EOF
   assert_contains "cache me" bazel-bin/fetched.out
 }
 
+function test_url_fallback_to_mirror() {
+  # The first URL is dead; the download manager must fall back to the mirror.
+  echo "mirrored content" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  write_fetch_rule
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = [
+        "http://127.0.0.1:1/payload.txt",
+        "http://127.0.0.1:$nc_port/payload.txt",
+    ],
+    integrity = "$integrity",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG //:fetched >& $TEST_log \
+    || fail "expected build to succeed via the mirror URL"
+  assert_contains "mirrored content" bazel-bin/fetched.out
+}
+
+function test_changing_urls_does_not_invalidate() {
+  # The integrity checksum is the identity of a download; urls are acquisition
+  # hints excluded from the action key. Changing them must not re-execute an
+  # already resolved download.
+  echo "url change is free" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  write_fetch_rule
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:$nc_port/payload.txt"],
+    integrity = "$integrity",
+)
+EOF
+
+  # The download cache is disabled throughout so that only the action cache
+  # can satisfy the rebuild.
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache= //:fetched >& $TEST_log \
+    || fail "expected online build to succeed"
+
+  # Point the declaration at a dead address and take the network away. The
+  # rebuild must be satisfied by the action cache without executing anything.
+  shutdown_server
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:1/payload.txt"],
+    integrity = "$integrity",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache= //:fetched >& $TEST_log \
+    || fail "expected rebuild with changed urls to succeed without re-downloading"
+  assert_contains "url change is free" bazel-bin/fetched.out
+}
+
+function test_canonical_id_restricts_cache_reuse() {
+  echo "canonically yours" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  write_fetch_rule
+  cat > BUILD <<EOF
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:$nc_port/payload.txt"],
+    integrity = "$integrity",
+    canonical_id = "id-one",
+)
+EOF
+
+  # Populate the download cache under canonical ID "id-one".
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache="$repo_cache_dir" \
+      //:fetched >& $TEST_log || fail "expected online build to succeed"
+
+  # Same canonical ID: the offline rebuild is a cache hit.
+  shutdown_server
+  bazel clean --expunge >& $TEST_log
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache="$repo_cache_dir" \
+      //:fetched >& $TEST_log \
+    || fail "expected offline rebuild with matching canonical ID to succeed"
+  assert_contains "canonically yours" bazel-bin/fetched.out
+
+  # A different canonical ID must refuse the cache entry and hit the (dead)
+  # network.
+  sed -i 's/id-one/id-two/' BUILD
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_cache="$repo_cache_dir" \
+      //:fetched >& $TEST_log \
+    && fail "expected build with mismatched canonical ID to fail offline"
+  expect_log "failed to download"
+}
+
+function test_offline_mode_reports_actionable_error() {
+  write_fetch_rule
+  cat > BUILD <<'EOF'
+load("//:fetch.bzl", "fetch_file")
+
+fetch_file(
+    name = "fetched",
+    path = "payload.txt",
+    urls = ["http://127.0.0.1:1/payload.txt"],
+    integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+)
+EOF
+
+  # With downloads disabled and a cold cache the failure must name the cause
+  # rather than surface a connection error.
+  bazel build $LAZY_DOWNLOADS_FLAG --repository_disable_download \
+      --repository_cache="$repo_cache_dir" //:fetched >& $TEST_log \
+    && fail "expected build to fail with downloads disabled"
+  expect_log "download is disabled"
+}
+
 function test_executable_download() {
   cat > tool.sh <<'EOF'
 #!/bin/sh
@@ -357,6 +489,67 @@ EOF
   expect_log "download path 'file.txt' is declared more than once"
 }
 
+function test_download_path_prefix_conflict_fails() {
+  cat > prefix.bzl <<'EOF'
+def _impl(ctx):
+    return [DefaultInfo()]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "dir",
+        urls = ["http://127.0.0.1:1/dir"],
+        integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    )
+    ctx.download(
+        path = "dir/file.txt",
+        urls = ["http://127.0.0.1:1/file.txt"],
+        integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    )
+
+prefix_rule = rule(
+    implementation = _impl,
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<'EOF'
+load("//:prefix.bzl", "prefix_rule")
+
+prefix_rule(name = "prefix")
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG //:prefix >& $TEST_log \
+    && fail "expected analysis to fail"
+  expect_log "download path 'dir/file.txt' conflicts with download path 'dir'"
+}
+
+function test_multi_checksum_integrity_fails_at_analysis() {
+  cat > multi.bzl <<'EOF'
+def _impl(ctx):
+    return [DefaultInfo()]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "file.txt",
+        urls = ["http://127.0.0.1:1/file.txt"],
+        integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE= sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    )
+
+multi_rule = rule(
+    implementation = _impl,
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<'EOF'
+load("//:multi.bzl", "multi_rule")
+
+multi_rule(name = "multi")
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG //:multi >& $TEST_log \
+    && fail "expected analysis to fail"
+  expect_log "exactly one checksum must be given"
+}
+
 function test_invalid_integrity_fails_at_analysis() {
   cat > invalid.bzl <<'EOF'
 def _impl(ctx):
@@ -398,6 +591,7 @@ fetch_file(
         "http://127.0.0.1:2/mirror/payload.txt",
     ],
     integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    canonical_id = "aquery-canonical-id",
 )
 EOF
 
@@ -408,6 +602,7 @@ EOF
   expect_log "http://127.0.0.1:1/payload.txt"
   expect_log "http://127.0.0.1:2/mirror/payload.txt"
   expect_log "Integrity: sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE="
+  expect_log "CanonicalId: aquery-canonical-id"
   expect_log "IsExecutable: false"
 
   bazel aquery $LAZY_DOWNLOADS_FLAG --output=textproto \
@@ -416,6 +611,7 @@ EOF
   expect_log 'download_urls: "http://127.0.0.1:1/payload.txt"'
   expect_log 'download_urls: "http://127.0.0.1:2/mirror/payload.txt"'
   expect_log 'download_integrity: "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE="'
+  expect_log 'download_canonical_id: "aquery-canonical-id"'
 }
 
 function test_downloads_parameter_requires_flag() {

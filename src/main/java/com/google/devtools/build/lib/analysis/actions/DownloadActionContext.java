@@ -32,9 +32,12 @@ public interface DownloadActionContext extends ActionContext {
    *
    * @param urls candidate URLs, tried in order; all must serve identical content
    * @param integrity a Subresource Integrity checksum pinning the content
+   * @param canonicalId if non-empty, restrict download cache hits to entries recorded with the
+   *     same canonical ID
    * @param output the path to materialize the content at
    * @param context a human-readable description of the requester, for progress reporting
    */
-  void download(ImmutableList<URI> urls, String integrity, Path output, String context)
+  void download(
+      ImmutableList<URI> urls, String integrity, String canonicalId, Path output, String context)
       throws IOException, InterruptedException;
 }

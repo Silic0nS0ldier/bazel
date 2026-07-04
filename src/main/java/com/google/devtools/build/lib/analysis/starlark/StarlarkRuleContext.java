@@ -366,6 +366,7 @@ public final class StarlarkRuleContext
               output,
               declaration.getUrls(),
               declaration.getIntegrity(),
+              declaration.getCanonicalId(),
               declaration.isExecutable()));
       downloads.put(declaration.getPath(), output);
     }

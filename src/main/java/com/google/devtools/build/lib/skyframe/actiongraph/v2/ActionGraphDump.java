@@ -224,6 +224,7 @@ public class ActionGraphDump {
       }
       actionBuilder
           .setDownloadIntegrity(downloadAction.getIntegrity())
+          .setDownloadCanonicalId(downloadAction.getCanonicalId())
           .setIsExecutable(downloadAction.isExecutable());
     }
 

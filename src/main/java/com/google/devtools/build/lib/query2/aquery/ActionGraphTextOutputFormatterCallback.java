@@ -375,8 +375,14 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
           .append("  ]\n")
           .append("  Integrity: ")
           .append(downloadAction.getIntegrity())
-          .append("\n")
-          .append(String.format("  IsExecutable: %b\n", downloadAction.isExecutable()));
+          .append("\n");
+      if (!downloadAction.getCanonicalId().isEmpty()) {
+        stringBuilder
+            .append("  CanonicalId: ")
+            .append(downloadAction.getCanonicalId())
+            .append("\n");
+      }
+      stringBuilder.append(String.format("  IsExecutable: %b\n", downloadAction.isExecutable()));
     }
 
     stringBuilder.append('\n');
