@@ -575,9 +575,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
         downloads != Starlark.NONE && !(downloads instanceof StarlarkFunction),
         "downloads must be a function, got '%s'",
         Starlark.type(downloads));
-    failIf(
-        downloads != Starlark.NONE && parentUnchecked != Starlark.NONE,
-        "downloads is not supported when extending rules.");
 
     final RuleClass parent;
     final boolean executable;

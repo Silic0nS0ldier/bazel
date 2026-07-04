@@ -737,6 +737,180 @@ EOF
       "bazel-bin/pkg/runner.runfiles/_main/pkg/dltarget/sub/payload.txt"
 }
 
+function test_rule_extension_composes_downloads() {
+  # The downloads callbacks of a rule class and its ancestors all run and
+  # share one declaration namespace; ctx.downloads exposes the merged map to
+  # every implementation in the chain.
+  echo "extension payload" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  cat > ext.bzl <<'EOF'
+def _parent_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".parent")
+    ctx.actions.run_shell(
+        inputs = [ctx.downloads["parent.txt"]],
+        outputs = [out],
+        command = "cp '{}' '{}'".format(ctx.downloads["parent.txt"].path, out.path),
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+def _parent_downloads(ctx):
+    ctx.download(
+        path = "parent.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+parent_rule = rule(
+    implementation = _parent_impl,
+    extendable = True,
+    attrs = {
+        "url": attr.string(mandatory = True, configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _parent_downloads,
+)
+
+def _child_impl(ctx):
+    _ = ctx.super()
+    out = ctx.actions.declare_file(ctx.label.name + ".child")
+    ctx.actions.run_shell(
+        inputs = [ctx.downloads["parent.txt"], ctx.downloads["child.txt"]],
+        outputs = [out],
+        command = "cat '{}' '{}' > '{}'".format(
+            ctx.downloads["parent.txt"].path,
+            ctx.downloads["child.txt"].path,
+            out.path,
+        ),
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+def _child_downloads(ctx):
+    ctx.download(
+        path = "child.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+child_rule = rule(
+    implementation = _child_impl,
+    parent = parent_rule,
+    downloads = _child_downloads,
+)
+EOF
+  cat > BUILD <<EOF
+load("//:ext.bzl", "child_rule")
+
+child_rule(
+    name = "ext",
+    url = "http://127.0.0.1:$nc_port/payload.txt",
+    integrity = "$integrity",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --experimental_rule_extension_api \
+      //:ext >& $TEST_log \
+    || fail "expected build of the extending rule to succeed"
+  [[ "$(grep -c "extension payload" bazel-bin/ext.child)" == 2 ]] \
+    || fail "expected both the parent's and the child's downloads to be consumed"
+}
+
+function test_rule_extension_duplicate_download_path_fails() {
+  cat > dupext.bzl <<'EOF'
+def _impl(ctx):
+    _ = ctx.super()
+    return [DefaultInfo()]
+
+def _parent_impl(ctx):
+    return [DefaultInfo()]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "same.txt",
+        urls = ["http://127.0.0.1:1/same.txt"],
+        integrity = "sha256-C60QAIWuqTvUgy/l8DEDBzHqEyhLcNqlnLwT07mrrGE=",
+    )
+
+parent_rule = rule(
+    implementation = _parent_impl,
+    extendable = True,
+    downloads = _downloads,
+)
+
+child_rule = rule(
+    implementation = _impl,
+    parent = parent_rule,
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<'EOF'
+load("//:dupext.bzl", "child_rule")
+
+child_rule(name = "dup")
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --experimental_rule_extension_api \
+      //:dup >& $TEST_log \
+    && fail "expected analysis to fail"
+  expect_log "download path 'same.txt' is declared more than once"
+}
+
+function test_initializer_values_visible_to_downloads_callback() {
+  # Initializers run before downloads callbacks; the callback observes the
+  # post-initializer attribute values.
+  echo "initialized payload" > payload.txt
+  local integrity="$(sri_sha256 payload.txt)"
+  serve_file payload.txt
+
+  cat > init.bzl <<EOF
+def _init(name, file = None, integrity = None, url = None, **kwargs):
+    # Compute the full URL from the short file name.
+    return {"url": "http://127.0.0.1:$nc_port/" + file, "integrity": integrity}
+
+def _impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.run_shell(
+        inputs = [ctx.downloads["file.txt"]],
+        outputs = [out],
+        command = "cp '{}' '{}'".format(ctx.downloads["file.txt"].path, out.path),
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+def _downloads(ctx):
+    ctx.download(
+        path = "file.txt",
+        urls = [ctx.attr.url],
+        integrity = ctx.attr.integrity,
+    )
+
+init_rule = rule(
+    implementation = _impl,
+    initializer = _init,
+    attrs = {
+        "file": attr.string(configurable = False),
+        "url": attr.string(configurable = False),
+        "integrity": attr.string(mandatory = True, configurable = False),
+    },
+    downloads = _downloads,
+)
+EOF
+  cat > BUILD <<EOF
+load("//:init.bzl", "init_rule")
+
+init_rule(
+    name = "initialized",
+    file = "payload.txt",
+    integrity = "$integrity",
+)
+EOF
+
+  bazel build $LAZY_DOWNLOADS_FLAG --experimental_rule_extension_api \
+      //:initialized >& $TEST_log \
+    || fail "expected build with initializer-computed URL to succeed"
+  assert_contains "initialized payload" bazel-bin/initialized.out
+}
+
 function test_sibling_repository_layout() {
   # Under --experimental_sibling_repository_layout the download root mirrors
   # how the configured roots move: bazel-out/downloads for the main repository,

@@ -18,6 +18,8 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
+import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
+import com.google.devtools.build.lib.actions.ActionProgressEvent;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
 import com.google.devtools.build.lib.analysis.actions.DownloadActionContext;
@@ -26,6 +28,7 @@ import com.google.devtools.build.lib.bazel.repository.cache.DownloadCache;
 import com.google.devtools.build.lib.bazel.repository.downloader.Checksum;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
 import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.remote.downloader.GrpcRemoteDownloader;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -50,8 +53,16 @@ import javax.annotation.Nullable;
  * transparently benefit from URL rewriting, netrc and credential-helper authentication, retries,
  * deduplication of concurrent downloads of identical content (against repository fetches too),
  * and — when configured — the remote downloader (Remote Asset API).
+ *
+ * <p>Fetch progress is reported on the download action's own progress line, mirroring how
+ * repository fetches report the URL currently being attempted.
  */
 public final class DownloadManagerActionContext implements DownloadActionContext {
+
+  // A single progress id: the action's progress line updates in place as attempts move between
+  // URLs (mirror fallback, retries).
+  private static final String PROGRESS_ID = "download";
+
   private final DownloadManager downloadManager;
   private final ImmutableMap<String, String> clientEnv;
   @Nullable private final VendorManager vendorManager;
@@ -77,7 +88,7 @@ public final class DownloadManagerActionContext implements DownloadActionContext
       String integrity,
       String canonicalId,
       boolean executable,
-      Artifact output,
+      ActionExecutionMetadata action,
       ActionExecutionContext actionExecutionContext)
       throws IOException, InterruptedException {
     Checksum checksum;
@@ -87,11 +98,14 @@ public final class DownloadManagerActionContext implements DownloadActionContext
       throw new IOException(
           String.format("invalid integrity checksum '%s': %s", integrity, e.getMessage()), e);
     }
-    Path outputPath = actionExecutionContext.getInputPath(output);
+    Path outputPath = actionExecutionContext.getInputPath(action.getPrimaryOutput());
     if (resolveFromVendorDirectory(checksum, outputPath)) {
       return;
     }
-    if (resolveToRemoteDigest(urls, checksum, canonicalId, output, actionExecutionContext)) {
+    ExtendedEventHandler progressEventHandler =
+        progressBridge(action, actionExecutionContext.getEventHandler());
+    if (resolveToRemoteDigest(
+        urls, checksum, canonicalId, action, actionExecutionContext, progressEventHandler)) {
       return;
     }
     // The calling action already runs on an execution-phase thread, so the download runs
@@ -108,10 +122,44 @@ public final class DownloadManagerActionContext implements DownloadActionContext
             /* type= */ Optional.empty(),
             outputPath,
             clientEnv,
-            /* context= */ output.getOwnerLabel().toString(),
+            /* context= */ action.getOwner().getLabel().toString(),
             new Phaser(),
-            /* mayHardlink= */ false);
+            /* mayHardlink= */ false,
+            progressEventHandler);
     Path unused = downloadManager.finalizeDownload(download);
+  }
+
+  /**
+   * Returns an event handler that renders fetch progress on the given action's own progress line
+   * and forwards everything else (warnings, BEP fetch events) unchanged.
+   *
+   * <p>This mirrors repository fetch reporting: the line names the URL currently being attempted
+   * and updates in place across mirror fallback and retries. The translation is UI-only; BEP
+   * continues to receive one event per fetch attempt ({@code FetchEvent}) and one event per action
+   * execution, since its action model has no notion of a retry.
+   */
+  private static ExtendedEventHandler progressBridge(
+      ActionExecutionMetadata action, ExtendedEventHandler delegate) {
+    return new ExtendedEventHandler() {
+      @Override
+      public void handle(Event event) {
+        delegate.handle(event);
+      }
+
+      @Override
+      public void post(Postable postable) {
+        if (postable instanceof FetchProgress progress) {
+          String message =
+              progress.getProgress().isEmpty()
+                  ? progress.getResourceIdentifier()
+                  : progress.getResourceIdentifier() + "; " + progress.getProgress();
+          delegate.post(
+              ActionProgressEvent.create(action, PROGRESS_ID, message, progress.isFinished()));
+        } else {
+          delegate.post(postable);
+        }
+      }
+    };
   }
 
   /**
@@ -126,12 +174,14 @@ public final class DownloadManagerActionContext implements DownloadActionContext
       ImmutableList<URI> urls,
       Checksum checksum,
       String canonicalId,
-      Artifact output,
-      ActionExecutionContext actionExecutionContext)
+      ActionExecutionMetadata action,
+      ActionExecutionContext actionExecutionContext,
+      ExtendedEventHandler progressEventHandler)
       throws InterruptedException {
     if (digestOnlyDownloader == null) {
       return false;
     }
+    Artifact output = action.getPrimaryOutput();
     Digest digest;
     try {
       digest =
@@ -139,7 +189,7 @@ public final class DownloadManagerActionContext implements DownloadActionContext
               urls,
               Optional.of(checksum),
               canonicalId,
-              actionExecutionContext.getEventHandler(),
+              progressEventHandler,
               /* context= */ output.getOwnerLabel().toString());
     } catch (IOException e) {
       actionExecutionContext

@@ -76,7 +76,7 @@ public final class DownloadAction extends AbstractAction {
     }
     try {
       downloadActionContext.download(
-          urls, integrity, canonicalId, executable, getPrimaryOutput(), actionExecutionContext);
+          urls, integrity, canonicalId, executable, this, actionExecutionContext);
       // The strategy may have resolved the output without materializing it locally (Build without
       // the Bytes); the executable bit only applies to a file that exists.
       Path outputPath = actionExecutionContext.getInputPath(getPrimaryOutput());

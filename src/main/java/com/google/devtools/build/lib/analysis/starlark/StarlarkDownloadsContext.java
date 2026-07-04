@@ -19,6 +19,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.StructImpl;
 import com.google.devtools.build.lib.packages.StructProvider;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -272,21 +273,41 @@ public final class StarlarkDownloadsContext implements StarlarkValue {
   }
 
   /**
-   * Evaluates a rule's {@code downloads} callback and returns the declarations, keyed by path.
+   * Evaluates the {@code downloads} callbacks of a rule's class and its ancestors and returns the
+   * merged declarations, keyed by path. Returns an empty map if no class in the chain declares a
+   * callback.
+   *
+   * <p>Callbacks run from child to ancestor, matching initializer order, and share one declaration
+   * namespace: a {@code path} declared by more than one callback in the chain is an error, exactly
+   * as within a single callback.
    *
    * <p>Requires only the {@link Rule} (a loading-phase product) and the Starlark semantics: the
    * declared download set is a pure function of loading-phase information, so this is usable both
    * during analysis (to register {@code DownloadAction}s) and from loading-phase-only tooling such
    * as {@code bazel vendor}.
    */
-  public static ImmutableMap<String, Declaration> evaluate(
-      Rule rule, StarlarkFunction downloadsCallback, StarlarkSemantics semantics)
+  public static ImmutableMap<String, Declaration> evaluate(Rule rule, StarlarkSemantics semantics)
       throws EvalException, InterruptedException {
+    ImmutableList.Builder<StarlarkFunction> callbacksBuilder = ImmutableList.builder();
+    for (RuleClass ruleClass = rule.getRuleClassObject();
+        ruleClass != null;
+        ruleClass = ruleClass.getStarlarkParent()) {
+      StarlarkFunction downloadsCallback = ruleClass.getDownloadsCallback();
+      if (downloadsCallback != null) {
+        callbacksBuilder.add(downloadsCallback);
+      }
+    }
+    ImmutableList<StarlarkFunction> callbacks = callbacksBuilder.build();
+    if (callbacks.isEmpty()) {
+      return ImmutableMap.of();
+    }
     StarlarkDownloadsContext downloadsContext = new StarlarkDownloadsContext(rule);
     try (Mutability mu = Mutability.create("downloads callback")) {
       StarlarkThread thread = StarlarkThread.createTransient(mu, semantics);
-      Starlark.call(
-          thread, downloadsCallback, Tuple.of(downloadsContext), ImmutableMap.of());
+      for (StarlarkFunction downloadsCallback : callbacks) {
+        Starlark.call(
+            thread, downloadsCallback, Tuple.of(downloadsContext), ImmutableMap.of());
+      }
     }
     return ImmutableMap.copyOf(downloadsContext.getDeclarations());
   }

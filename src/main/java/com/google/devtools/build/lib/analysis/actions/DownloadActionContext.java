@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.analysis.actions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.ActionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
-import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import java.io.IOException;
 import java.net.URI;
 
@@ -24,7 +24,7 @@ import java.net.URI;
 public interface DownloadActionContext extends ActionContext {
 
   /**
-   * Resolves the content identified by {@code integrity} into {@code output}.
+   * Resolves the content identified by {@code integrity} into the action's primary output.
    *
    * <p>Implementations must verify the content against {@code integrity} (a Subresource Integrity
    * checksum) at every network boundary and are expected to consult content-addressed stores (the
@@ -37,7 +37,8 @@ public interface DownloadActionContext extends ActionContext {
    * @param canonicalId if non-empty, restrict download cache hits to entries recorded with the
    *     same canonical ID
    * @param executable whether the output is marked executable
-   * @param output the artifact to resolve
+   * @param action the executing download action; its primary output is the artifact to resolve,
+   *     and progress is attributed to it
    * @param actionExecutionContext the executing action's context
    */
   void download(
@@ -45,7 +46,7 @@ public interface DownloadActionContext extends ActionContext {
       String integrity,
       String canonicalId,
       boolean executable,
-      Artifact output,
+      ActionExecutionMetadata action,
       ActionExecutionContext actionExecutionContext)
       throws IOException, InterruptedException;
 }

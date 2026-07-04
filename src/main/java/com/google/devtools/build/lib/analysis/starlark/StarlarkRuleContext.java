@@ -107,7 +107,6 @@ import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.Dict.ImmutableKeyTrackingDict;
 import net.starlark.java.eval.EvalException;
-import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.Starlark;
@@ -273,11 +272,7 @@ public final class StarlarkRuleContext
       this.ruleAttributesCollection = null;
 
       // Populate ctx.downloads.
-      StarlarkFunction downloadsCallback = rule.getRuleClassObject().getDownloadsCallback();
-      this.downloads =
-          downloadsCallback == null
-              ? Dict.empty()
-              : createDownloads(ruleContext, downloadsCallback);
+      this.downloads = createDownloads(ruleContext);
     } else { // ASPECT
       this.outputsObject = null;
       ImmutableCollection<Attribute> attributes =
@@ -333,20 +328,19 @@ public final class StarlarkRuleContext
   }
 
   /**
-   * Evaluates the rule's {@code downloads} callback and registers a {@link DownloadAction} for
-   * each declared download.
+   * Evaluates the {@code downloads} callbacks of the rule's class and its ancestors and registers
+   * a {@link DownloadAction} for each declared download.
    *
-   * <p>The callback runs in a transient thread against a context exposing only non-configurable
+   * <p>The callbacks run in a transient thread against a context exposing only non-configurable
    * attributes, keeping the declared download set independent of the build configuration.
    */
-  private static Dict<String, Artifact> createDownloads(
-      RuleContext ruleContext, StarlarkFunction downloadsCallback) throws RuleErrorException {
+  private static Dict<String, Artifact> createDownloads(RuleContext ruleContext)
+      throws RuleErrorException {
     ImmutableMap<String, StarlarkDownloadsContext.Declaration> declarations;
     try {
       declarations =
           StarlarkDownloadsContext.evaluate(
               ruleContext.getRule(),
-              downloadsCallback,
               ruleContext.getAnalysisEnvironment().getStarlarkSemantics());
     } catch (EvalException e) {
       throw ruleContext.throwWithRuleError(
@@ -354,6 +348,9 @@ public final class StarlarkRuleContext
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw ruleContext.throwWithRuleError("downloads callback was interrupted");
+    }
+    if (declarations.isEmpty()) {
+      return Dict.empty();
     }
     // Download artifacts live under a configuration-free root (bazel-out/downloads, or
     // bazel-out/<repo>/downloads under the sibling repository layout). The exec path is derived

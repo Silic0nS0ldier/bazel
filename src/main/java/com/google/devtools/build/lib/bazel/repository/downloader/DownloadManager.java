@@ -140,6 +140,41 @@ public class DownloadManager {
       String context,
       Phaser downloadPhaser,
       boolean mayHardlink) {
+    return startDownload(
+        executorService,
+        originalUrls,
+        headers,
+        authHeaders,
+        checksum,
+        canonicalId,
+        type,
+        output,
+        clientEnv,
+        context,
+        downloadPhaser,
+        mayHardlink,
+        /* progressEventHandler= */ null);
+  }
+
+  /**
+   * Variant of {@link #startDownload} routing progress reporting through {@code
+   * progressEventHandler} instead of this download manager's default event handler. Lets callers
+   * scope fetch progress to their own reporting surface (e.g. a download action's progress line).
+   */
+  public Future<Path> startDownload(
+      ExecutorService executorService,
+      List<URI> originalUrls,
+      Map<String, List<String>> headers,
+      Map<URI, Map<String, List<String>>> authHeaders,
+      Optional<Checksum> checksum,
+      String canonicalId,
+      Optional<String> type,
+      Path output,
+      Map<String, String> clientEnv,
+      String context,
+      Phaser downloadPhaser,
+      boolean mayHardlink,
+      @Nullable ExtendedEventHandler progressEventHandler) {
     return executorService.submit(
         () -> {
           if (downloadPhaser.register() != 0) {
@@ -157,7 +192,8 @@ public class DownloadManager {
                 output,
                 clientEnv,
                 context,
-                mayHardlink);
+                mayHardlink,
+                progressEventHandler);
           } finally {
             downloadPhaser.arrive();
           }
@@ -209,7 +245,8 @@ public class DownloadManager {
       Path output,
       Map<String, String> clientEnv,
       String context,
-      boolean mayHardlink)
+      boolean mayHardlink,
+      @Nullable ExtendedEventHandler progressEventHandler)
       throws IOException, InterruptedException {
     if (checksum.isEmpty()) {
       // Without a checksum the download has no content identity to deduplicate on.
@@ -223,7 +260,8 @@ public class DownloadManager {
           output,
           clientEnv,
           context,
-          mayHardlink);
+          mayHardlink,
+          progressEventHandler);
     }
     ReentrantLock lock =
         inflightDownloads.computeIfAbsent(
@@ -240,7 +278,8 @@ public class DownloadManager {
           output,
           clientEnv,
           context,
-          mayHardlink);
+          mayHardlink,
+          progressEventHandler);
     } finally {
       lock.unlock();
     }
@@ -256,11 +295,16 @@ public class DownloadManager {
       Path output,
       Map<String, String> clientEnv,
       String context,
-      boolean mayHardlink)
+      boolean mayHardlink,
+      @Nullable ExtendedEventHandler progressEventHandler)
       throws IOException, InterruptedException {
     if (Thread.interrupted()) {
       throw new InterruptedException();
     }
+
+    // Shadows the field: all progress in this method goes to the per-call handler when given.
+    ExtendedEventHandler eventHandler =
+        progressEventHandler != null ? progressEventHandler : this.eventHandler;
 
     // TODO(andreisolo): This code path is inconsistent as the authHeaders are fetched from a
     //  .netrc only if it comes from a http_{archive,file,jar} - and it is handled directly

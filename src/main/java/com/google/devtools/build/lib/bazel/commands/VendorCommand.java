@@ -103,7 +103,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.EvalException;
-import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.StarlarkSemantics;
 
 /**
@@ -475,13 +474,9 @@ public final class VendorCommand implements BlazeCommand {
       if (!(target instanceof Rule rule)) {
         continue;
       }
-      StarlarkFunction downloadsCallback = rule.getRuleClassObject().getDownloadsCallback();
-      if (downloadsCallback == null) {
-        continue;
-      }
       ImmutableMap<String, StarlarkDownloadsContext.Declaration> declarations;
       try {
-        declarations = StarlarkDownloadsContext.evaluate(rule, downloadsCallback, semantics);
+        declarations = StarlarkDownloadsContext.evaluate(rule, semantics);
       } catch (EvalException e) {
         throw new IOException(
             String.format(
