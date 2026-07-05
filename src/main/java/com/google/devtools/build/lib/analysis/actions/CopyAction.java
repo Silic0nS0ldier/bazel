@@ -24,7 +24,10 @@ import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionResult;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
+import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
+import com.google.devtools.build.lib.actions.FileContentsProxy;
 import com.google.devtools.build.lib.actions.FileStateType;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.analysis.platform.PlatformInfo;
@@ -32,6 +35,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
+import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.Dirent;
@@ -42,6 +46,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.SymlinkTargetType;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.IOException;
+import java.util.Map;
 import javax.annotation.Nullable;
 
 /**
@@ -173,8 +178,11 @@ public final class CopyAction extends AbstractAction {
       } else if (output.isTreeArtifact()) {
         // The output directory has already been created empty prior to execution.
         copyTreeDereferencing(metadataFs, inputPath, outputPath);
+        maybeInjectTreeMetadata(
+            actionExecutionContext, input, (SpecialArtifact) output, outputPath);
       } else {
         copyFile(metadataFs, inputPath, outputPath);
+        maybeInjectOutputMetadata(actionExecutionContext, input, output, outputPath);
       }
     } catch (IOException e) {
       String message =
@@ -186,6 +194,83 @@ public final class CopyAction extends AbstractAction {
     }
 
     return ActionResult.EMPTY;
+  }
+
+  /**
+   * For a plain local file copy, injects the output's metadata instead of letting Bazel re-read and
+   * re-hash the just-written output: the output's content is identical to the input's, so its digest
+   * is the input's digest. Only the (cheap) content proxy is taken from the output's stat. This
+   * spares a full re-read of every output, which dominates for large files.
+   *
+   * <p>Skipped when an action filesystem is present (it performs its own metadata propagation, see
+   * {@link MetadataPropagatingFileSystem}) or when the input's digest is unavailable.
+   */
+  private static void maybeInjectOutputMetadata(
+      ActionExecutionContext ctx, Artifact input, Artifact output, Path outputPath)
+      throws IOException {
+    if (ctx.getActionFileSystem() != null) {
+      return;
+    }
+    FileArtifactValue inputMetadata = ctx.getInputMetadataProvider().getInputMetadata(input);
+    if (inputMetadata == null) {
+      return;
+    }
+    byte[] digest = inputMetadata.getDigest();
+    if (digest == null) {
+      return;
+    }
+    // Match the read-only output permissions Bazel applies before computing a (ctime-based) proxy,
+    // so the injected proxy stays consistent with the on-disk state across incremental builds.
+    outputPath.chmod(0555);
+    FileContentsProxy proxy;
+    try {
+      proxy = FileContentsProxy.create(outputPath.stat(Symlinks.NOFOLLOW));
+    } catch (IOException e) {
+      return; // Fall back to filesystem-derived metadata.
+    }
+    ctx.getOutputMetadataStore()
+        .injectFile(
+            output, FileArtifactValue.createForNormalFile(digest, proxy, inputMetadata.getSize()));
+  }
+
+  /**
+   * Tree-artifact analogue of {@link #maybeInjectOutputMetadata}: builds the output tree's metadata
+   * from the input tree's per-child digests (identical content) plus the copied children's content
+   * proxies, sparing a re-read + re-hash of every child. Falls back to filesystem-derived metadata
+   * (by not injecting) if any child's digest is unavailable.
+   */
+  private static void maybeInjectTreeMetadata(
+      ActionExecutionContext ctx, Artifact input, SpecialArtifact output, Path outputPath)
+      throws IOException {
+    if (ctx.getActionFileSystem() != null) {
+      return;
+    }
+    TreeArtifactValue inputTree = ctx.getInputMetadataProvider().getTreeMetadata(input);
+    if (inputTree == null) {
+      return;
+    }
+    TreeArtifactValue.Builder builder = TreeArtifactValue.newBuilder(output);
+    for (Map.Entry<TreeFileArtifact, FileArtifactValue> entry :
+        inputTree.getChildValues().entrySet()) {
+      FileArtifactValue childMetadata = entry.getValue();
+      byte[] digest = childMetadata.getDigest();
+      if (digest == null) {
+        return;
+      }
+      PathFragment relPath = entry.getKey().getParentRelativePath();
+      Path childPath = outputPath.getRelative(relPath);
+      childPath.chmod(0555);
+      FileContentsProxy proxy;
+      try {
+        proxy = FileContentsProxy.create(childPath.stat(Symlinks.NOFOLLOW));
+      } catch (IOException e) {
+        return;
+      }
+      builder.putChild(
+          TreeFileArtifact.createTreeOutput(output, relPath),
+          FileArtifactValue.createForNormalFile(digest, proxy, childMetadata.getSize()));
+    }
+    ctx.getOutputMetadataStore().injectTree(output, builder.build());
   }
 
   /**

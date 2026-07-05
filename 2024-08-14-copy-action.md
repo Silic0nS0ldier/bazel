@@ -144,6 +144,57 @@ Skipping the `ActionResult` may look like it forfeits value — output lifetime 
 * For directory copies, no new CAS objects are needed either: REAPI `Tree`/`Directory` messages do not embed the root directory's own name, so the output tree's digest is identical to the input tree's, and the object already exists in the CAS.
 * Output lifetime is tracked through the digests the build references (lease extension, TTL), which is indifferent to whether the reference arrived via the original producer or via a copy.
 
+### Measured performance
+
+A prototype implementation was benchmarked against the status quo (a per-file spawn running `cp`, mirroring skylib/bazel-lib) on identical output graphs, cold builds, median of three trials, on a 16-core Linux host with a btrfs (copy-on-write capable) output tree. Both mechanisms produced byte-identical outputs.
+
+| Scenario | Metric | Spawn (status quo) | `actions.copy` | Improvement |
+|---|---|---|---|---|
+| 8000 × 1 KiB files, local | wall | 11.9 s | 4.4 s | **2.7× faster** |
+| | CPU | 110 s | 34 s | **3.2× less** |
+| | disk written | 94 MB | 18 MB | **5.2× less** |
+| | retained heap | 46 MB | 40 MB | 1.15× less |
+| 200 × 4 MiB files, local | execution CPU | 6.1 s | 0.4 s | **15× less** |
+| | disk written | 802 MB | 0.6 MB | **>1000× less** (reflink) |
+| 60 tree artifacts (100 files each) | wall | 4.2 s | 3.9 s | 1.08× faster |
+| | peak RSS | 850 MB | 651 MB | 1.3× less |
+| | output storage | 1.9 MB | 0.6 MB | **3.3× less** (reflink) |
+| 8000 × 1 KiB, Build without the Bytes | wall | 10.9 s | 4.7 s | **2.3× faster** |
+| | disk written | 86 MB | 18 MB | **4.8× less** |
+
+Two implementation notes fall out of the benchmark:
+
+* **Output metadata is injected, not recomputed.** A naive implementation lets Bazel read back and re-hash every output to compute its digest — but a copy already knows the output digest equals the input's. Injecting the output metadata (digest from the input, content proxy from a single stat of the output; the tree case injects per-child metadata analogously) eliminates that re-hash. This is what collapses large-file execution CPU by ~8× on top of the no-spawn saving, and it mirrors the metadata propagation that `SymlinkAction` already performs.
+* **Copy-on-write is automatic where available.** Because the physical fallback routes through the platform file-copy APIs (`copy_file_range`/`clonefile`), copies on a CoW filesystem write essentially no new blocks — the >1000× drop in bytes written for large files, and the ~3× smaller on-disk footprint for trees.
+
+The per-action *retained* footprint is also smaller (a `CopyAction` carries no command line, environment, or tool inputs — ~32 bytes of core state versus a spawn action's command-line objects), though at these scales the difference is dominated by shared artifact state. Per-action BEP event volume, when all actions are published, is ~14% smaller for copies (their events carry no command line); the larger remote-protocol saving (no `Execute`/`ActionResult`/CAS round trips) is structural rather than a matter of degree.
+
+### Comparison against batched copy spawns
+
+Because a per-file spawn is so expensive, rulesets commonly *batch* — one spawn copies many files (e.g. bazel-lib's `copy_to_directory`) — trading cache granularity for amortised overhead. The relevant comparison is therefore against both a per-file spawn and a single batched spawn, across cache states. Same 8000 × 1 KiB workload; the Bazel server is already running before every measured build (execution isolated from JVM/startup cost); median of 5 runs, `[min–max]` in brackets.
+
+| Cache state | metric | per-file copy action | batched spawn | per-file spawn |
+|---|---|---|---|---|
+| **Cold** (outputs wiped) | wall | **1.11 s** `[1.01–1.62]` | 2.03 s `[1.96–2.36]` | 8.33 s `[8.31–8.86]` |
+| | bytes written | **12.5 MB** | 38.3 MB | 88 MB |
+| | total CPU | 6.6 s | **4.1 s** | 74 s |
+| **Warm** (no change) | wall | 0.50 s | 0.49 s | 0.47 s |
+| | copies re-run | 0 | 0 | 0 |
+| **Partial** (1 input changed) | wall | **0.48 s** | 1.72 s | 0.50 s |
+| | bytes written | **536 KB** | 34.2 MB | 552 KB |
+| | actions re-run | 1 copy | whole batch | 1 spawn |
+| **Partial** (1% changed) | wall | **0.53 s** | 1.75 s | 0.60 s |
+| | bytes written | **1.1 MB** | 34.2 MB | 1.8 MB |
+| | actions re-run | 80 copies | whole batch | 80 spawns |
+
+Reading the table by regime:
+
+* **Cold**: the copy action is fastest on wall time — it parallelises across cores, whereas the batched spawn is a single serial process — and writes the least (reflink). The batched spawn's *one* advantage anywhere is ~1.6× lower cold total CPU (one action node versus 8000), the intrinsic cost of fine granularity.
+* **Warm**: all three are a wash — every mechanism is fully cached and nothing re-runs. The copy action carries no penalty for having 8000 separate cache entries.
+* **Partial**: the decisive regime. A one-file edit re-runs exactly one copy (536 KB written) but re-runs the *entire* batched spawn (34.2 MB, ~3.6× the wall time) — and the batch pays that same full cost whether 1 or 80 files changed. The per-file spawn is equally granular but, as the cold row shows, ruinous to build from scratch.
+
+The copy action is the only mechanism that is both granular (partial rebuilds scale with what changed) and cheap cold — today rulesets must give up one to get the other. The same granularity argument extends to a shared disk/remote action cache: a batched spawn is one coarse entry invalidated by any change, while per-file copies are independently cacheable — and cheap enough to simply re-run (metadata-only under Build without the Bytes) rather than depend on the cache at all.
+
 ## Implementation challenges
 
 The implementation cost concentrates in three places, and accepting this proposal means accepting these work items:

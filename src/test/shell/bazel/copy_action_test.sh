@@ -292,6 +292,13 @@ EOF
   echo "version 2" > pkg/input.txt
   bazel build //pkg:copy >& $TEST_log || fail "incremental build failed"
   assert_equals "version 2" "$(cat bazel-bin/pkg/output.txt)"
+
+  # A no-op rebuild must not re-execute the copy. Injected output metadata (an
+  # optimization that skips re-hashing the output) must keep the content proxy
+  # consistent with the on-disk output, otherwise the copy would spuriously
+  # re-run on every build.
+  bazel build -s //pkg:copy >& $TEST_log || fail "no-op build failed"
+  expect_not_log "Copying.*output.txt"
 }
 
 function test_copy_directory() {
@@ -313,6 +320,12 @@ EOF
     || fail "copied directory content differs from input"
   assert_equals "top" "$(cat bazel-bin/pkg/tree_copy/top.txt)"
   assert_equals "nested" "$(cat bazel-bin/pkg/tree_copy/sub/nested.txt)"
+
+  # No-op rebuild must not re-run the tree copy: injected tree metadata (per-child
+  # digests from the input, proxies from the copied children) must stay consistent
+  # with the on-disk children.
+  bazel build //pkg:copy >& $TEST_log || fail "no-op build failed"
+  expect_not_log "Copying.*tree_copy"
 }
 
 function test_copy_unresolved_symlink() {
