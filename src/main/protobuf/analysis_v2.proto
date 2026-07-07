@@ -122,11 +122,23 @@ message Action {
   // For regular Symlink actions, the target is represented as an input.
   string unresolved_symlink_target = 18;
 
-  // If FileWrite actions should make their output executable.
-  // (ctx.actions.write(is_executable=True))
+  // If FileWrite or Download actions should make their output executable.
+  // (ctx.actions.write(is_executable=True), downloads_ctx.download(executable=True))
   bool is_executable = 19;
 
   reserved 20;
+
+  // The URLs a Download action may fetch its output from, in order. All URLs
+  // are expected to serve identical content.
+  repeated string download_urls = 21;
+
+  // The Subresource Integrity checksum pinning the content of a Download
+  // action's output.
+  string download_integrity = 22;
+
+  // The canonical ID restricting download cache hits for a Download action,
+  // if any. (downloads_ctx.download(canonical_id=...))
+  string download_canonical_id = 23;
 }
 
 // Represents a single target (without configuration information) that is

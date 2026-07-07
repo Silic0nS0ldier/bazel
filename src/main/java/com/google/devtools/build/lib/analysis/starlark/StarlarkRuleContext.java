@@ -45,6 +45,7 @@ import com.google.devtools.build.lib.analysis.LocationExpander;
 import com.google.devtools.build.lib.analysis.ResolvedToolchainContext;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.actions.DownloadAction;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.ShToolchain;
 import com.google.devtools.build.lib.analysis.SymlinkEntry;
@@ -60,6 +61,7 @@ import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.Depset.TypeException;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -168,6 +170,7 @@ public final class StarlarkRuleContext
   private StarlarkAttributesCollection ruleAttributesCollection;
   private StructImpl splitAttributes;
   private Outputs outputsObject;
+  private Dict<String, Artifact> downloads;
 
   /**
    * Counter for calls to {@code ctx.resolve_command} with a command longer than {@link
@@ -267,6 +270,9 @@ public final class StarlarkRuleContext
       this.attributesCollection = builder.build();
       this.splitAttributes = buildSplitAttributeInfo(attributes, ruleContext);
       this.ruleAttributesCollection = null;
+
+      // Populate ctx.downloads.
+      this.downloads = createDownloads(ruleContext);
     } else { // ASPECT
       this.outputsObject = null;
       ImmutableCollection<Attribute> attributes =
@@ -317,7 +323,73 @@ public final class StarlarkRuleContext
       }
 
       this.ruleAttributesCollection = ruleBuilder.build();
+      this.downloads = Dict.empty();
     }
+  }
+
+  /**
+   * Evaluates the {@code downloads} callbacks of the rule's class and its ancestors and registers
+   * a {@link DownloadAction} for each declared download.
+   *
+   * <p>The callbacks run in a transient thread against a context exposing only non-configurable
+   * attributes, keeping the declared download set independent of the build configuration.
+   */
+  private static Dict<String, Artifact> createDownloads(RuleContext ruleContext)
+      throws RuleErrorException {
+    ImmutableMap<String, StarlarkDownloadsContext.Declaration> declarations;
+    try {
+      declarations =
+          StarlarkDownloadsContext.evaluate(
+              ruleContext.getRule(),
+              ruleContext.getAnalysisEnvironment().getStarlarkSemantics());
+    } catch (EvalException e) {
+      throw ruleContext.throwWithRuleError(
+          "error evaluating downloads callback: " + e.getMessageWithStack());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw ruleContext.throwWithRuleError("downloads callback was interrupted");
+    }
+    if (declarations.isEmpty()) {
+      return Dict.empty();
+    }
+    // Download artifacts live under a configuration-free root (bazel-out/downloads, or
+    // bazel-out/<repo>/downloads under the sibling repository layout). The exec path is derived
+    // from the declaring label plus the declared path only, so the same declaration analysed in
+    // any number of configurations yields the same artifact path and, via shared-action
+    // deduplication (DownloadAction keys are configuration-independent), a single action
+    // execution. The layout mirrors the other derived roots' repository conventions — an
+    // external/<repo> prefix in the root-relative path under the default layout, the repository
+    // name in the root under the sibling layout — which is what makes Artifact#getRunfilesPath
+    // place the artifact correctly in runfiles trees.
+    BuildConfigurationValue configuration = ruleContext.getConfiguration();
+    RepositoryName repository = ruleContext.getLabel().getRepository();
+    ArtifactRoot downloadsRoot = configuration.getDownloadsDirectory(repository);
+    PathFragment targetBase =
+        (configuration.isSiblingRepositoryLayout()
+                ? ruleContext.getLabel().getPackageFragment()
+                : ruleContext
+                    .getLabel()
+                    .getPackageIdentifier()
+                    .getExecPath(/* siblingRepositoryLayout= */ false))
+            .getRelative(ruleContext.getLabel().getName());
+    Dict.Builder<String, Artifact> downloads = Dict.builder();
+    for (StarlarkDownloadsContext.Declaration declaration : declarations.values()) {
+      Artifact output =
+          ruleContext
+              .getAnalysisEnvironment()
+              .getDerivedArtifact(
+                  targetBase.getRelative(declaration.getPath()), downloadsRoot);
+      ruleContext.registerAction(
+          new DownloadAction(
+              ruleContext.getActionOwner(),
+              output,
+              declaration.getUrls(),
+              declaration.getIntegrity(),
+              declaration.getCanonicalId(),
+              declaration.isExecutable()));
+      downloads.put(declaration.getPath(), output);
+    }
+    return downloads.buildImmutable();
   }
 
   /** Returns the subrules declared by the rule or aspect represented by this context. */
@@ -476,6 +548,7 @@ public final class StarlarkRuleContext
     ruleAttributesCollection = null;
     splitAttributes = null;
     outputsObject = null;
+    downloads = null;
   }
 
   /** Returns the {@link ArtifactRoot} for newly declared artifacts for use in actions. */
@@ -678,6 +751,21 @@ public final class StarlarkRuleContext
   public StructImpl getAttr() throws EvalException {
     checkMutable("attr");
     return attributesCollection.getAttr();
+  }
+
+  @Override
+  public Dict<String, Artifact> getDownloads() throws EvalException {
+    checkMutable("downloads");
+    return downloads;
+  }
+
+  /**
+   * Returns the declared download artifacts, for the {@code _downloads} output group. Unlike
+   * {@link #getDownloads}, this is usable while the configured target is being assembled, after
+   * the implementation function has returned.
+   */
+  public ImmutableList<Artifact> getDownloadArtifacts() {
+    return downloads == null ? ImmutableList.of() : ImmutableList.copyOf(downloads.values());
   }
 
   @Override

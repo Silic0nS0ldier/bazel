@@ -1161,6 +1161,26 @@ sh_test(
 )
 
 sh_test(
+    name = "lazy_downloads_test",
+    size = "large",
+    srcs = ["lazy_downloads_test.sh"],
+    data = [
+        ":test-deps",
+        "@rules_java//toolchains:current_java_runtime",
+    ],
+    env = {
+        "JAVA_ROOTPATH": "$(JAVA_ROOTPATH)",  # for remote_helpers setup_javabase
+    },
+    tags = [
+        "no_windows",
+        "requires-network",
+    ],
+    toolchains = [
+        "@rules_java//toolchains:current_java_runtime",
+    ],
+)
+
+sh_test(
     name = "bazel_repository_cache_test",
     size = "large",
     srcs = ["bazel_repository_cache_test.sh"],

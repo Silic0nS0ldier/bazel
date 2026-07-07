@@ -682,6 +682,7 @@ public class RuleClass implements RuleClassData {
     @Nullable private RuleClass starlarkParent = null;
     @Nullable private StarlarkFunction initializer = null;
     @Nullable private LabelConverter labelConverterForInitializer = null;
+    @Nullable private StarlarkFunction downloadsCallback = null;
 
     // The extendable may take 3 value, null means that the default allowlist should be use when
     // rule is extendable in practice.
@@ -935,6 +936,7 @@ public class RuleClass implements RuleClassData {
           starlarkParent,
           initializer,
           labelConverterForInitializer,
+          downloadsCallback,
           starlark,
           starlarkExtensionLabel,
           starlarkDocumentation,
@@ -1046,6 +1048,16 @@ public class RuleClass implements RuleClassData {
         StarlarkFunction initializer, LabelConverter labelConverterForInitializer) {
       this.initializer = initializer;
       this.labelConverterForInitializer = labelConverterForInitializer;
+      return this;
+    }
+
+    /**
+     * Sets the callback declaring the lazy downloads of this rule class, evaluated with access to
+     * non-configurable attributes only.
+     */
+    @CanIgnoreReturnValue
+    public Builder downloadsCallback(@Nullable StarlarkFunction downloadsCallback) {
+      this.downloadsCallback = downloadsCallback;
       return this;
     }
 
@@ -1699,6 +1711,7 @@ public class RuleClass implements RuleClassData {
   @Nullable private final RuleClass starlarkParent;
   @Nullable private final StarlarkFunction initializer;
   @Nullable private final LabelConverter labelConverterForInitializer;
+  @Nullable private final StarlarkFunction downloadsCallback;
   private final boolean isStarlark;
   private final boolean extendable;
   // The following 2 fields may be non-null only if the rule is Starlark-defined.
@@ -1812,6 +1825,7 @@ public class RuleClass implements RuleClassData {
       RuleClass starlarkParent,
       @Nullable StarlarkFunction initializer,
       @Nullable LabelConverter labelConverterForInitializer,
+      @Nullable StarlarkFunction downloadsCallback,
       boolean isStarlark,
       @Nullable Label starlarkExtensionLabel,
       @Nullable String starlarkDocumentation,
@@ -1853,6 +1867,7 @@ public class RuleClass implements RuleClassData {
     this.starlarkParent = starlarkParent;
     this.initializer = initializer;
     this.labelConverterForInitializer = labelConverterForInitializer;
+    this.downloadsCallback = downloadsCallback;
     this.isStarlark = isStarlark;
     this.starlarkExtensionLabel = starlarkExtensionLabel;
     this.starlarkDocumentation = starlarkDocumentation;
@@ -1966,6 +1981,15 @@ public class RuleClass implements RuleClassData {
   @Nullable
   public LabelConverter getLabelConverterForInitializer() {
     return labelConverterForInitializer;
+  }
+
+  /**
+   * Returns the callback declaring the lazy downloads of this rule class, or null if the rule class
+   * does not declare downloads.
+   */
+  @Nullable
+  public StarlarkFunction getDownloadsCallback() {
+    return downloadsCallback;
   }
 
   /**

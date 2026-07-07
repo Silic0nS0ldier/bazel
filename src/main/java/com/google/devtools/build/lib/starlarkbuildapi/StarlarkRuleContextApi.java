@@ -19,6 +19,7 @@ import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.Depset.TypeException;
+import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.starlarkbuildapi.core.StructApi;
 import com.google.devtools.build.lib.starlarkbuildapi.core.TransitiveInfoCollectionApi;
 import com.google.devtools.build.lib.starlarkbuildapi.platform.ConstraintValueInfoApi;
@@ -167,6 +168,18 @@ public interface StarlarkRuleContextApi<ConstraintValueT extends ConstraintValue
 
   @StarlarkMethod(name = "attr", structField = true, doc = ATTR_DOC)
   StructApi getAttr() throws EvalException;
+
+  @StarlarkMethod(
+      name = "downloads",
+      structField = true,
+      enableOnlyWithFlag = BuildLanguageOptions.EXPERIMENTAL_LAZY_DOWNLOADS,
+      doc =
+          "A dict of the downloads declared by the rule's <code>downloads</code> callback, keyed"
+              + " by the <code>path</code> they were declared with. Values are <a"
+              + " href=\"../builtins/File.html\">File</a>s usable like any generated file, e.g. as"
+              + " action inputs. The download itself is lazy: it only happens if the file is"
+              + " actually needed by the build.")
+  Dict<String, ? extends FileApi> getDownloads() throws EvalException;
 
   @StarlarkMethod(name = "split_attr", structField = true, doc = SPLIT_ATTR_DOC)
   StructApi getSplitAttr() throws EvalException;

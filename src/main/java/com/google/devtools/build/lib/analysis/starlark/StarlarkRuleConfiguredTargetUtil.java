@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.analysis.starlark;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.ActionConflictException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.ActionsProvider;
@@ -21,6 +22,7 @@ import com.google.devtools.build.lib.analysis.CachingAnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.DefaultInfo;
 import com.google.devtools.build.lib.analysis.MaterializedDepsInfo;
+import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.RequiredConfigFragmentsProvider;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -32,6 +34,7 @@ import com.google.devtools.build.lib.analysis.StarlarkProviderValidationUtil;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
+import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.AdvertisedProviderSet;
 import com.google.devtools.build.lib.packages.Info;
 import com.google.devtools.build.lib.packages.Provider;
@@ -165,6 +168,7 @@ public final class StarlarkRuleConfiguredTargetUtil {
       Object rawProviders,
       AdvertisedProviderSet advertisedProviders,
       boolean isDefaultExecutableCreated,
+      ImmutableList<Artifact> downloadArtifacts,
       @Nullable RequiredConfigFragmentsProvider requiredConfigFragmentsProvider)
       throws InterruptedException, ActionConflictException {
     RuleConfiguredTargetBuilder builder = new RuleConfiguredTargetBuilder(context);
@@ -191,6 +195,16 @@ public final class StarlarkRuleConfiguredTargetUtil {
     // RequiredConfigFragmentsProvider may be removed with removal of Android feature flags.
     if (requiredConfigFragmentsProvider != null) {
       builder.addProvider(requiredConfigFragmentsProvider);
+    }
+
+    // Expose the declared download artifacts through the implicit _downloads output group.
+    // Because declarations are configuration-independent, requesting this group under any single
+    // configuration fetches the target's complete declared download set. Merges with any
+    // rule-supplied group of the same name, like other core-managed groups.
+    if (!downloadArtifacts.isEmpty()) {
+      builder.addOutputGroup(
+          OutputGroupInfo.DOWNLOADS,
+          NestedSetBuilder.wrap(Order.STABLE_ORDER, downloadArtifacts));
     }
 
     ConfiguredTarget ct;

@@ -26,6 +26,7 @@ import build.bazel.remote.execution.v2.RequestMetadata;
 import com.google.auth.Credentials;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.bazel.repository.downloader.Checksum;
 import com.google.devtools.build.lib.bazel.repository.downloader.Downloader;
 import com.google.devtools.build.lib.bazel.repository.downloader.HashOutputStream;
@@ -235,6 +236,68 @@ public class GrpcRemoteDownloader implements AutoCloseable, Downloader {
           clientEnv,
           type,
           context);
+    }
+  }
+
+  /**
+   * Fetches the content of the given URLs via the Remote Asset API and returns its digest,
+   * without downloading the bytes locally. The Fetch service is required to have placed the blob
+   * in the CAS by the time it responds, so the returned digest is usable as a remote-only file
+   * (Build without the Bytes).
+   *
+   * <p>Unlike {@link #download}, this method never falls back to the HTTP downloader: the caller
+   * decides how to handle failure (typically by falling back to a materializing download).
+   */
+  public Digest fetchBlobDigest(
+      List<URI> urls,
+      Optional<Checksum> checksum,
+      String canonicalId,
+      ExtendedEventHandler eventHandler,
+      String context)
+      throws IOException, InterruptedException {
+    RequestMetadata metadata =
+        TracingMetadataUtils.buildMetadata(
+            buildRequestId,
+            commandId,
+            "remote_downloader",
+            /* mnemonic= */ null,
+            /* label= */ context,
+            /* configurationId= */ null);
+    RemoteActionExecutionContext remoteActionExecutionContext =
+        RemoteActionExecutionContext.create(metadata);
+    FetchBlobRequest request =
+        newFetchBlobRequest(
+            options.getRemoteInstanceName(),
+            /* remoteDownloaderPropagateCredentials= */ false,
+            urls,
+            checksum,
+            canonicalId,
+            digestFunction,
+            /* headers= */ ImmutableMap.of(),
+            /* credentials= */ null);
+    String eventUri = urls.getFirst().toString();
+    try {
+      FetchBlobResponse response =
+          retrier.execute(
+              () ->
+                  channel.withChannelBlocking(
+                      channel ->
+                          fetchBlockingStub(remoteActionExecutionContext, channel)
+                              .fetchBlob(request)));
+      if (!response.getUri().isEmpty()) {
+        eventUri = response.getUri();
+      }
+      if (response.getStatus().getCode() != Code.OK_VALUE) {
+        throw StatusProto.toStatusRuntimeException(response.getStatus());
+      }
+      eventHandler.post(new FetchEvent(eventUri, FetchId.Downloader.GRPC, /* success= */ true));
+      return response.getBlobDigest();
+    } catch (StatusRuntimeException e) {
+      eventHandler.post(new FetchEvent(eventUri, FetchId.Downloader.GRPC, /* success= */ false));
+      throw new IOException(e);
+    } catch (IOException e) {
+      eventHandler.post(new FetchEvent(eventUri, FetchId.Downloader.GRPC, /* success= */ false));
+      throw e;
     }
   }
 

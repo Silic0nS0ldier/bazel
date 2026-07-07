@@ -452,6 +452,7 @@ public final class ConfiguredTargetFactory {
       if (ruleClass.isStarlark()) {
         final Object rawProviders;
         final boolean isDefaultExecutableCreated;
+        final ImmutableList<Artifact> downloadArtifacts;
         @Nullable final RequiredConfigFragmentsProvider requiredConfigFragmentsProvider;
         try {
           // must be called before any calls to ruleContext.getStarlarkRuleContext()
@@ -463,6 +464,8 @@ public final class ConfiguredTargetFactory {
           // is accessed in the implementation. This fragile mechanism should be revised and removed
           isDefaultExecutableCreated =
               ruleContext.getStarlarkRuleContext().isDefaultExecutableCreated();
+          // Captured here because ruleContext.close() severs access to the StarlarkRuleContext.
+          downloadArtifacts = ruleContext.getStarlarkRuleContext().getDownloadArtifacts();
           requiredConfigFragmentsProvider = ruleContext.getRequiredConfigFragments();
         } finally {
           ruleContext.close();
@@ -478,6 +481,7 @@ public final class ConfiguredTargetFactory {
                 rawProviders,
                 ruleClass.getAdvertisedProviders(),
                 isDefaultExecutableCreated,
+                downloadArtifacts,
                 requiredConfigFragmentsProvider); // may be null
         return target != null
             ? target

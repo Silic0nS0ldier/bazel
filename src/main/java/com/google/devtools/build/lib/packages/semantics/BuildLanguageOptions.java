@@ -582,6 +582,17 @@ public abstract class BuildLanguageOptions extends OptionsBase {
   public abstract boolean getExperimentalRuleExtensionApi();
 
   @Option(
+      name = "experimental_lazy_downloads",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "If true, the lazy downloads API is available: the `downloads` parameter of `rule()`"
+              + " and the `downloads` field of the rule implementation context.")
+  public abstract boolean getExperimentalLazyDownloads();
+
+  @Option(
       name = "experimental_dormant_deps",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -922,6 +933,7 @@ public abstract class BuildLanguageOptions extends OptionsBase {
                 INCOMPATIBLE_DISABLE_TARGET_DEFAULT_PROVIDER_FIELDS,
                 getIncompatibleDisableTargetDefaultProviderFields())
             .setBool(EXPERIMENTAL_RULE_EXTENSION_API, getExperimentalRuleExtensionApi())
+            .setBool(EXPERIMENTAL_LAZY_DOWNLOADS, getExperimentalLazyDownloads())
             .setBool(EXPERIMENTAL_DORMANT_DEPS, getExperimentalDormantDeps())
             .setBool(EXPERIMENTAL_STARLARK_TYPE_SYNTAX, getExperimentalStarlarkTypeSyntax())
             .setBool(
@@ -1107,6 +1119,7 @@ public abstract class BuildLanguageOptions extends OptionsBase {
       "-incompatible_disable_target_default_provider_fields";
   public static final String EXPERIMENTAL_RULE_EXTENSION_API =
       FlagConstants.DEFAULT_EXPERIMENTAL_RULE_EXTENSION_API_NAME;
+  public static final String EXPERIMENTAL_LAZY_DOWNLOADS = "-experimental_lazy_downloads";
   public static final String EXPERIMENTAL_DORMANT_DEPS = "-experimental_dormant_deps";
 
   public static final String EXPERIMENTAL_STARLARK_TYPE_SYNTAX =

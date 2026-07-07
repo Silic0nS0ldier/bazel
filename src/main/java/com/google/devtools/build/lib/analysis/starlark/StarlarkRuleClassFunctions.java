@@ -568,10 +568,16 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
       Object parentUnchecked,
       Object extendableUnchecked,
       Sequence<?> subrules,
+      Object downloads,
       StarlarkThread thread)
       throws EvalException {
     // Ensure we're initializing a .bzl file, which also means we have a RuleDefinitionEnvironment.
     BzlInitThreadContext bazelContext = BzlInitThreadContext.fromOrFail(thread, "rule()");
+
+    failIf(
+        downloads != Starlark.NONE && !(downloads instanceof StarlarkFunction),
+        "downloads must be a function, got '%s'",
+        Starlark.type(downloads));
 
     final RuleClass parent;
     final boolean executable;
@@ -652,7 +658,8 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
         buildSetting,
         cfg,
         execGroups,
-        subrules);
+        subrules,
+        downloads == Starlark.NONE ? null : (StarlarkFunction) downloads);
   }
 
   @Override
@@ -699,7 +706,8 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
         /* buildSetting= */ Starlark.NONE,
         /* cfg= */ Starlark.NONE,
         /* execGroups= */ Starlark.NONE,
-        /* subrulesUnchecked= */ StarlarkList.empty());
+        /* subrulesUnchecked= */ StarlarkList.empty(),
+        /* downloads= */ null);
   }
 
   /**
@@ -743,7 +751,8 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
       Object buildSetting,
       Object cfg,
       Object execGroups,
-      Sequence<?> subrulesUnchecked)
+      Sequence<?> subrulesUnchecked,
+      @Nullable StarlarkFunction downloads)
       throws EvalException {
 
     // analysis_test=true implies test=true.
@@ -784,6 +793,7 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
     }
 
     builder.initializer(initializer, labelConverter);
+    builder.downloadsCallback(downloads);
 
     builder.setDefaultExtendableAllowlist(
         ruleDefinitionEnvironment.getToolsLabel("//tools/allowlists/extend_rule_allowlist"));
@@ -960,8 +970,12 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
                 .build();
       }
 
-      // "configurable" may only be user-set for symbolic macros, not rules.
-      if (attr.configurableAttrWasUserSet()) {
+      // "configurable" may only be user-set for symbolic macros, not rules — except that with the
+      // lazy downloads API enabled, `configurable = False` is allowed so that downloads callbacks
+      // have configuration-independent attributes to read.
+      if (attr.configurableAttrWasUserSet()
+          && !(!attr.isConfigurable()
+              && thread.getSemantics().getBool(BuildLanguageOptions.EXPERIMENTAL_LAZY_DOWNLOADS))) {
         throw Starlark.errorf(
             "attribute '%s' has the 'configurable' argument set, which is not allowed in rule"
                 + " definitions",
