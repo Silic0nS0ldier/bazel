@@ -88,6 +88,7 @@ import com.google.devtools.build.lib.runtime.BuildEventArtifactUploaderFactory;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.CommandLinePathFactory;
 import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteHelpersFactory;
 import com.google.devtools.build.lib.runtime.ServerBuilder;
@@ -347,11 +348,18 @@ public final class RemoteModule extends BlazeModule {
     if (combinedCache == null) {
       return;
     }
+    // The bundled extraction utility, used to run repository archive extractions as remote
+    // actions under --experimental_granular_repository_caching.
+    Path repoExtractor = env.getBlazeWorkspace().getBinTools().getEmbeddedPath("repo-extractor");
+    if (repoExtractor != null && !repoExtractor.exists()) {
+      repoExtractor = null;
+    }
     repositoryRemoteHelpersFactoryDelegate.init(
         new RepositoryRemoteHelpersFactoryImpl(
             env.getDirectories(),
             combinedCache,
             actionContextProvider.getRemoteExecutionClient(),
+            repoExtractor,
             buildRequestId,
             invocationId,
             env.getWorkspaceName(),
@@ -1327,6 +1335,16 @@ public final class RemoteModule extends BlazeModule {
         return null;
       }
       return delegate.createRepoContentsCache();
+    }
+
+    @Nullable
+    @Override
+    public RepositoryCas createCas() {
+      RepositoryRemoteHelpersFactory delegate = this.delegate;
+      if (delegate == null) {
+        return null;
+      }
+      return delegate.createCas();
     }
   }
 

@@ -420,6 +420,18 @@ py_test(
 )
 
 py_test(
+    name = "granular_repo_caching_test",
+    size = "large",
+    srcs = ["bzlmod/granular_repo_caching_test.py"],
+    shard_count = 3,
+    tags = ["requires-network"],
+    deps = [
+        ":bzlmod_test_utils",
+        ":test_base",
+    ],
+)
+
+py_test(
     name = "bzlmod_credentials_test",
     size = "large",
     srcs = ["bzlmod/bzlmod_credentials_test.py"],

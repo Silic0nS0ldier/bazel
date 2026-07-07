@@ -23,6 +23,7 @@ import com.google.devtools.build.lib.bazel.repository.starlark.StarlarkBaseExter
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
 import com.google.devtools.build.lib.runtime.ProcessWrapper;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.skyframe.SkyFunction.Environment;
@@ -83,7 +84,12 @@ public class ModuleExtensionContext extends StarlarkBaseExternalContext {
         starlarkSemantics,
         ModuleExtensionEvaluationProgress.moduleExtensionEvaluationContextString(extensionId),
         remoteExecutor,
-        /* allowWatchingPathsOutsideWorkspace= */ false);
+        /* repositoryCas= */ null,
+        /* linuxSandbox= */ null,
+        /* allowWatchingPathsOutsideWorkspace= */ false,
+        // Module extensions don't have a defined output directory that could serve as the action
+        // input/output tree, so they don't participate in granular caching (yet).
+        /* granularCachingEnabled= */ false);
     this.extensionId = extensionId;
     this.modules = modules;
     this.facts = facts;

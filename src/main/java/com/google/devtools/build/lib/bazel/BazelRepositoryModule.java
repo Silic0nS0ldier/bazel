@@ -89,10 +89,12 @@ import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.runtime.InfoItem;
 import com.google.devtools.build.lib.runtime.ProcessWrapper;
 import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteHelpersFactory;
 import com.google.devtools.build.lib.runtime.ServerBuilder;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
+import com.google.devtools.build.lib.sandbox.LinuxSandboxUtil;
 import com.google.devtools.build.lib.server.FailureDetails.ExternalRepository;
 import com.google.devtools.build.lib.server.FailureDetails.ExternalRepository.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
@@ -301,6 +303,8 @@ public class BazelRepositoryModule extends BlazeModule {
       }
 
       repositoryCache.getDownloadCache().setHardlink(repoOptions.getUseHardlinks());
+      repositoryFetchFunction.setUseGranularRepositoryCaching(
+          repoOptions.getUseGranularRepositoryCaching());
       if (repoOptions.getExperimentalScaleTimeouts() > 0.0) {
         repositoryFetchFunction.setTimeoutScaling(repoOptions.getExperimentalScaleTimeouts());
         singleExtensionEvalFunction.setTimeoutScaling(repoOptions.getExperimentalScaleTimeouts());
@@ -653,12 +657,22 @@ public class BazelRepositoryModule extends BlazeModule {
           env.getRuntime().getRepositoryHelpersFactory();
       RepositoryRemoteExecutor remoteExecutor = null;
       RemoteRepoContentsCache remoteRepoContentsCache = null;
+      RepositoryCas repositoryCas = null;
       if (repositoryRemoteHelpersFactory != null) {
         remoteExecutor = repositoryRemoteHelpersFactory.createExecutor();
         remoteRepoContentsCache = repositoryRemoteHelpersFactory.createRepoContentsCache();
+        repositoryCas = repositoryRemoteHelpersFactory.createCas();
       }
       repositoryFetchFunction.setRepositoryRemoteExecutor(remoteExecutor);
       repositoryFetchFunction.setRemoteRepoContentsCache(remoteRepoContentsCache);
+      repositoryFetchFunction.setRepositoryCas(repositoryCas);
+      // Used to sandbox local executions under --experimental_granular_repository_caching so that
+      // they only observe declared inputs, like their remotely executed counterparts.
+      Path linuxSandbox = null;
+      if (OS.getCurrent() == OS.LINUX && LinuxSandboxUtil.isSupported(env.getBlazeWorkspace())) {
+        linuxSandbox = LinuxSandboxUtil.getLinuxSandbox(env.getBlazeWorkspace());
+      }
+      repositoryFetchFunction.setLinuxSandbox(linuxSandbox);
       singleExtensionEvalFunction.setRepositoryRemoteExecutor(remoteExecutor);
 
       clock = env.getClock();

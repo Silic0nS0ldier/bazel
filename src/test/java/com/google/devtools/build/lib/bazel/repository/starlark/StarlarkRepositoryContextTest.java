@@ -198,8 +198,11 @@ public final class StarlarkRepositoryContextTest {
             /* processWrapper= */ null,
             starlarkSemantics,
             repoRemoteExecutor,
+            /* repositoryCas= */ null,
+            /* linuxSandbox= */ null,
             SyscallCache.NO_CACHE,
-            directories);
+            directories,
+            /* useGranularRepositoryCaching= */ false);
   }
 
   private void setUpRepo(String name) throws Exception {

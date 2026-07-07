@@ -99,6 +99,55 @@ public abstract class RepositoryOptions extends OptionsBase {
   public abstract Duration getRepoContentsCacheGcIdleDelay();
 
   @Option(
+      name = "experimental_granular_repository_caching",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
+      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          """
+          Enables a more granular caching strategy for repository contents that is compatible with
+          remote caching setups where AC entries are only allowed from remotely executed actions.
+
+          When enabled, <code>repository_ctx</code> operations become synonymous with rule actions.
+          That is, operations like <code>execute</code> act more like <code>ctx.actions.run</code>
+          meaning they can be persisted in the action cache and executed remotely. The action
+          cache entry for such an operation is only ever produced by the remote execution service,
+          never uploaded by the client, so this remains sound in deployments where clients are not
+          trusted to write action results.
+
+          Repository rules with <code>local = True</code> are exempt: their operations run locally
+          and do not participate in caching, as they are expected to depend on the local system.
+
+          <code>execute</code> operations are only cacheable when they run at the repository root
+          (the default working directory) and only reference files inside the repository or via
+          labels; otherwise they transparently fall back to local execution.
+
+          The following operations currently participate:
+          <ul>
+            <li><code>ctx.execute</code>: becomes an action executed remotely, with the repository
+            directory as its input tree and declared output. When executed locally instead (no
+            remote executor, or not representable remotely), the command runs in a hermetic
+            sandbox where the platform offers one, so that only declared inputs are visible.</li>
+            <li><code>ctx.download</code>/<code>ctx.download_and_extract</code>: downloads verified
+            against a user-provided integrity are inserted into the CAS (content-addressed, so
+            safe for clients to write). The CAS-based download read path is provided by
+            <code>--remote_downloader</code>.</li>
+            <li><code>ctx.extract</code>/<code>ctx.download_and_extract</code>: with a remote
+            executor, extraction runs as a remote action using an extraction utility bundled with
+            Bazel (assuming the default remote platform matches the host OS), so the action cache
+            entry is produced by the remote service. Otherwise, extractions are cached client-side
+            keyed by the archive digest, extraction parameters and destination state; such entries
+            are only written to caches the client is trusted to write action results to: always
+            the local disk cache, and the remote cache only when
+            <code>--remote_upload_local_results</code> is enabled.</li>
+            <li><code>ctx.file</code>: the written content is inserted into the CAS.</li>
+          </ul>
+          Planned: lazy materialization of repository contents.
+          """)
+  public abstract boolean getUseGranularRepositoryCaching();
+
+  @Option(
       name = "registry",
       defaultValue = "null",
       allowMultiple = true,

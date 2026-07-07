@@ -287,6 +287,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/rules:repository/repo_recorded_input",
         "//src/main/java/com/google/devtools/build/lib/rules:repository/repository_directory_value",
         "//src/main/java/com/google/devtools/build/lib/runtime:process_wrapper",
+        "//src/main/java/com/google/devtools/build/lib/runtime:repository_cas",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_executor",
         "//src/main/java/com/google/devtools/build/lib/skyframe:client_environment_function",
         "//src/main/java/com/google/devtools/build/lib/skyframe:environment_variable_value",

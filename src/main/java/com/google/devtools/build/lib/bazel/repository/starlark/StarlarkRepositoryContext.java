@@ -35,6 +35,7 @@ import com.google.devtools.build.lib.repository.RepositoryFetchProgress;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput.RepoCacheFriendlyPath;
 import com.google.devtools.build.lib.runtime.ProcessWrapper;
+import com.google.devtools.build.lib.runtime.RepositoryCas;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
 import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
@@ -95,8 +96,11 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       @Nullable ProcessWrapper processWrapper,
       StarlarkSemantics starlarkSemantics,
       @Nullable RepositoryRemoteExecutor remoteExecutor,
+      @Nullable RepositoryCas repositoryCas,
+      @Nullable Path linuxSandbox,
       SyscallCache syscallCache,
-      BlazeDirectories directories)
+      BlazeDirectories directories,
+      boolean useGranularRepositoryCaching)
       throws EvalException {
     super(
         outputDirectory,
@@ -111,7 +115,13 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
         RepositoryFetchProgress.repositoryFetchContextString(
             RepositoryName.createUnvalidated(repoDefinition.name())),
         remoteExecutor,
-        /* allowWatchingPathsOutsideWorkspace= */ true);
+        repositoryCas,
+        linuxSandbox,
+        /* allowWatchingPathsOutsideWorkspace= */ true,
+        // Rules with local = True explicitly rely on the local system, so their operations must
+        // not be cached or run remotely.
+        /* granularCachingEnabled= */ useGranularRepositoryCaching
+            && !repoDefinition.repoRule().local());
     this.repoDefinition = repoDefinition;
     this.packageLocator = packageLocator;
     this.ignoredSubdirectories = ignoredSubdirectories;
@@ -219,6 +229,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void symlink(Object target, Object linkName, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): Participate in --experimental_granular_repository_caching.
+
     StarlarkPath targetPath = getPath(target);
     StarlarkPath linkPath = getPath(linkName);
     WorkspaceRuleEvent w =
@@ -318,6 +331,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       String watchTemplate,
       StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): Participate in --experimental_granular_repository_caching.
+
     StarlarkPath p = getPath(path);
     StarlarkPath t = getPath(template);
     Map<String, String> substitutionMap =
@@ -367,9 +383,14 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
 
   @Override
   protected ImmutableMap<String, String> getRemoteExecProperties() throws EvalException {
+    // The exec_properties attribute is only declared when --experimental_repo_remote_exec is
+    // enabled; granular caching uses this method regardless of that flag.
+    Object execProperties = getAttr().getValue("exec_properties");
+    if (execProperties == null) {
+      return ImmutableMap.of();
+    }
     return ImmutableMap.copyOf(
-        Dict.cast(
-            getAttr().getValue("exec_properties"), String.class, String.class, "exec_properties"));
+        Dict.cast(execProperties, String.class, String.class, "exec_properties"));
   }
 
   @StarlarkMethod(
@@ -392,6 +413,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public boolean delete(Object pathObject, StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): Participate in --experimental_granular_repository_caching.
+
     StarlarkPath starlarkPath = externalPath("delete()", pathObject);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newDeleteEvent(
@@ -443,6 +467,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void rename(Object srcName, Object dstName, StarlarkThread thread)
       throws RepositoryFunctionException, EvalException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): Participate in --experimental_granular_repository_caching.
+
     StarlarkPath srcPath = getPath(srcName);
     StarlarkPath dstPath = getPath(dstName);
     WorkspaceRuleEvent w =
@@ -521,6 +548,9 @@ public class StarlarkRepositoryContext extends StarlarkBaseExternalContext {
       })
   public void patch(Object patchFile, StarlarkInt stripI, String watchPatch, StarlarkThread thread)
       throws EvalException, RepositoryFunctionException, InterruptedException {
+
+    // TODO(Silic0nS0ldier): Participate in --experimental_granular_repository_caching.
+
     int strip = Starlark.toInt(stripI, "strip");
     StarlarkPath starlarkPath = getPath(patchFile);
     WorkspaceRuleEvent w =

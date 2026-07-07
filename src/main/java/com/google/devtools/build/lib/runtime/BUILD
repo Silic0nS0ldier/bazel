@@ -446,6 +446,7 @@ java_library(
     srcs = ["RepositoryRemoteHelpersFactory.java"],
     deps = [
         ":remote_repo_contents_cache",
+        ":repository_cas",
         ":repository_remote_executor",
         "//third_party:jsr305",
     ],
@@ -469,6 +470,16 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//third_party:guava",
+    ],
+)
+
+java_library(
+    name = "repository_cas",
+    srcs = ["RepositoryCas.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//third_party:guava",
+        "//third_party:jsr305",
     ],
 )
 

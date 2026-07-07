@@ -42,6 +42,7 @@ sh_binary(
         "//src/conditions:windows": [],
         "//conditions:default": [
             "//src/main/tools:daemonize",
+            "//src/main/tools:repo-extractor",
         ],
     }) + embedded_tools_target,
     outs = ["install_base_key" + suffix],
@@ -321,6 +322,7 @@ genrule(
         "//src/conditions:windows": [],
         "//conditions:default": [
             "//src/main/tools:daemonize",
+            "//src/main/tools:repo-extractor",
         ],
     }),
     outs = ["package" + suffix + ".zip"],

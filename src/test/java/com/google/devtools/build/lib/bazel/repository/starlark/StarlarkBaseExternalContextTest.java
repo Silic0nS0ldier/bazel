@@ -134,7 +134,10 @@ public class StarlarkBaseExternalContextTest {
           starlarkSemantics,
           identifyingStringForLogging,
           remoteExecutor,
-          allowWatchingPathsOutsideWorkspace);
+          /* repositoryCas= */ null,
+          /* linuxSandbox= */ null,
+          allowWatchingPathsOutsideWorkspace,
+          /* granularCachingEnabled= */ false);
     }
 
     @Override
