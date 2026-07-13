@@ -469,13 +469,20 @@ Integration coverage: `//src/test/py/bazel:download_validation_test`
 (stale-checksum masking demonstrated then caught, record skip across `clean --expunge`, tolerant/strict fetch-failure split, mirror fall-through, URL policy, `allow_fail`, manifest contents).
 
 **Records.**
-Download cache marker files (`validated-<record digest>` beside the checksum-keyed content entry) as specified.
-The shared CAS store is not yet implemented:
-records are per-machine until disk/remote CAS insertion and `FindMissingBlobs` presence checks are wired into the remote module.
+Download cache marker files (`validated-<record digest>` beside the checksum-keyed content entry) as specified,
+plus the shared store: record documents inserted as disk/remote CAS blobs with presence checked via `FindMissingBlobs`,
+wired through the same factory that provides the remote repository helpers.
+Remote hits are localised as download cache markers;
+insertion is best-effort and never fails a fetch;
+store availability failures report absent, so the safe consequence is revalidation.
+Integration-tested against a local remote worker: with local markers deleted and the output base expunged, the remote record alone prevents revalidation.
 
 **Manifests.**
 Written by every repository fetch as `@<canonical name>.downloads` beside the marker file, cleared and replaced with it.
-Not yet implemented: manifests for module extension evaluations, and carriage in repository contents cache entries and vendored repositories.
+Local repository contents cache entries carry the manifest as `<entry>.downloads` beside the recorded inputs file
+(moved out of the output base together with the marker, deleted with the entry on GC),
+so a repository restored from the cache still knows its downloads.
+Not yet implemented: manifests for module extension evaluations, remote contents cache carriage, and vendored repositories.
 
 **Not yet implemented.**
 The `@downloads` repository and natively executed validation tests;
