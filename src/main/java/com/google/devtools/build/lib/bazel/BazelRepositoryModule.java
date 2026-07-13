@@ -15,6 +15,7 @@
 
 package com.google.devtools.build.lib.bazel;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 
@@ -71,6 +72,7 @@ import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.Reposito
 import com.google.devtools.build.lib.bazel.repository.RepositoryUtils;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidator;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriter;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriterParseException;
 import com.google.devtools.build.lib.bazel.repository.starlark.StarlarkRepositoryModule;
@@ -110,6 +112,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParsingResult;
+import com.google.devtools.common.options.RegexPatternOption;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
@@ -298,6 +301,20 @@ public class BazelRepositoryModule extends BlazeModule {
       downloadManager.setDisableDownload(repoOptions.getDisableDownload());
       if (repoOptions.getRepositoryDownloaderRetries() >= 0) {
         downloadManager.setRetries(repoOptions.getRepositoryDownloaderRetries());
+      }
+
+      if (repoOptions.getDownloadValidation() != RepositoryOptions.DownloadValidationMode.OFF) {
+        downloadManager.setDownloadValidator(
+            new DownloadValidator(
+                repoOptions.getDownloadValidation()
+                        == RepositoryOptions.DownloadValidationMode.STRICT
+                    ? DownloadValidator.Mode.STRICT
+                    : DownloadValidator.Mode.TOLERANT,
+                repoOptions.getDownloadValidationUrls().stream()
+                    .map(RegexPatternOption::regexPattern)
+                    .collect(toImmutableList()),
+                repositoryCache.getDownloadCache(),
+                env.getReporter()));
       }
 
       repositoryCache.getDownloadCache().setHardlink(repoOptions.getUseHardlinks());

@@ -71,6 +71,7 @@ public class DownloadManager {
   private int retries = 0;
   @Nullable private Credentials netrcCreds;
   private CredentialFactory credentialFactory = StaticCredentials::new;
+  @Nullable private DownloadValidator downloadValidator;
 
   /** Creates {@code Credentials} from a map of per-{@code URI} authentication headers. */
   public interface CredentialFactory {
@@ -121,6 +122,10 @@ public class DownloadManager {
     this.credentialFactory = credentialFactory;
   }
 
+  public void setDownloadValidator(@Nullable DownloadValidator downloadValidator) {
+    this.downloadValidator = downloadValidator;
+  }
+
   public Future<Path> startDownload(
       ExecutorService executorService,
       List<URI> originalUrls,
@@ -133,7 +138,8 @@ public class DownloadManager {
       Map<String, String> clientEnv,
       String context,
       Phaser downloadPhaser,
-      boolean mayHardlink) {
+      boolean mayHardlink,
+      boolean allowFail) {
     return executorService.submit(
         () -> {
           if (downloadPhaser.register() != 0) {
@@ -151,7 +157,8 @@ public class DownloadManager {
                 output,
                 clientEnv,
                 context,
-                mayHardlink);
+                mayHardlink,
+                allowFail);
           } finally {
             downloadPhaser.arrive();
           }
@@ -198,7 +205,8 @@ public class DownloadManager {
       Path output,
       Map<String, String> clientEnv,
       String context,
-      boolean mayHardlink)
+      boolean mayHardlink,
+      boolean allowFail)
       throws IOException, InterruptedException {
     if (Thread.interrupted()) {
       throw new InterruptedException();
@@ -233,6 +241,26 @@ public class DownloadManager {
     }
     Path destination = getDownloadDestination(mainUrl, type, output);
     ImmutableSet<String> candidateFileNames = getCandidateFileNames(mainUrl, destination);
+
+    // Validation runs before any checksum-first cache consultation: its purpose is to exercise
+    // URLs that cached content would otherwise mask. Downloads-disabled mode cannot fetch, so
+    // validation is skipped rather than guaranteed to fail.
+    if (downloadValidator != null
+        && checksum.isPresent()
+        && !rewrittenUrls.isEmpty()
+        && !disableDownload) {
+      downloadValidator.validate(
+          rewrittenUrls,
+          headers,
+          credentialFactory.create(rewrittenAuthHeaders),
+          checksum.get(),
+          canonicalId,
+          downloader,
+          destination.getParentDirectory(),
+          clientEnv,
+          context,
+          allowFail);
+    }
 
     // Is set to true if the value should be cached by the checksum value provided
     boolean isCachingByProvidedChecksum = false;

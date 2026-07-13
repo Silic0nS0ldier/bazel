@@ -22,6 +22,7 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.bazel.bzlmod.GsonTypeAdapterUtil;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManifest;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import com.google.devtools.build.lib.rules.repository.RepoRecordedInput;
@@ -48,12 +49,14 @@ public class DigestWriter {
   private final BlazeDirectories directories;
   final String predeclaredInputHash;
   final Path markerPath;
+  final Path downloadManifestPath;
 
   private DigestWriter(
       BlazeDirectories directories, RepositoryName repositoryName, String predeclaredInputHash) {
     this.directories = directories;
     this.predeclaredInputHash = predeclaredInputHash;
     this.markerPath = getMarkerPath(directories, repositoryName);
+    this.downloadManifestPath = getDownloadManifestPath(directories, repositoryName);
   }
 
   /** Returns null if and only if a Skyframe restart is needed. */
@@ -83,6 +86,20 @@ public class DigestWriter {
     String content = builder.toString();
     try {
       FileSystemUtils.writeContent(markerPath, ISO_8859_1, content);
+    } catch (IOException e) {
+      throw new RepositoryFunctionException(e, Transience.TRANSIENT);
+    }
+  }
+
+  /**
+   * Writes the download manifest alongside the marker file, sharing its lifecycle. An empty
+   * manifest is meaningful: it asserts the fetch performed no checksum-bearing downloads.
+   */
+  void writeDownloadManifest(List<DownloadManifest.Entry> entries)
+      throws RepositoryFunctionException {
+    try {
+      FileSystemUtils.writeContent(
+          downloadManifestPath, ISO_8859_1, DownloadManifest.serialize(entries));
     } catch (IOException e) {
       throw new RepositoryFunctionException(e, Transience.TRANSIENT);
     }
@@ -214,10 +231,17 @@ public class DigestWriter {
         .getChild(repo.getMarkerFileName());
   }
 
+  /** The download manifest is a sibling of the marker file and shares its lifecycle. */
+  public static Path getDownloadManifestPath(BlazeDirectories directories, RepositoryName repo) {
+    return RepositoryUtils.getExternalRepositoryDirectory(directories)
+        .getChild("@" + repo.getName() + ".downloads");
+  }
+
   static void clearMarkerFile(BlazeDirectories directories, RepositoryName repo)
       throws RepositoryFunctionException {
     try {
       getMarkerPath(directories, repo).delete();
+      getDownloadManifestPath(directories, repo).delete();
     } catch (IOException e) {
       throw new RepositoryFunctionException(e, Transience.TRANSIENT);
     }
