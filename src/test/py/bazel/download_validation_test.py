@@ -91,6 +91,9 @@ class DownloadValidationTest(test_base.TestBase):
             '        allow_fail = ctx.attr.allow_fail,',
             '    )',
             '    ctx.file("BUILD", "exports_files([\'out.bin\'])")',
+            '    if ctx.attr.reproducible:',
+            '        return ctx.repo_metadata(reproducible = True)',
+            '    return None',
             '',
             'dl_repo = repository_rule(',
             '    implementation = _dl_impl,',
@@ -98,6 +101,7 @@ class DownloadValidationTest(test_base.TestBase):
             '        "urls": attr.string_list(),',
             '        "sha256": attr.string(),',
             '        "allow_fail": attr.bool(default = False),',
+            '        "reproducible": attr.bool(default = False),',
             '    },',
             ')',
         ],
@@ -117,12 +121,14 @@ class DownloadValidationTest(test_base.TestBase):
     for name, value in repos.items():
       urls, sha256 = value[0], value[1]
       allow_fail = value[2] if len(value) > 2 else False
+      reproducible = value[3] if len(value) > 3 else False
       lines += [
           'dl_repo(',
           '    name = "%s",' % name,
           '    urls = %r,' % [self._url_base + u for u in urls],
           '    sha256 = "%s",' % sha256,
           '    allow_fail = %s,' % allow_fail,
+          '    reproducible = %s,' % reproducible,
           ')',
       ]
     self.ScratchFile('MODULE.bazel', lines)
@@ -241,6 +247,30 @@ class DownloadValidationTest(test_base.TestBase):
     # Original URLs in declaration order, tab-separated on one entry line.
     self.assertIn(
         '%s/a.bin\t%s/mirror-a.bin' % (self._url_base, self._url_base), content)
+
+  def testManifestCarriedIntoRepoContentsCache(self):
+    contents_cache = tempfile.mkdtemp(dir=self._temp)
+    self._WriteModuleFile({'foo': (['/a.bin'], SHA256_A, False, True)})
+    self.RunBazel([
+        'build',
+        '--repository_cache=' + self._repository_cache,
+        '--repo_contents_cache=' + contents_cache,
+        '@foo//:out.bin',
+    ])
+
+    # The manifest travels into the cache entry as <uuid>.downloads, moved
+    # out of the output base together with the marker. Other cacheable repos
+    # (e.g. module repos like `platforms`) carry their own manifests too, so
+    # filter for ours.
+    contents = []
+    for root, _, files in os.walk(contents_cache):
+      for f in files:
+        if f.endswith('.downloads'):
+          with open(os.path.join(root, f), 'r') as manifest:
+            contents.append(manifest.read())
+    ours = [c for c in contents if self._url_base + '/a.bin' in c]
+    self.assertEqual(len(ours), 1)
+    self.assertIn('bazel download manifest v1', ours[0])
 
   def testUrlPolicyRestrictsValidation(self):
     # Warm the cache with A.

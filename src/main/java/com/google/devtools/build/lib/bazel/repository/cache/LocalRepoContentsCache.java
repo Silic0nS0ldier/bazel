@@ -57,6 +57,7 @@ import javax.annotation.Nullable;
  */
 public final class LocalRepoContentsCache {
   public static final String RECORDED_INPUTS_SUFFIX = ".recorded_inputs";
+  public static final String DOWNLOAD_MANIFEST_SUFFIX = ".downloads";
 
   /**
    * The path to a "lock" file, relative to the root of the repo contents cache. While a shared lock
@@ -102,6 +103,14 @@ public final class LocalRepoContentsCache {
               0, recordedInputsFileBaseName.length() - RECORDED_INPUTS_SUFFIX.length());
       return new CandidateRepo(
           recordedInputsFile, recordedInputsFile.replaceName(contentsDirBaseName));
+    }
+
+    /**
+     * The download manifest carried with this entry, so a repo restored from the cache still knows
+     * its downloads. May not exist for entries written before manifests existed.
+     */
+    public Path downloadManifestFile() {
+      return contentsDir.replaceName(contentsDir.getBaseName() + DOWNLOAD_MANIFEST_SUFFIX);
     }
 
     /** Updates the mtime of the recorded inputs file, to delay GC for this entry. */
@@ -155,7 +164,10 @@ public final class LocalRepoContentsCache {
    * @return the new cache entry
    */
   public CandidateRepo moveToCache(
-      Path fetchedRepoDir, Path fetchedRepoMarkerFile, String predeclaredInputHash)
+      Path fetchedRepoDir,
+      Path fetchedRepoMarkerFile,
+      @Nullable Path fetchedDownloadManifestFile,
+      String predeclaredInputHash)
       throws IOException {
     Preconditions.checkState(path != null);
 
@@ -170,6 +182,12 @@ public final class LocalRepoContentsCache {
     // the fetched repo and the cache locations are considered out-of-date.
     Path temporaryMarker = ensureTrashDir().getChild(UUID.randomUUID().toString());
     FileSystemUtils.moveFile(fetchedRepoMarkerFile, temporaryMarker);
+    // The download manifest travels with the entry, like the marker.
+    Path temporaryManifest = null;
+    if (fetchedDownloadManifestFile != null && fetchedDownloadManifestFile.exists()) {
+      temporaryManifest = ensureTrashDir().getChild(UUID.randomUUID().toString());
+      FileSystemUtils.moveFile(fetchedDownloadManifestFile, temporaryManifest);
+    }
     // Now perform the move, and afterwards, restore the marker file.
     try {
       fetchedRepoDir.renameTo(cacheRepoDir);
@@ -177,11 +195,15 @@ public final class LocalRepoContentsCache {
       cacheRepoDir.createDirectoryAndParents();
       FileSystemUtils.moveTreesBelow(fetchedRepoDir, cacheRepoDir);
     }
+    CandidateRepo newEntry = new CandidateRepo(cacheRecordedInputsFile, cacheRepoDir);
+    if (temporaryManifest != null) {
+      temporaryManifest.renameTo(newEntry.downloadManifestFile());
+    }
     temporaryMarker.renameTo(cacheRecordedInputsFile);
     // Set up a symlink at the original fetched repo dir path.
     fetchedRepoDir.deleteTree();
     FileSystemUtils.ensureSymbolicLink(fetchedRepoDir, cacheRepoDir);
-    return new CandidateRepo(cacheRecordedInputsFile, cacheRepoDir);
+    return newEntry;
   }
 
   public void acquireSharedLock() throws IOException, InterruptedException {
@@ -268,9 +290,10 @@ public final class LocalRepoContentsCache {
         if (Instant.ofEpochMilli(recordedInputsFile.getLastModifiedTime()).isBefore(cutoff)
             || !seen.add(sha256.hashBytes(FileSystemUtils.readContent(recordedInputsFile)))) {
           recordedInputsFile.delete();
-          var repoDir = CandidateRepo.fromRecordedInputsFile(recordedInputsFile).contentsDir;
+          var candidate = CandidateRepo.fromRecordedInputsFile(recordedInputsFile);
+          candidate.downloadManifestFile().delete();
           // Use a UUID to avoid clashes.
-          repoDir.renameTo(trashDir.getChild(UUID.randomUUID().toString()));
+          candidate.contentsDir().renameTo(trashDir.getChild(UUID.randomUUID().toString()));
         }
       }
     }
