@@ -72,6 +72,7 @@ import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.Reposito
 import com.google.devtools.build.lib.bazel.repository.RepositoryUtils;
 import com.google.devtools.build.lib.bazel.repository.cache.RepositoryCache;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidationRecordStore;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidator;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriter;
 import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriterParseException;
@@ -303,19 +304,6 @@ public class BazelRepositoryModule extends BlazeModule {
         downloadManager.setRetries(repoOptions.getRepositoryDownloaderRetries());
       }
 
-      if (repoOptions.getDownloadValidation() != RepositoryOptions.DownloadValidationMode.OFF) {
-        downloadManager.setDownloadValidator(
-            new DownloadValidator(
-                repoOptions.getDownloadValidation()
-                        == RepositoryOptions.DownloadValidationMode.STRICT
-                    ? DownloadValidator.Mode.STRICT
-                    : DownloadValidator.Mode.TOLERANT,
-                repoOptions.getDownloadValidationUrls().stream()
-                    .map(RegexPatternOption::regexPattern)
-                    .collect(toImmutableList()),
-                repositoryCache.getDownloadCache(),
-                env.getReporter()));
-      }
 
       repositoryCache.getDownloadCache().setHardlink(repoOptions.getUseHardlinks());
       if (repoOptions.getExperimentalScaleTimeouts() > 0.0) {
@@ -670,13 +658,31 @@ public class BazelRepositoryModule extends BlazeModule {
           env.getRuntime().getRepositoryHelpersFactory();
       RepositoryRemoteExecutor remoteExecutor = null;
       RemoteRepoContentsCache remoteRepoContentsCache = null;
+      DownloadValidationRecordStore downloadValidationRecordStore = null;
       if (repositoryRemoteHelpersFactory != null) {
         remoteExecutor = repositoryRemoteHelpersFactory.createExecutor();
         remoteRepoContentsCache = repositoryRemoteHelpersFactory.createRepoContentsCache();
+        downloadValidationRecordStore =
+            repositoryRemoteHelpersFactory.createDownloadValidationRecordStore();
       }
       repositoryFetchFunction.setRepositoryRemoteExecutor(remoteExecutor);
       repositoryFetchFunction.setRemoteRepoContentsCache(remoteRepoContentsCache);
       singleExtensionEvalFunction.setRepositoryRemoteExecutor(remoteExecutor);
+
+      if (repoOptions.getDownloadValidation() != RepositoryOptions.DownloadValidationMode.OFF) {
+        downloadManager.setDownloadValidator(
+            new DownloadValidator(
+                repoOptions.getDownloadValidation()
+                        == RepositoryOptions.DownloadValidationMode.STRICT
+                    ? DownloadValidator.Mode.STRICT
+                    : DownloadValidator.Mode.TOLERANT,
+                repoOptions.getDownloadValidationUrls().stream()
+                    .map(RegexPatternOption::regexPattern)
+                    .collect(toImmutableList()),
+                repositoryCache.getDownloadCache(),
+                downloadValidationRecordStore,
+                env.getReporter()));
+      }
 
       clock = env.getClock();
       try {

@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.runtime;
 
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidationRecordStore;
 import javax.annotation.Nullable;
 
 /** Factory for {@link RepositoryRemoteExecutor} and {@link RemoteRepoContentsCache}. */
@@ -25,4 +26,8 @@ public interface RepositoryRemoteHelpersFactory {
   /** Returns a new {@link RemoteRepoContentsCache} or {@code null}. */
   @Nullable
   RemoteRepoContentsCache createRepoContentsCache();
+
+  /** Returns a new {@link DownloadValidationRecordStore} or {@code null}. */
+  @Nullable
+  DownloadValidationRecordStore createDownloadValidationRecordStore();
 }

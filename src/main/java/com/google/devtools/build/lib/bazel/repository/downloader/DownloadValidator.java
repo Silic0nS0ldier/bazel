@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import javax.annotation.Nullable;
 
 /**
  * Validates that download URLs actually serve content matching their declared checksum.
@@ -67,6 +68,7 @@ public final class DownloadValidator {
   private final Mode mode;
   private final ImmutableList<Pattern> urlPatterns;
   private final DownloadCache downloadCache;
+  @Nullable private final DownloadValidationRecordStore sharedStore;
   private final ExtendedEventHandler eventHandler;
 
   /**
@@ -82,10 +84,12 @@ public final class DownloadValidator {
       Mode mode,
       ImmutableList<Pattern> urlPatterns,
       DownloadCache downloadCache,
+      @Nullable DownloadValidationRecordStore sharedStore,
       ExtendedEventHandler eventHandler) {
     this.mode = mode;
     this.urlPatterns = urlPatterns;
     this.downloadCache = downloadCache;
+    this.sharedStore = sharedStore;
     this.eventHandler = eventHandler;
   }
 
@@ -190,6 +194,17 @@ public final class DownloadValidator {
         && downloadCache.hasValidationRecord(cacheKey, keyType, recordDigest)) {
       return Optional.empty();
     }
+    if (sharedStore != null && sharedStore.hasRecord(recordDocument(url, checksum))) {
+      // Validated elsewhere in the fleet; localise the record so future runs skip the round-trip.
+      if (downloadCache.isEnabled()) {
+        try {
+          downloadCache.putValidationRecord(cacheKey, keyType, recordDigest);
+        } catch (IOException e) {
+          // Best effort; the shared record remains authoritative.
+        }
+      }
+      return Optional.empty();
+    }
 
     CompletableFuture<Optional<IOException>> future = new CompletableFuture<>();
     CompletableFuture<Optional<IOException>> existing =
@@ -274,6 +289,18 @@ public final class DownloadValidator {
         // The bytes are verified; cache them so content resolution does not download again.
         downloadCache.put(cacheKey, tmp, keyType, canonicalId);
         downloadCache.putValidationRecord(cacheKey, keyType, recordDigest);
+      }
+      if (sharedStore != null) {
+        try {
+          sharedStore.putRecord(recordDocument(url, checksum));
+        } catch (IOException e) {
+          // Record insertion is best-effort and must never fail the fetch.
+          eventHandler.handle(
+              Event.warn(
+                  String.format(
+                      "Download validation: failed to share validation record for %s: %s",
+                      url, e.getMessage())));
+        }
       }
       return Optional.empty();
     } finally {

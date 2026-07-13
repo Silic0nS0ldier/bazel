@@ -228,6 +228,38 @@ class DownloadValidationTest(test_base.TestBase):
     self.assertIn('could not be fetched', stderr)
     self.assertIn('/missing.bin', stderr)
 
+  def testRecordsSharedViaRemoteCas(self):
+    worker_port = self.StartRemoteWorker()
+    try:
+      self._WriteModuleFile({'foo': (['/a.bin'], SHA256_A)})
+      args = [
+          'build',
+          '--remote_cache=grpc://localhost:%d' % worker_port,
+          '--repository_cache=' + self._repository_cache,
+          '--experimental_repository_download_validation=strict',
+          '@foo//:out.bin',
+      ]
+      self.RunBazel(args)
+      self.assertEqual(self._RequestCount('/a.bin'), 1)
+
+      # Drop the local validation markers, keeping the content. The only
+      # remaining evidence of validation is the record blob in the remote CAS.
+      removed = 0
+      for root, _, files in os.walk(self._repository_cache):
+        for name in files:
+          if name.startswith('validated-'):
+            os.remove(os.path.join(root, name))
+            removed += 1
+      self.assertGreaterEqual(removed, 1)
+      self.RunBazel(['clean', '--expunge'])
+
+      # The remote record is found via FindMissingBlobs: no revalidation
+      # fetch, and the content resolves from the checksum-keyed cache.
+      self.RunBazel(args)
+      self.assertEqual(self._RequestCount('/a.bin'), 1)
+    finally:
+      self.StopRemoteWorker()
+
   def testDownloadManifestWritten(self):
     # Manifests are written by every fetch, validation flags or not.
     self._WriteModuleFile({'foo': (['/a.bin', '/mirror-a.bin'], SHA256_A)})

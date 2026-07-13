@@ -46,6 +46,7 @@ import com.google.devtools.build.lib.authandtls.GoogleAuthUtils;
 import com.google.devtools.build.lib.authandtls.credentialhelper.CredentialHelperEnvironment;
 import com.google.devtools.build.lib.authandtls.credentialhelper.CredentialModule;
 import com.google.devtools.build.lib.authandtls.credentialhelper.GetCredentialsResponse;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidationRecordStore;
 import com.google.devtools.build.lib.bazel.repository.downloader.Downloader;
 import com.google.devtools.build.lib.buildeventstream.BuildEventArtifactUploader;
 import com.google.devtools.build.lib.buildeventstream.LocalFilesArtifactUploader;
@@ -1333,6 +1334,16 @@ public final class RemoteModule extends BlazeModule {
         return null;
       }
       return delegate.createRepoContentsCache();
+    }
+
+    @Nullable
+    @Override
+    public DownloadValidationRecordStore createDownloadValidationRecordStore() {
+      RepositoryRemoteHelpersFactory delegate = this.delegate;
+      if (delegate == null) {
+        return null;
+      }
+      return delegate.createDownloadValidationRecordStore();
     }
   }
 
