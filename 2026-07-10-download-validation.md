@@ -22,9 +22,9 @@ so that the entire fleet skips revalidation of anything already proven.
 The mechanism sits in the shared download layer,
 covering repository rules, module extensions, registry downloads, and the `Download` actions of the sibling [Lazy Downloads](2026-07-03-lazy-downloads.md) proposal.
 Each repository fetch additionally records a manifest of its downloads — carried into repository contents cache entries —
-and enforcement is a universe-scoped fetch:
-`bazel fetch --validate //app/...` verifies the downloads that universe depends on,
-fetching only what the universe itself needs and never re-running implementation functions.
+and enforcement is a flag on the fetch command:
+`bazel fetch --validate --all` verifies the downloads of the module graph's repositories,
+fetching only what is absent and never re-running implementation functions.
 Because records live in the CAS and never in the action cache,
 the design works in deployments where clients may not upload action results.
 
@@ -291,11 +291,12 @@ the manifest is an ordinary output of the remotely executed fetch.
 Enforcement is a universe-scoped fetch;
 
 ```
-bazel fetch --validate --config=mirror //app/... //tools/toolchains/...
+bazel fetch --validate --all --config=mirror
+bazel fetch --validate --repo=@zlib --repo=@openjdk
 ```
 
-`bazel fetch <patterns>` already computes exactly the right universe —
-the repositories the named targets need, discovered natively by Skyframe with no analysis-ordering machinery —
+`bazel fetch` already computes the right universe —
+the module graph's repositories for `--all`, named repositories for `--repo`, discovered natively with no analysis-ordering machinery —
 and already embodies the right cost model: absent repositories are fetched, present ones are not.
 `--validate` strengthens the contract from "make the universe's external content present" to "present and correct";
 
@@ -303,8 +304,8 @@ and already embodies the right cost model: absent repositories are fetched, pres
 * an up-to-date repository is validated from its manifest — recorded URLs through the current rewriter configuration into the validation engine, records checked, unvalidated URLs exercised — with the implementation function never re-run;
 * a repository restored from the contents cache validates from the manifest delivered with the entry.
 
-The checked set is easy to state: **the downloads the named universe depends on**.
-No stale output-base history (a removed dependency is simply not in any universe),
+The checked set is easy to state: **the downloads of the universe's repositories**.
+No stale output-base history (a removed dependency is simply not in the module graph),
 no co-invocation subtleties,
 and no new command surface — a flag on the command whose subject was always the universe's external content.
 Nothing is fetched that the universe does not itself need,
@@ -457,8 +458,7 @@ Manifest writes are atomic (write-then-rename).
 Integration-tested: an unchanged repository validates with exactly one additional request, records make the following run free, and mirror rot fails strict enforcement from the manifest alone.
 
 **Not yet implemented.**
-Target-pattern universes for `--validate`;
-the JUnit report flag;
+The JUnit report flag;
 validation actions for lazy download declarations;
 manifests for module extension evaluations and remote contents cache manifest delivery;
 registry download validation;
