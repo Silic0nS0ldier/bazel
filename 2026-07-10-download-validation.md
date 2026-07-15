@@ -449,10 +449,17 @@ Local repository contents cache entries carry the manifest as `<entry>.downloads
 so a repository restored from the cache still knows its downloads.
 Not yet implemented: carriage in vendored repositories.
 
+**Enforcement.**
+`bazel fetch --validate` is implemented for `--all` and `--repo` universes:
+up-to-date repositories are validated from their manifests (including manifests carried in contents cache entries, found through the repository symlink) without re-running implementation functions,
+guarded to require the validation flags, with manifest-less repositories reported rather than failed.
+Manifest writes are atomic (write-then-rename).
+Integration-tested: an unchanged repository validates with exactly one additional request, records make the following run free, and mirror rot fails strict enforcement from the manifest alone.
+
 **Not yet implemented.**
-The `--validate` fetch mode and its JUnit report;
+Target-pattern universes for `--validate`;
+the JUnit report flag;
 validation actions for lazy download declarations;
-atomic (write-then-rename) manifest writes;
 manifests for module extension evaluations and remote contents cache manifest delivery;
 registry download validation;
 the Remote Asset validation path;
