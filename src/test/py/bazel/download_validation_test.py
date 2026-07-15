@@ -260,6 +260,51 @@ class DownloadValidationTest(test_base.TestBase):
     finally:
       self.StopRemoteWorker()
 
+  def testFetchValidateEnforcesWithoutRefetch(self):
+    # Fetch without validation: manifest written, no records, one request.
+    self._WriteModuleFile({'foo': (['/a.bin'], SHA256_A)})
+    self._Build('@foo//:out.bin')
+    self.assertEqual(self._RequestCount('/a.bin'), 1)
+
+    # --validate requires the validation flag.
+    exit_code, _, stderr = self.RunBazel(
+        ['fetch', '--repo=@foo', '--validate'], allow_failure=True)
+    self.assertNotEqual(exit_code, 0)
+    self.assertIn(
+        'requires --experimental_repository_download_validation',
+        '\n'.join(stderr))
+
+    # Enforcement validates from the manifest without re-running the repo
+    # rule: exactly one additional request (the validation fetch).
+    fetch_args = [
+        'fetch',
+        '--repo=@foo',
+        '--validate',
+        '--repository_cache=' + self._repository_cache,
+        '--experimental_repository_download_validation=strict',
+    ]
+    _, _, stderr = self.RunBazel(fetch_args)
+    self.assertIn('validated successfully', '\n'.join(stderr))
+    self.assertEqual(self._RequestCount('/a.bin'), 2)
+
+    # Records make the next enforcement run free.
+    self.RunBazel(fetch_args)
+    self.assertEqual(self._RequestCount('/a.bin'), 2)
+
+    # Mirror rot: the URL stops serving; with records dropped, strict
+    # enforcement fails from the manifest alone - no refetch involved.
+    del _Handler.files['/a.bin']
+    removed = 0
+    for root, _, files in os.walk(self._repository_cache):
+      for name in files:
+        if name.startswith('validated-'):
+          os.remove(os.path.join(root, name))
+          removed += 1
+    self.assertGreaterEqual(removed, 1)
+    exit_code, _, stderr = self.RunBazel(fetch_args, allow_failure=True)
+    self.assertNotEqual(exit_code, 0)
+    self.assertIn('could not be fetched', '\n'.join(stderr))
+
   def testDownloadManifestWritten(self):
     # Manifests are written by every fetch, validation flags or not.
     self._WriteModuleFile({'foo': (['/a.bin', '/mirror-a.bin'], SHA256_A)})

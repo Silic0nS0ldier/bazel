@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.StarlarkSemantics;
 
@@ -98,8 +99,13 @@ public class DigestWriter {
   void writeDownloadManifest(List<DownloadManifest.Entry> entries)
       throws RepositoryFunctionException {
     try {
-      FileSystemUtils.writeContent(
-          downloadManifestPath, ISO_8859_1, DownloadManifest.serialize(entries));
+      // Written atomically so concurrent readers (enforcement fetches in other servers sharing
+      // the output base's external directory) never observe a partial document.
+      Path tmp =
+          downloadManifestPath.replaceName(
+              downloadManifestPath.getBaseName() + ".tmp-" + UUID.randomUUID());
+      FileSystemUtils.writeContent(tmp, ISO_8859_1, DownloadManifest.serialize(entries));
+      tmp.renameTo(downloadManifestPath);
     } catch (IOException e) {
       throw new RepositoryFunctionException(e, Transience.TRANSIENT);
     }

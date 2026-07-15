@@ -163,6 +163,7 @@ public class BazelRepositoryModule extends BlazeModule {
   private RepoSpecFunction repoSpecFunction;
   private YankedVersionsFunction yankedVersionsFunction;
 
+  private final FetchCommand fetchCommand = new FetchCommand();
   private final VendorCommand vendorCommand = new VendorCommand(nonstrictRepoEnvSupplier);
   private final RegistryFactoryImpl registryFactory =
       new RegistryFactoryImpl(nonstrictRepoEnvSupplier);
@@ -204,7 +205,7 @@ public class BazelRepositoryModule extends BlazeModule {
 
   @Override
   public void serverInit(OptionsParsingResult startupOptions, ServerBuilder builder) {
-    builder.addCommands(new FetchCommand());
+    builder.addCommands(fetchCommand);
     builder.addCommands(new ModCommand());
     builder.addCommands(vendorCommand);
     builder.addInfoItems(new RepositoryCacheInfoItem(repositoryCache));
@@ -285,6 +286,7 @@ public class BazelRepositoryModule extends BlazeModule {
     this.repoSpecFunction.setDownloadManager(downloadManager);
     this.yankedVersionsFunction.setDownloadManager(downloadManager);
     this.vendorCommand.setDownloadManager(downloadManager);
+    this.fetchCommand.setDownloadManager(downloadManager);
 
     repoEnvSupplier.set(env.getRepoEnv());
     nonstrictRepoEnvSupplier.set(env.getNonstrictRepoEnv());

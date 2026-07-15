@@ -126,6 +126,67 @@ public class DownloadManager {
     this.downloadValidator = downloadValidator;
   }
 
+  public boolean hasDownloadValidator() {
+    return downloadValidator != null;
+  }
+
+  /**
+   * Validates recorded download manifest entries without any repository fetch: URLs pass through
+   * the current rewriter configuration and into the validation engine exactly as a fresh fetch's
+   * downloads would. Used by {@code bazel fetch --validate} for up-to-date repositories.
+   */
+  public void validateManifestEntries(
+      List<DownloadManifest.Entry> entries,
+      Path tmpDir,
+      Map<String, String> clientEnv,
+      String context)
+      throws IOException, InterruptedException {
+    if (downloadValidator == null) {
+      return;
+    }
+    for (DownloadManifest.Entry entry : entries) {
+      if (entry.hasHeaders()) {
+        eventHandler.handle(
+            Event.warn(
+                String.format(
+                    "Download validation: skipping a download of %s recorded with explicit"
+                        + " headers; it is validated only during real fetches.",
+                    context)));
+        continue;
+      }
+      Checksum checksum;
+      try {
+        checksum = Checksum.fromSubresourceIntegrity(entry.integrity());
+      } catch (Checksum.InvalidChecksumException e) {
+        throw new IOException(
+            String.format("Invalid checksum in download manifest of %s: %s", context, entry), e);
+      }
+      ImmutableList<URI> urls =
+          entry.urls().stream().map(URI::create).collect(toImmutableList());
+      ImmutableList<URI> rewrittenUrls = urls;
+      Map<URI, Map<String, List<String>>> authHeaders = ImmutableMap.of();
+      if (rewriter != null) {
+        ImmutableList<UrlRewriter.RewrittenURL> mappings = rewriter.amend(urls);
+        rewrittenUrls = mappings.stream().map(RewrittenURL::url).collect(toImmutableList());
+        authHeaders = rewriter.updateAuthHeaders(mappings, authHeaders, netrcCreds);
+      }
+      if (rewrittenUrls.isEmpty()) {
+        continue;
+      }
+      downloadValidator.validate(
+          rewrittenUrls,
+          ImmutableMap.of(),
+          credentialFactory.create(authHeaders),
+          checksum,
+          /* canonicalId= */ "",
+          downloader,
+          tmpDir,
+          clientEnv,
+          context,
+          entry.allowFail());
+    }
+  }
+
   public Future<Path> startDownload(
       ExecutorService executorService,
       List<URI> originalUrls,
