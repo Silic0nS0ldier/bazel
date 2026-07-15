@@ -22,8 +22,9 @@ so that the entire fleet skips revalidation of anything already proven.
 The mechanism sits in the shared download layer,
 covering repository rules, module extensions, registry downloads, and the `Download` actions of the sibling [Lazy Downloads](2026-07-03-lazy-downloads.md) proposal.
 Each repository fetch additionally records a manifest of its downloads — carried into repository contents cache entries —
-and a workspace-planted `download_validation_test` rule turns enforcement into ordinary test targets with policy expressed as attributes:
-`bazel test //infra:validate_mirror`, with no fetching, materialising, or re-running of implementation functions.
+and enforcement is a universe-scoped fetch:
+`bazel fetch --validate //app/...` verifies the downloads that universe depends on,
+fetching only what the universe itself needs and never re-running implementation functions.
 Because records live in the CAS and never in the action cache,
 the design works in deployments where clients may not upload action results.
 
@@ -95,20 +96,17 @@ it fires at the two moments Bazel already touches downloads, and only there;
   A fetch served from the repository contents cache executes no downloads,
   and instead validates from the manifest delivered with the entry (see [coexistence](#coexistence-with-the-repository-contents-cache)).
   This is the passive path: an ordinary `bazel build` that happens to fetch a stale repository validates that repository's downloads in passing.
-* **When a [validation test](#validation-as-tests-download_validation_test) runs.**
-  `download_validation_test` is an ordinary test rule the workspace plants;
-  its checked set is the repositories reachable in the configured graph — the invocation's and its `universe` attribute's —
-  whose [download manifests](#validating-already-fetched-repositories-download-manifests) it reads once analysis has completed,
-  plus the [lazy download declarations](#lazy-download-actions) of its `deps`.
-  The test itself fetches nothing and never runs an implementation function;
-  every repository it checks was fetched because analysis needed it, never for validation's sake.
+* **When `bazel fetch --validate` runs.**
+  A universe-scoped [enforcement fetch](#enforcement-bazel-fetch---validate):
+  absent repositories of the universe are fetched as fetch already does (inline validation covering them),
+  and up-to-date repositories are validated from their [download manifests](#validating-already-fetched-repositories-download-manifests) —
+  implementation functions never re-run, and nothing is fetched that the universe does not itself need.
+  [Lazy download declarations](#lazy-download-actions) validate as validation actions during ordinary builds.
 
 Nothing else triggers validation.
 A fully warm build — repositories materialised, download cache populated, `Download` action outputs present — performs no validation work at all
 (whether manifest checks should also run opportunistically during builds is left as an open question).
-Enforcement therefore means running the workspace's validation test targets, as a CI job would.
-The flags govern the first moment;
-validation test targets carry their own policy as attributes.
+Enforcement therefore means running `bazel fetch --validate` over a universe, as a CI job would.
 
 ## Validation records
 
@@ -232,8 +230,7 @@ common:presubmit --repository_download_validation=strict
 common:presubmit --repository_download_validation_urls=https://mirror\.example\.com/.*
 ```
 
-These flags govern inline validation only;
-enforcement over the unchanged set is expressed as [validation test targets](#validation-as-tests-download_validation_test), whose policy lives in attributes.
+The same flags govern enforcement fetches, composed via rc configs (e.g. `bazel fetch --validate --config=presubmit //app/...`).
 
 Both flags would incubate under the `--experimental_` prefix.
 Neither participates in repository fingerprinting:
@@ -278,7 +275,7 @@ The manifest resolves this by being part of the cached entry:
 it is recorded as an output of the fetch alongside the recorded inputs,
 so an entry written by a validation-aware fetch delivers its manifest with the hit.
 A cache-hit fetch then validates inline from the delivered manifest — record checks, plus exercising anything unvalidated — with the implementation function never running.
-[Validation tests](#validation-as-tests-download_validation_test) read a checked repository's manifest from its contents cache entry without materialising anything;
+[Enforcement fetches](#enforcement-bazel-fetch---validate) read a checked repository's manifest from its contents cache entry without materialising anything;
 remote cache hits deliver their manifest into the output base, where the same by-name lookup finds it.
 
 An entry without a manifest (written by an older Bazel, or with validation disabled) cannot be validated;
@@ -289,110 +286,49 @@ In deployments where the remote contents cache is unavailable because clients ma
 the design carries over to fetch results produced via remote execution:
 the manifest is an ordinary output of the remotely executed fetch.
 
-## Validation as tests: `download_validation_test`
+## Enforcement: `bazel fetch --validate`
 
-Enforcement shares the *interface* of the test machinery — targets, `bazel test`, `test.xml`, BEP test results, tag filtering — while its execution is the validation engine, not a spawn.
-The surface is a rule the workspace plants, with policy expressed as ordinary attributes;
+Enforcement is a universe-scoped fetch;
 
-```starlark
-download_validation_test(
-    name = "validate_mirror",
-    mode = "strict",
-    url_patterns = ["https://mirror\\.example\\.com/.*"],
-    universe = ["//app:release", "//tools/toolchains:all_platforms"],
-    shard_count = 4,
-)
-
-download_validation_test(
-    name = "validate_upstream",
-    universe = ["//app:release"],
-    tags = ["manual"],  # run by the scheduled job only
-)
+```
+bazel fetch --validate --config=mirror //app/... //tools/toolchains/...
 ```
 
-Planted targets make validation policy checked-in, code-reviewed workspace configuration:
-multiple suites with different policies coexist as ordinary targets, selected by target patterns and tag filters,
-with no dedicated command surface and no configuration juggling.
-`mode` and `url_patterns` mirror the inline flags but are independent of them —
-the flags govern the passive fetch-time moment, the attributes govern the target —
-and a `deps` attribute additionally validates the [lazy download declarations](#lazy-download-actions) of the listed targets.
+`bazel fetch <patterns>` already computes exactly the right universe —
+the repositories the named targets need, discovered natively by Skyframe with no analysis-ordering machinery —
+and already embodies the right cost model: absent repositories are fetched, present ones are not.
+`--validate` strengthens the contract from "make the universe's external content present" to "present and correct";
 
-Each test is functionally a report generator over an exactly defined universe:
-the repositories reachable in the configured graph of the invocation's top-level targets and of the rule's `universe` attribute.
-The `universe` attribute makes the checked set explicit in the BUILD file and makes standalone enforcement invocations work —
-`bazel test //infra:validate_mirror` analyses its universe itself
-(fetching its repositories, proportionally and largely from the contents caches: the coverage-establishment cost this proposal already embraces) —
-while co-invoked runs (`bazel test //...`) additionally cover everything the invocation touches.
+* an absent repository is fetched as today, with inline validation covering its downloads as they happen;
+* an up-to-date repository is validated from its manifest — recorded URLs through the current rewriter configuration into the validation engine, records checked, unvalidated URLs exercised — with the implementation function never re-run;
+* a repository restored from the contents cache validates from the manifest delivered with the entry.
 
-For each repository in the checked set the manifest is read by name —
-from the output base, or from the contents cache entry the repository resolved to —
-its recorded URLs pass through the current rewriter configuration and into the validation engine:
-records checked, unvalidated URLs exercised, outcomes written as the test's own `test.xml` (see below).
+The checked set is easy to state: **the downloads the named universe depends on**.
+No stale output-base history (a removed dependency is simply not in any universe),
+no co-invocation subtleties,
+and no new command surface — a flag on the command whose subject was always the universe's external content.
+Nothing is fetched that the universe does not itself need,
+and anything it does fetch was needed regardless: coverage establishment is the fetch the universe already implies.
 
-The test actions are deliberately uncacheable.
-Caching lives at the right granularity already — validation records per (URL, checksum) —
-so a fully validated universe's test is a graph traversal plus record presence checks,
-and an action-key story over execution-time-discovered manifests would buy nothing.
-`shard_count` partitions the discovered manifest set for parallelism,
-and `--keep_going`, flaky-retry semantics, and tag filtering behave as for any test.
+Validation work is proportional to novelty, not universe size:
+a fully validated universe costs manifest reads plus record presence checks,
+and only definitions without a record anywhere in the fleet cause network traffic.
 
-Because every existing test executes as a spawn, a natively executed test action is new machinery
-(`TestRunnerAction` and the test strategies assume one);
-this remains the largest novel implementation surface in the proposal.
+The division of labour with inline validation still holds;
 
-### Discovery and ordering
+* a changed definition is invalidated and fetched by the next build that needs it regardless — inline validation covers the changed set with no cost attributable to enforcement;
+* the enforcement fetch exists for the *unchanged* set (mirror rot, evicted records), validated from manifests without re-running anything;
+* a repository outside every named universe is never validated and costs nothing — content used only by other pipelines is covered by naming it in theirs.
 
-Under `bazel test //...`, validation targets are analysed and configured before much of the invocation's repository fetching has happened;
-a naive execution-time read of whatever manifests exist would race with fetching (late discovery) and,
-worse, would inherit the output base's *history* — manifests of repositories long removed from the graph,
-whose dead URLs would fail a strict suite as false positives.
-Anchoring discovery to the configured graph resolves both, with two mechanisms;
+### Reporting
 
-* **The validation action waits for analysis to complete.**
-  Analysis completing implies every loading-phase fetch of the invocation has happened and written its manifest,
-  so the read is ordered, not raced.
-  Phased builds satisfy this for free (execution starts after analysis);
-  under interleaved analysis and execution the action's executor blocks on the analysis-complete signal Bazel already produces —
-  a wait on one cheap action, not a global barrier.
-* **The checked set is computed from the graph, not the filesystem.**
-  A walkable-graph traversal from the invocation's top-level targets (and the rule's `universe`) collects the reachable repositories —
-  including those used only during loading, such as bzl-only and toolchain repositories, since the package-loading edges are in the graph —
-  and their manifests are read by name.
-  Graph traversal from an action is unusual but precedented (remote lease extension does exactly this),
-  and the action is already deliberately impure and uncacheable.
+Enforcement results are emitted as machine-readable output via;
 
-The result is easy to state:
-**the checked set is exactly the downloads the checked universe depends on**.
-No stale history, no missed late fetches, and nothing validated that the workspace no longer uses.
-Lazy download declarations need none of this — they are analysis facts of the `deps`, dependency-ordered ahead of the action by construction.
+```
+--repository_download_validation_junit=<path>
+```
 
-### Reachability: coverage is the universe
-
-The module graph routinely contains repositories no build ever uses — optional features of rulesets, toolchains for other platforms.
-Validating them would be waste, and fetching them in order to validate them would be worse.
-Graph-anchored discovery makes reachability exact rather than observed;
-
-* a repository in the checked universe was fetched by that universe's own analysis, so its manifest exists and is validated — coverage *is* the universe, with nothing to assert separately;
-* a repository outside every declared universe and every invocation is never validated and costs nothing;
-* content used only by other pipelines (platform variants, release-only tooling) is covered by naming it in a `universe`.
-
-Fleet-wide record reach is unchanged:
-records live in the shared CAS, so a (URL, checksum) pair validated by any machine is skipped by all,
-and ephemeral machines resolve their universes' repositories largely from the shared contents cache,
-which delivers manifests with its hits (see [coexistence](#coexistence-with-the-repository-contents-cache)).
-
-The division of labour with inline validation completes the picture;
-
-* a repository whose definition changed is invalidated, so the next build that needs it fetches it regardless —
-  inline validation covers the changed set with no fetch cost attributable to validation;
-* the tests exist for the *unchanged* set (mirror rot, evicted records),
-  which by construction was fetched before and therefore has a manifest;
-* a repository never fetched anywhere has never been needed by any build,
-  and validating it genuinely requires a first fetch, which stays an explicit choice rather than a test side effect.
-
-### Test results
-
-Each test writes `test.xml` in the dialect `bazel test` already produces.
+writing JUnit XML in the dialect `bazel test` produces, because that is what CI systems already ingest for per-item results.
 Results nest download-first, URL-second;
 
 * one `<testsuite>` per download, named by its declaring context (canonical repository, module extension, or target label for lazy declarations) plus its integrity checksum;
@@ -410,8 +346,8 @@ Outcomes map onto the JUnit vocabulary;
   a URL excluded by the URL policy;
   a manifest entry marked as carrying explicit headers (inline-only validation).
 
-A test target fails when any of its cases record a `<failure>` or `<error>`; skipped cases never fail a test,
-so `tolerant` environments see green runs with skip counts while `strict` environments gate.
+The enforcement fetch fails when any case records a `<failure>` or `<error>`; skipped cases never fail it,
+so `tolerant` runs stay green with skip counts while `strict` runs gate.
 Validation is deduplicated by (URL, checksum) but reporting is not:
 a shared outcome appears under every declaring suite, so each download reads as a complete unit.
 
@@ -453,10 +389,11 @@ Both fetch paths share `DownloadManager`, so lazy downloads inherit validation a
   exactly as an already-materialised repository does not.
 
 Declared downloads need no manifest — the declaration *is* the manifest, a loading-phase fact of the declaring target.
-Their validation surface is the same planted rule:
-a `download_validation_test` with `deps` consumes the declared downloads of the listed targets,
-reporting per-URL cases in the same `test.xml` shape.
-Late discovery does not arise for them — declarations are analysis facts, dependency-ordered ahead of the test action.
+Their validation surface is Bazel's existing validation-action machinery:
+a download-declaring target emits a validation action into the `_validation` output group,
+checking its declared (URL, integrity) pairs through the same engine and records,
+and running alongside whatever builds the target under `--run_validations` —
+implicit, invocation-scoped, owned by the declaring target, with nothing to plant and nothing to schedule.
 Ruleset macros can pair declaring targets with validation tests or expose per-package suites,
 and reachability is native — the tests sit in the ordinary build graph and are selected by ordinary target patterns.
 Neither the `Download` actions nor the content fetches run for validation:
@@ -513,8 +450,8 @@ so a repository restored from the cache still knows its downloads.
 Not yet implemented: carriage in vendored repositories.
 
 **Not yet implemented.**
-The `download_validation_test` rule with its natively executed non-spawn test action,
-analysis-completion wait, and configured-graph traversal;
+The `--validate` fetch mode and its JUnit report;
+validation actions for lazy download declarations;
 atomic (write-then-rename) manifest writes;
 manifests for module extension evaluations and remote contents cache manifest delivery;
 registry download validation;
@@ -531,8 +468,9 @@ and CAS blobs are ordinary content-addressed entries requiring no server-side ch
 Download manifests are additive files with marker lifecycle;
 repositories fetched without them (older Bazel, validation disabled) simply lack them,
 and their validation tests report skipped rather than failing — the next real fetch produces one.
-The `download_validation_test` rule is new, opt-in surface planted by the workspace;
-no repository names are reserved and nothing is generated.
+`bazel fetch` gains the `--validate` flag and the JUnit report flag,
+and lazy declarations emit ordinary validation actions;
+nothing is generated and no names are reserved.
 Enabling validation can fail fetches that previously succeeded — that is its purpose — but only ever by surfacing a URL/checksum disagreement or (in strict mode) an unfetchable URL.
 No repository fingerprint, lockfile, or marker file format changes are involved.
 
@@ -587,45 +525,30 @@ and that cost is paid to recover facts a previous fetch already observed.
 An enforcement pass that forces fetching is unusable at exactly the scale it is needed.
 Fetching remains the explicit escape hatch for bringing a not-yet-fetched repository into validation coverage.
 
-## A standalone sweep command
+## Enforcement without a universe
 
-Expose enforcement as a command mode (e.g. `bazel fetch --validate`) that walks recorded metadata and reports results through bespoke output.
-Rejected: it duplicates interface the test machinery already owns —
-scoping via target patterns and tag filters, scheduling, retries, `--keep_going`, per-item JUnit results, BEP, CI ingestion —
-behind new flags and a new report format,
-and a fetch mode defined by never fetching is contradictory surface.
-Planted validation test targets keep the identical no-fetch execution semantics under the existing interface.
+Drive enforcement from recorded metadata alone:
+a walk of every manifest in the output base and the contents caches, behind a flag, a command, or a test rule.
+Rejected: the walked universe is output-base *history* rather than workspace state,
+so manifests of removed dependencies linger indefinitely and fail strict runs as false positives,
+and under interleaved analysis and execution the walk races fetching.
+A named universe states what will be checked, and the fetch command computes it natively.
 
-## A Bazel-generated synthetic repository
+## Test-rule enforcement surfaces
 
-Have Bazel synthesise a repository (e.g. `@downloads`) containing one validation test target per repository in the module graph,
-generated from module resolution and lockfile-recorded extension results.
-Workable, and an earlier form of this design;
-rejected in favour of the planted rule, which deletes machinery rather than adding it;
+Model enforcement as `bazel test` targets:
+either a Bazel-generated synthetic repository with one validation test per repository,
+or a workspace-planted `download_validation_test` rule whose checked set comes from the configured graph.
+Both were earlier forms of this design, and each teaches a rejection;
 
-* no generation logic, no reserved repository name, no collision handling;
-* no generation-time enumeration at all — the checked set is computed from the configured graph when the test runs;
-* policy as ordinary attributes (multiple coexisting suites, tags, visibility, `shard_count`) instead of flag-scoped target patterns;
-* one rule covers repository manifests and lazy declarations alike.
+* the synthetic repository needs generation machinery, a reserved repository name, and module-graph enumeration;
+* the planted rule deletes those but strains the test model —
+  its action must wait for analysis to complete and traverse the invocation's graph (novel, impure machinery),
+  a standalone suite invocation checks nothing without a `universe` attribute,
+  and the universe-plus-co-invocation split makes "what will be checked" hard to state.
 
-The synthetic repository's one advantage — a skipped entry making never-fetched repositories visible —
-is subsumed by the `universe` attribute, under which coverage is exact by construction.
-
-## Manifest-walk discovery
-
-Have the validation test enumerate by walking the filesystem for manifests — the output base's external directory and the local contents cache — instead of consulting the configured graph.
-Attractive for its simplicity (no analysis-completion wait, no graph traversal), and an earlier form of this design;
-rejected for two defects the graph anchors away;
-
-* **history, not state**: the walk's universe is everything ever fetched in the output base,
-  including repositories since removed from the graph, whose manifests nothing clears —
-  a strict suite fails on the dead URL of a dependency the workspace no longer has;
-* **late discovery**: under `bazel test //...` with interleaved analysis and execution,
-  manifests appear, are replaced, or are momentarily absent (mid-refetch) while the action runs,
-  so the walk is a racy snapshot whose report only converges on the following invocation.
-
-Graph-anchored discovery states its coverage in one sentence — the downloads the checked universe depends on —
-which is also the property that makes reports trustworthy.
+Every property the test interface was chosen for — CI-ingestible per-item reports, scoped invocations, rc-config policy — is available on the fetch surface,
+whose command owns universe computation and phasing natively.
 
 ## Spawn-based validation tests
 
@@ -686,5 +609,3 @@ a future declarative surface would simply produce its manifest at loading time.
   which is the value a developer needs to fix the declaration when the URL is the intended one.
 * Whether manifest-driven validation of up-to-date repositories should also run opportunistically during ordinary builds
   (the record checks are cheap; the concern is surprising network traffic outside explicitly validating commands).
-* Whether download-declaring rule targets should also receive an implicit validation test,
-  alongside the explicit `download_validation_test` rule.
