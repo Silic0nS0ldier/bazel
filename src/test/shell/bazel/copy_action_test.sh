@@ -76,9 +76,10 @@ def _make_tree_impl(ctx):
     ctx.actions.run_shell(
         outputs = [tree],
         command = """
-            mkdir -p $1/sub
+            mkdir -p $1/sub/deep
             echo top > $1/top.txt
             echo nested > $1/sub/nested.txt
+            echo leaf > $1/sub/deep/leaf.txt
         """,
         arguments = [tree.path],
     )
@@ -185,6 +186,21 @@ extract_from_file = rule(
     implementation = _extract_from_file_impl,
     attrs = {
         "src": attr.label(mandatory = True, allow_single_file = True),
+        "out": attr.string(mandatory = True),
+        "path": attr.string(mandatory = True),
+    },
+)
+
+def _extract_dir_impl(ctx):
+    src = ctx.attr.src[DefaultInfo].files.to_list()[0]
+    out = ctx.actions.declare_directory(ctx.attr.out)
+    ctx.actions.copy(input = src, output = out, path = ctx.attr.path)
+    return DefaultInfo(files = depset([out]))
+
+extract_dir = rule(
+    implementation = _extract_dir_impl,
+    attrs = {
+        "src": attr.label(mandatory = True),
         "out": attr.string(mandatory = True),
         "path": attr.string(mandatory = True),
     },
@@ -407,6 +423,75 @@ EOF
 
   bazel build //pkg:extract >& $TEST_log || fail "build failed"
   assert_equals "nested" "$(cat bazel-bin/pkg/extracted.txt)"
+}
+
+function test_copy_path_extracts_directory_from_directory() {
+  setup_copy_rules
+  cat > pkg/BUILD <<'EOF'
+load(":rules.bzl", "extract_dir", "make_tree")
+
+make_tree(name = "tree")
+
+extract_dir(
+    name = "extract",
+    src = ":tree",
+    out = "extracted",
+    path = "sub",
+)
+EOF
+
+  bazel build //pkg:extract >& $TEST_log || fail "build failed"
+  assert_equals "nested" "$(cat bazel-bin/pkg/extracted/nested.txt)"
+  # The sub-tree is copied recursively, rebased onto the output's root.
+  assert_equals "leaf" "$(cat bazel-bin/pkg/extracted/deep/leaf.txt)"
+  # Entries outside the extracted sub-tree are not copied.
+  if [[ -e bazel-bin/pkg/extracted/top.txt ]]; then
+    fail "top.txt is outside the extracted sub-tree and should not have been copied"
+  fi
+}
+
+function test_copy_path_directory_output_missing_dir_is_an_execution_error() {
+  setup_copy_rules
+  cat > pkg/BUILD <<'EOF'
+load(":rules.bzl", "extract_dir", "make_tree")
+
+make_tree(name = "tree")
+
+# `path` names a file, but the output is declared as a directory.
+extract_dir(
+    name = "extract",
+    src = ":tree",
+    out = "extracted",
+    path = "sub/nested.txt",
+)
+EOF
+
+  bazel build //pkg:extract >& $TEST_log \
+    && fail "build should have failed extracting a file into a directory output"
+  expect_log "failed to copy 'sub/nested.txt'"
+  expect_log "no such directory in the directory"
+}
+
+function test_copy_path_file_output_rejects_directory_at_path() {
+  setup_copy_rules
+  cat > pkg/BUILD <<'EOF'
+load(":rules.bzl", "extract_file", "make_tree")
+
+make_tree(name = "tree")
+
+# `path` names a directory, but the output is declared as a file.
+extract_file(
+    name = "extract",
+    src = ":tree",
+    out = "extracted.txt",
+    path = "sub",
+)
+EOF
+
+  bazel build //pkg:extract >& $TEST_log \
+    && fail "build should have failed extracting a directory into a file output"
+  expect_log "failed to copy 'sub'"
+  expect_log "no such file in the directory"
 }
 
 function test_copy_path_missing_file_is_an_execution_error() {

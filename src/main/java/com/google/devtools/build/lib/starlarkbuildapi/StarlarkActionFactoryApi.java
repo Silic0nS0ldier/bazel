@@ -249,10 +249,13 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               + " only the name differs. For files and directories the content is byte-identical."
               + " For unresolved symlinks the output is a symlink with the identical target"
               + " string.</p><p>Alternatively, when <code>path</code> is set, <code>input</code>"
-              + " must be a directory and <code>output</code> a file: the action copies the single"
-              + " file at <code>path</code> (relative to the directory's root) out of the"
-              + " directory.</p><p>The action is not a spawn: it has no execution strategy, is not"
-              + " sandboxed and never executes remotely.</p>",
+              + " must be a directory: the action extracts the entry at <code>path</code>"
+              + " (relative to the directory's root) out of the directory. Declare"
+              + " <code>output</code> with <a"
+              + " href=\"#declare_file\"><code>declare_file()</code></a> to extract a single file,"
+              + " or <a href=\"#declare_directory\"><code>declare_directory()</code></a> to"
+              + " recursively extract a sub-directory.</p><p>The action is not a spawn: it has no"
+              + " execution strategy, is not sandboxed and never executes remotely.</p>",
       parameters = {
         @Param(name = "input", doc = "The file, directory, or symlink to copy.", named = true),
         @Param(
@@ -269,10 +272,11 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             positional = false,
             defaultValue = "None",
             doc =
-                "May only be used when <code>input</code> is a directory and <code>output</code>"
-                    + " is a file. The path of the file to copy out of the directory, relative to"
-                    + " the directory's root. The build fails if no file exists at this path when"
-                    + " the action executes."),
+                "May only be used when <code>input</code> is a directory. The path of the file or"
+                    + " sub-directory to copy out of the directory, relative to the directory's"
+                    + " root. It must name a file when <code>output</code> is a file and a directory"
+                    + " when <code>output</code> is a directory. The build fails if nothing of the"
+                    + " expected type exists at this path when the action executes."),
         @Param(
             name = "progress_message",
             allowedTypes = {

@@ -276,11 +276,10 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
             "copy() with \"path\" param requires that \"input\" be a directory, not a %s",
             describeArtifactType(inputArtifact));
       }
-      if (outputArtifact.isTreeArtifact() || outputArtifact.isSymlink()) {
+      if (outputArtifact.isSymlink()) {
         throw Starlark.errorf(
-            "copy() with \"path\" param requires that \"output\" be declared as a file, not a %s"
-                + " (did you mean to use declare_file()?)",
-            describeArtifactType(outputArtifact));
+            "copy() with \"path\" param requires that \"output\" be declared as a file or"
+                + " directory, not a symlink");
       }
       PathFragment path = PathFragment.create((String) pathUnchecked);
       if (path.isAbsolute() || path.containsUplevelReferences() || path.isEmpty()) {

@@ -70,7 +70,7 @@ public final class CopyAction extends AbstractAction {
 
   private final String progressMessage;
 
-  /** If set, the path of the file to extract from the tree artifact input. */
+  /** If set, the tree-relative path of the file or sub-tree to extract from the input. */
   @Nullable private final PathFragment path;
 
   private CopyAction(
@@ -105,10 +105,11 @@ public final class CopyAction extends AbstractAction {
   }
 
   /**
-   * Creates a copy action that extracts a single file from a tree artifact input.
+   * Creates a copy action that extracts a file or sub-tree from a tree artifact input.
    *
-   * <p>The path must be a normalized relative path; this is expected to have been validated by the
-   * caller at analysis time.
+   * <p>A file output extracts the regular file at {@code path}; a tree output recursively extracts
+   * the sub-tree rooted at {@code path}. The path must be a normalized relative path; this is
+   * expected to have been validated by the caller at analysis time.
    */
   public static CopyAction createExtracting(
       ActionOwner owner,
@@ -119,8 +120,8 @@ public final class CopyAction extends AbstractAction {
     Preconditions.checkArgument(
         input.isTreeArtifact(), "copy input %s must be a tree artifact to use path", input);
     Preconditions.checkArgument(
-        !output.isTreeArtifact() && !output.isSymlink(),
-        "copy output %s must be a file artifact to use path",
+        !output.isSymlink(),
+        "copy output %s must be a file or tree artifact to use path",
         output);
     Preconditions.checkArgument(
         !path.isAbsolute() && !path.containsUplevelReferences() && !path.isEmpty(),
@@ -129,7 +130,10 @@ public final class CopyAction extends AbstractAction {
     return new CopyAction(owner, input, output, progressMessage, path);
   }
 
-  /** Returns the tree-relative path of the extracted file, or null for a whole-artifact copy. */
+  /**
+   * Returns the tree-relative path of the extracted file or sub-tree, or null for a whole-artifact
+   * copy.
+   */
   @Nullable
   public PathFragment getPath() {
     return path;
@@ -154,17 +158,23 @@ public final class CopyAction extends AbstractAction {
 
     try {
       if (path != null) {
-        // Extract a single file from the tree artifact input.
+        // Extract the file or sub-tree at `path` from the tree artifact input. The declared output
+        // type fixes which one is expected; a mismatch (including a missing path) is an error.
         Path childPath = inputPath.getRelative(path);
-        if (!childPath.isFile(Symlinks.FOLLOW)) {
-          String message =
-              String.format(
-                  "failed to copy '%s' from '%s' to '%s': no such file in the directory",
-                  path, input.getExecPathString(), output.getExecPathString());
-          throw new ActionExecutionException(
-              message, this, false, createDetailedExitCode(message));
+        if (output.isTreeArtifact()) {
+          if (!childPath.isDirectory(Symlinks.FOLLOW)) {
+            throw extractionError("no such directory in the directory", input, output);
+          }
+          // The output directory has already been created empty prior to execution.
+          copyTreeDereferencing(metadataFs, childPath, outputPath);
+          maybeInjectTreeMetadata(
+              actionExecutionContext, input, (SpecialArtifact) output, outputPath, path);
+        } else {
+          if (!childPath.isFile(Symlinks.FOLLOW)) {
+            throw extractionError("no such file in the directory", input, output);
+          }
+          copyFile(metadataFs, childPath, outputPath);
         }
-        copyFile(metadataFs, childPath, outputPath);
       } else if (output.isSymlink()) {
         // Unresolved symlink: reproduce the target string verbatim. The target is tracked
         // metadata, so the input's materialization need not be consulted (or even exist).
@@ -179,7 +189,11 @@ public final class CopyAction extends AbstractAction {
         // The output directory has already been created empty prior to execution.
         copyTreeDereferencing(metadataFs, inputPath, outputPath);
         maybeInjectTreeMetadata(
-            actionExecutionContext, input, (SpecialArtifact) output, outputPath);
+            actionExecutionContext,
+            input,
+            (SpecialArtifact) output,
+            outputPath,
+            /* subPath= */ null);
       } else {
         copyFile(metadataFs, inputPath, outputPath);
         maybeInjectOutputMetadata(actionExecutionContext, input, output, outputPath);
@@ -194,6 +208,15 @@ public final class CopyAction extends AbstractAction {
     }
 
     return ActionResult.EMPTY;
+  }
+
+  /** Builds an execution error for a {@code path} extraction whose target is missing or mistyped. */
+  private ActionExecutionException extractionError(String reason, Artifact input, Artifact output) {
+    String message =
+        String.format(
+            "failed to copy '%s' from '%s' to '%s': %s",
+            path, input.getExecPathString(), output.getExecPathString(), reason);
+    return new ActionExecutionException(message, this, false, createDetailedExitCode(message));
   }
 
   /**
@@ -238,9 +261,16 @@ public final class CopyAction extends AbstractAction {
    * from the input tree's per-child digests (identical content) plus the copied children's content
    * proxies, sparing a re-read + re-hash of every child. Falls back to filesystem-derived metadata
    * (by not injecting) if any child's digest is unavailable.
+   *
+   * <p>When {@code subPath} is set (a sub-tree extraction), only the input children under that path
+   * are injected, rebased onto the output tree's root; the rest are ignored.
    */
   private static void maybeInjectTreeMetadata(
-      ActionExecutionContext ctx, Artifact input, SpecialArtifact output, Path outputPath)
+      ActionExecutionContext ctx,
+      Artifact input,
+      SpecialArtifact output,
+      Path outputPath,
+      @Nullable PathFragment subPath)
       throws IOException {
     if (ctx.getActionFileSystem() != null) {
       return;
@@ -252,12 +282,18 @@ public final class CopyAction extends AbstractAction {
     TreeArtifactValue.Builder builder = TreeArtifactValue.newBuilder(output);
     for (Map.Entry<TreeFileArtifact, FileArtifactValue> entry :
         inputTree.getChildValues().entrySet()) {
+      PathFragment relPath = entry.getKey().getParentRelativePath();
+      if (subPath != null) {
+        if (!relPath.startsWith(subPath)) {
+          continue;
+        }
+        relPath = relPath.relativeTo(subPath);
+      }
       FileArtifactValue childMetadata = entry.getValue();
       byte[] digest = childMetadata.getDigest();
       if (digest == null) {
         return;
       }
-      PathFragment relPath = entry.getKey().getParentRelativePath();
       Path childPath = outputPath.getRelative(relPath);
       childPath.chmod(0555);
       FileContentsProxy proxy;
