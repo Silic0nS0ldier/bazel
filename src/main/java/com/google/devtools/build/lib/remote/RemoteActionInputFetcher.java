@@ -82,6 +82,22 @@ public class RemoteActionInputFetcher extends AbstractActionInputPrefetcher {
     input.atomicallyWriteRelativeTo(execRoot);
   }
 
+  /**
+   * Writes a local file's content to the CAS under the given digest (a no-op if already present).
+   *
+   * <p>This object is the action filesystem's access point to the build's remote cache — it already
+   * mediates all CAS reads (input prefetching) and exposes the {@link RemoteOutputChecker}. This is
+   * the corresponding write: {@code ctx.actions.copy} uses it to place a copied local (e.g. source)
+   * input into the CAS, so an output recorded as remote-backed without an eager local write is a
+   * genuine cache-resident artifact any consumer can obtain.
+   */
+  public ListenableFuture<Void> uploadToCas(byte[] digest, long size, Path file) {
+    RemoteActionExecutionContext context =
+        RemoteActionExecutionContext.create(
+            TracingMetadataUtils.buildMetadata(buildRequestId, commandId, "copy-action-upload"));
+    return combinedCache.uploadFile(context, DigestUtil.buildDigest(digest, size), file);
+  }
+
   @Override
   protected boolean canDownloadFile(Path path, FileArtifactValue metadata) {
     // Only files and directories have remote-only content that can be downloaded.

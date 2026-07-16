@@ -1255,6 +1255,10 @@ message CopyAction {
   enum Code {
     COPY_ACTION_UNKNOWN = 0 [(metadata) = { exit_code: 37 }];
     COPY_IO_EXCEPTION = 1 [(metadata) = { exit_code: 1 }];
+    // A file-type input turned out to be the wrong kind of file on disk for the
+    // declared output type — e.g. a source artifact copied to a directory output
+    // was not actually a source directory. Only discoverable at execution time.
+    COPY_UNEXPECTED_INPUT_TYPE = 2 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;

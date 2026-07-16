@@ -248,8 +248,15 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               + " of <code>input</code>.</p><p>The output's content is identical to the input's;"
               + " only the name differs. For files and directories the content is byte-identical."
               + " For unresolved symlinks the output is a symlink with the identical target"
-              + " string.</p><p>Alternatively, when <code>path</code> is set, <code>input</code>"
-              + " must be a directory: the action extracts the entry at <code>path</code>"
+              + " string.</p><p>A <em>source directory</em> input is a special case: it is a"
+              + " file-type artifact (<a href=\"../builtins/File.html#is_directory\"><code>"
+              + "is_directory</code></a> is False — whether a source artifact is a directory is"
+              + " unknowable before execution), but may be copied to an output declared with <a"
+              + " href=\"#declare_directory\"><code>declare_directory()</code></a>. The build"
+              + " fails at execution if such an input turns out not to be a directory.</p>"
+              + "<p>Alternatively, when <code>path</code> is set, <code>input</code>"
+              + " must be a directory (a tree artifact or a source directory): the action extracts"
+              + " the entry at <code>path</code>"
               + " (relative to the directory's root) out of the directory. Declare"
               + " <code>output</code> with <a"
               + " href=\"#declare_file\"><code>declare_file()</code></a> to extract a single file,"
@@ -260,7 +267,10 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
         @Param(name = "input", doc = "The file, directory, or symlink to copy.", named = true),
         @Param(
             name = "output",
-            doc = "The output of this action, of the same artifact type as <code>input</code>.",
+            doc =
+                "The output of this action, of the same artifact type as <code>input</code> (or a"
+                    + " directory declared with <code>declare_directory()</code> when"
+                    + " <code>input</code> is a source directory).",
             named = true),
         @Param(
             name = "path",
@@ -272,7 +282,8 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             positional = false,
             defaultValue = "None",
             doc =
-                "May only be used when <code>input</code> is a directory. The path of the file or"
+                "May only be used when <code>input</code> is a directory (a tree artifact or a"
+                    + " source directory). The path of the file or"
                     + " sub-directory to copy out of the directory, relative to the directory's"
                     + " root. It must name a file when <code>output</code> is a file and a directory"
                     + " when <code>output</code> is a directory. The build fails if nothing of the"

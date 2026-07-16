@@ -38,4 +38,43 @@ public interface MetadataPropagatingFileSystem {
    *     should fall back to a physical copy.
    */
   boolean copyFileByMetadata(PathFragment source, PathFragment target) throws IOException;
+
+  /**
+   * Copies a file whose content is byte-identical to a local file (e.g. a source) that is not
+   * tracked as remote content: uploads that content to the CAS (from {@code resolvedSource}, a
+   * no-op if already present) and records {@code target} as content-by-digest — without writing the
+   * output's bytes to the local output tree.
+   *
+   * <p>Unlike {@link #copyFileByMetadata}, the digest and size are supplied by the caller (which has
+   * them from the input's metadata). This lets {@code ctx.actions.copy} avoid an eager local copy
+   * under Build without the Bytes even when copying a local input, while keeping the output a
+   * genuine remote-backed artifact whose blob is available to any consumer. (The content upload is
+   * eager; deferring it until a remote consumer demands it is a possible future improvement.)
+   *
+   * @param resolvedSource an absolute, symlink-free path to the file supplying the content
+   * @return true if handled; false if {@code target} is not an output this filesystem tracks, in
+   *     which case the caller should fall back to a physical copy
+   */
+  boolean copyFileBackedBySource(
+      PathFragment target, byte[] digest, long size, PathFragment resolvedSource)
+      throws IOException;
+
+  /**
+   * Tree analogue of {@link #copyFileBackedBySource}: recursively copies the local directory at
+   * {@code resolvedSource} (e.g. a source directory) to the output tree rooted at {@code target}
+   * by uploading each contained file's content to the CAS and recording the corresponding output
+   * as content-by-digest — without writing any bytes to the local output tree.
+   *
+   * <p>Unlike the single-file variant, no digests are supplied: a source directory's tracked
+   * metadata is one aggregate fingerprint, so each contained file is hashed here — the same cost a
+   * physical copy pays when the copied outputs are digested. Symlinks are dereferenced; a dangling
+   * symlink is an error, matching physical tree copying.
+   *
+   * @param resolvedSource an absolute, symlink-free path to the directory supplying the content
+   * @return true if handled; false if {@code target} is not an output this filesystem tracks or
+   *     would be materialized locally anyway, in which case the caller should fall back to a
+   *     physical copy
+   */
+  boolean copyTreeBackedBySource(PathFragment target, PathFragment resolvedSource)
+      throws IOException;
 }

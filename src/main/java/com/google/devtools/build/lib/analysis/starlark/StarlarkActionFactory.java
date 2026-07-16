@@ -271,9 +271,13 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
             : "Copying %{input} to %{output}";
 
     if (pathUnchecked != Starlark.NONE) {
-      if (!inputArtifact.isTreeArtifact()) {
+      // A tree artifact, or a source artifact: source directories are file-type artifacts whose
+      // directoriness is unknowable at analysis time, so accept any source artifact here and let
+      // execution verify that it actually is a directory.
+      if (!inputArtifact.isTreeArtifact() && !inputArtifact.isSourceArtifact()) {
         throw Starlark.errorf(
-            "copy() with \"path\" param requires that \"input\" be a directory, not a %s",
+            "copy() with \"path\" param requires that \"input\" be a directory (a tree artifact"
+                + " or a source directory), not a %s",
             describeArtifactType(inputArtifact));
       }
       if (outputArtifact.isSymlink()) {
@@ -294,8 +298,15 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       return;
     }
 
-    if (inputArtifact.isSymlink() != outputArtifact.isSymlink()
-        || inputArtifact.isTreeArtifact() != outputArtifact.isTreeArtifact()) {
+    // A source artifact may be a source directory — indistinguishable from a source file at
+    // analysis time — so a tree output is accepted for it; execution verifies the input actually
+    // is a directory. No such allowance for generated inputs: a generated non-tree artifact is
+    // guaranteed a regular file.
+    boolean sourceDirectoryCopy =
+        inputArtifact.isSourceArtifact() && outputArtifact.isTreeArtifact();
+    if (!sourceDirectoryCopy
+        && (inputArtifact.isSymlink() != outputArtifact.isSymlink()
+            || inputArtifact.isTreeArtifact() != outputArtifact.isTreeArtifact())) {
       throw Starlark.errorf(
           "copy() requires that \"input\" and \"output\" be of the same type, but \"input\" is a"
               + " %s and \"output\" was declared as a %s (did you mean to use declare_%s()?)",
