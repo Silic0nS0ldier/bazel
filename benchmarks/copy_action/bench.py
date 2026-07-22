@@ -78,6 +78,10 @@ Caveats:
 Individual run metrics are also always written to a CSV (<out or
 scratch-root>/raw.csv, no flag) so the reported averages can be audited.
 
+The analysis-phase action graph is captured once per scenario and mechanism via
+`bazel aquery` and written to <out or scratch-root>/aquery/<scenario>-<impl>.txt
+(strategy/state independent, so not repeated across those loops).
+
 For deeper introspection, every bazel invocation the harness makes always has its
 artifacts stored in a single flat directory (<out or scratch-root>/introspect,
 wiped at the start of each run): argv/exit code (<prefix>.invocation.json), combined
@@ -610,6 +614,12 @@ class Bazel:
                      phase="probe-" + target)
         return r.returncode == 0
 
+    def aquery(self, target, phase="aquery"):
+        """Dumps the analysis-phase action graph for `target` (a scoped `aquery
+        //...`). Strategy/state independent, so the driver captures it once per
+        (scenario, mechanism); see the aquery block in `main`."""
+        return self.run(["aquery", "//:" + target, "--experimental_copy_action"], phase=phase)
+
     def clean(self):
         self.run(["clean"], phase="clean")
 
@@ -846,7 +856,7 @@ def fmt_elapsed(seconds):
 # harness overhead. Order is display order; unknown labels sort last.
 _BUILD_PHASES = ("build",)
 _PHASE_ORDER = ("build", "baseline", "server-warm", "clean", "nl-reset",
-                "cache-wipe", "sizing", "genws")
+                "cache-wipe", "sizing", "genws", "aquery")
 
 
 def fmt_breakdown(timing):
@@ -1019,6 +1029,15 @@ def main():
     rmtree_robust(introspect_dir)
     introspector = Introspector(introspect_dir)
 
+    # The analysis-phase action graph (`bazel aquery`) per (scenario, mechanism),
+    # written once each under <out>/aquery/<scenario>-<impl>.txt. Strategy/state
+    # independent, so it is captured once per scenario rather than across the
+    # strategy/state/repeat loops. Wiped at the start of each run, like introspect/,
+    # so it reflects only the run just made.
+    aquery_dir = os.path.join(out_dir, "aquery")
+    rmtree_robust(aquery_dir)
+    os.makedirs(aquery_dir, exist_ok=True)
+
     total_cells = len(scen) * len(strategies) * len(states) * len(impls)
     if run_scratch:
         print("scratch: %s%s" % (run_scratch,
@@ -1049,6 +1068,21 @@ def main():
             sc_timing0 = dict(_TIMING)
             with timed("genws"):
                 gen_workspace(ws, sc)
+            # Capture the action graph once per (scenario, mechanism) up front. It
+            # is strategy/state independent, so a single local Bazel (no cache or
+            # RBE needed) suffices; the output goes to <out>/aquery/. Whatever
+            # aquery prints — including an analysis error for an unsupported
+            # combination (copy on a source directory) — is written verbatim, so
+            # the file documents that too.
+            aq_bazel = Bazel(args.bazel, ws, os.path.join(ob_root, "%s-aquery" % sc["key"]),
+                             "local", introspector=introspector)
+            aq_bazel.context = "%s-aquery" % sc["key"]
+            for impl in impls:
+                with timed("aquery"):
+                    r = aq_bazel.aquery(MECHANISMS[impl][0])
+                write_file(os.path.join(aquery_dir, "%s-%s.txt" % (sc["key"], impl)),
+                           (r.stdout or "").encode())
+            aq_bazel.shutdown()
             for strat in strategies:
                 results[sc["key"]].setdefault(strat, {})
                 ob = os.path.join(ob_root, "%s-%s" % (sc["key"], strat))
