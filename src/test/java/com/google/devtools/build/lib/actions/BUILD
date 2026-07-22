@@ -25,6 +25,9 @@ java_library(
             "*.java",
             "cache/*.java",
         ],
+        # Runs in a dedicated target below with the source-directory flag enabled via jvm_flags;
+        # must not run under this (flag-disabled) suite.
+        exclude = ["SourceArtifactIsDirectoryTest.java"],
     ),
     javacopts = [
     ],
@@ -109,5 +112,20 @@ java_test(
     runtime_deps = [
         ":ActionsTests_lib",
         "//src/test/java/com/google/devtools/build/lib:test_runner",
+    ],
+)
+
+java_test(
+    name = "SourceArtifactIsDirectoryTest",
+    srcs = ["SourceArtifactIsDirectoryTest.java"],
+    jvm_flags = ["-DBAZEL_SOURCE_DIRECTORY_IS_DIRECTORY=1"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
+        "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//src/test/java/com/google/devtools/build/lib/actions/util",
+        "//src/test/java/com/google/devtools/build/lib/testutil",
+        "//third_party:guava",
+        "//third_party:junit4",
+        "//third_party:truth",
     ],
 )
