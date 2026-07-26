@@ -254,7 +254,30 @@ public class BuildView {
     skyframeBuildView.resetProgressReceiver();
 
     ImmutableMap<Label, Target> labelToTargetMap = constructLabelToTargetMap(loadingResult);
-    eventBus.post(new AnalysisPhaseStartedEvent(labelToTargetMap.values()));
+
+    // Include expanded test_suite targets in analysis so that visibility of their `tests`
+    // attribute references is checked. These targets are not built; they are filtered from
+    // the final results in createResult().
+    ImmutableSet<Label> expandedTestSuiteLabels = loadingResult.getExpandedTestSuiteLabels();
+    ImmutableMap<Label, Target> analysisTargetMap;
+    if (!expandedTestSuiteLabels.isEmpty()) {
+      ImmutableMap.Builder<Label, Target> builder =
+          ImmutableMap.builderWithExpectedSize(
+              labelToTargetMap.size() + expandedTestSuiteLabels.size());
+      builder.putAll(labelToTargetMap);
+      for (Label label : expandedTestSuiteLabels) {
+        Package pkg =
+            checkNotNull(
+                skyframeExecutor.getExistingPackage(label.getPackageIdentifier()), label);
+        Target target = checkNotNull(pkg.getTargets().get(label.getName()), label);
+        builder.put(label, target);
+      }
+      analysisTargetMap = builder.buildOrThrow();
+    } else {
+      analysisTargetMap = labelToTargetMap;
+    }
+
+    eventBus.post(new AnalysisPhaseStartedEvent(analysisTargetMap.values()));
 
     // Prepare the analysis phase
     BuildConfigurationValue topLevelConfig;
@@ -363,7 +386,7 @@ public class BuildView {
 
     var configurationKey = topLevelConfig.getKey();
     ImmutableList<ConfiguredTargetKey> topLevelCtKeys =
-        labelToTargetMap.keySet().stream()
+        analysisTargetMap.keySet().stream()
             .map(
                 label ->
                     ConfiguredTargetKey.builder()
@@ -412,7 +435,7 @@ public class BuildView {
                 topLevelCtKeys,
                 aspectKeys,
                 loadingResult.getTestsToRunLabels(),
-                labelToTargetMap,
+                analysisTargetMap,
                 topLevelOptions,
                 explicitTargetPatterns,
                 eventBus,
@@ -439,7 +462,7 @@ public class BuildView {
         skyframeAnalysisResult =
             skyframeBuildView.configureTargets(
                 eventHandler,
-                labelToTargetMap,
+                analysisTargetMap,
                 topLevelCtKeys,
                 aspectKeys,
                 topLevelOptions,
@@ -482,6 +505,7 @@ public class BuildView {
               skyframeAnalysisResult,
               /* targetsToSkip= */ ImmutableSet.of(),
               labelToTargetMap,
+              expandedTestSuiteLabels,
               /* includeExecutionPhase= */ true);
     } else {
       ImmutableSet<ConfiguredTarget> targetsToSkip = ImmutableSet.of();
@@ -527,6 +551,7 @@ public class BuildView {
               skyframeAnalysisResult,
               targetsToSkip,
               labelToTargetMap,
+              expandedTestSuiteLabels,
               /* includeExecutionPhase= */ false);
     }
     logger.atInfo().log("Finished analysis");
@@ -653,11 +678,17 @@ public class BuildView {
       SkyframeAnalysisResult skyframeAnalysisResult,
       Set<ConfiguredTarget> targetsToSkip,
       ImmutableMap<Label, Target> labelToTargetMap,
+      ImmutableSet<Label> expandedTestSuiteLabels,
       boolean includeExecutionPhase)
       throws InterruptedException {
     ImmutableSet<Label> testsToRun = loadingResult.getTestsToRunLabels();
     Set<ConfiguredTarget> configuredTargets =
         new LinkedHashSet<>(skyframeAnalysisResult.getConfiguredTargets());
+    // Remove test_suite targets that were only analyzed for visibility checking of their tests
+    // attribute. They should not be built.
+    if (!expandedTestSuiteLabels.isEmpty()) {
+      configuredTargets.removeIf(ct -> expandedTestSuiteLabels.contains(ct.getLabel()));
+    }
     ImmutableMap<AspectKey, ConfiguredAspect> aspects = skyframeAnalysisResult.getAspects();
 
     Set<ConfiguredTarget> allTargetsToTest = null;
