@@ -43,6 +43,7 @@ import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
 import com.google.devtools.build.lib.remote.common.RemotePathResolver;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
 import com.google.devtools.build.lib.remote.util.FakeSpawnExecutionContext;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
 import com.google.devtools.build.lib.util.io.FileOutErr;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
@@ -71,7 +72,7 @@ public class MerkleTreeComputerTest {
   @Before
   public void setUp() throws IOException {
     var fs = new InMemoryFileSystem(new JavaClock(), DigestHashFunction.SHA256);
-    execRoot = fs.getPath("/execroot/_main");
+    execRoot = fs.getPath("/execroot/" + TestConstants.WORKSPACE_NAME);
     execRoot.createDirectoryAndParents();
     artifactRoot = ArtifactRoot.asDerivedRoot(execRoot, ArtifactRoot.RootType.OUTPUT, "outputs");
     checkNotNull(artifactRoot.getRoot().asPath()).createDirectoryAndParents();
@@ -438,7 +439,7 @@ public class MerkleTreeComputerTest {
         uploader,
         "buildRequestId",
         "commandId",
-        "_main");
+        TestConstants.WORKSPACE_NAME);
   }
 
   private FakeSpawnExecutionContext createSpawnExecutionContext(

@@ -229,7 +229,7 @@ public class RemoteExecutionServiceTest {
 
     fs = new InMemoryFileSystem(new JavaClock(), DigestHashFunction.SHA256);
 
-    execRoot = fs.getPath("/execroot/_main");
+    execRoot = fs.getPath("/execroot/" + TestConstants.WORKSPACE_NAME);
     execRoot.createDirectoryAndParents();
 
     artifactRoot = ArtifactRoot.asDerivedRoot(execRoot, RootType.OUTPUT, "outputs");
@@ -2837,7 +2837,7 @@ public class RemoteExecutionServiceTest {
           Directory.newBuilder()
               .addDirectories(
                   DirectoryNode.newBuilder()
-                      .setName("_main")
+                      .setName(TestConstants.WORKSPACE_NAME)
                       .setDigest(digestUtil.compute(rootDirectory))
                       .build())
               .build();

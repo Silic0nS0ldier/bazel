@@ -49,6 +49,15 @@ public final class RepositoryName {
 
   @SerializationConstant public static final RepositoryName MAIN = new RepositoryName("");
 
+  /**
+   * The name of the directory under a runfiles tree's root that holds the files of the main
+   * repository, i.e. the first path component of a runfiles-relative path (aka {@code rlocation}
+   * path) of a main-repository file. This is a fixed constant now that the main repository always
+   * has the canonical name {@code ""}; it used to be the workspace name defined in the (now removed)
+   * {@code WORKSPACE} file.
+   */
+  public static final String MAIN_REPOSITORY_DIRECTORY_NAME = "_main";
+
   @SerializationConstant
   public static final RepositoryName BUILTINS = new RepositoryName("_builtins");
 

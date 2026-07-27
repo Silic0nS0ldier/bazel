@@ -324,6 +324,13 @@ public final class StarlarkRuleImplementationFunctionsTest extends BuildViewTest
   }
 
   @Test
+  public void testArtifactRlocationPath() throws Exception {
+    setRuleContext(createRuleContext("//foo:foo"));
+    String result = (String) ev.eval("ruleContext.files.tools[0].rlocation_path");
+    assertThat(result).isEqualTo("_main/foo/t.exe");
+  }
+
+  @Test
   public void testCreateSpawnActionArgumentsWithCommand() throws Exception {
     StarlarkRuleContext ruleContext = createRuleContext("//foo:foo");
     setRuleContext(ruleContext);

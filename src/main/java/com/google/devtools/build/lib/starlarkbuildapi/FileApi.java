@@ -109,10 +109,36 @@ public interface FileApi extends StarlarkValue {
       name = "short_path",
       structField = true,
       doc =
-          "The path of this file relative to its root. This excludes the aforementioned "
-              + "<i>root</i>, i.e. configuration-specific fragments of the path. This is also the "
-              + "path under which the file is mapped if it's in the runfiles of a binary.")
+          """
+          The path of this file relative to its root. This excludes the aforementioned \
+          <i>root</i>, i.e. configuration-specific fragments of the path. This is also the path \
+          under which the file is mapped into a binary's runfiles, <b>relative to the runfiles \
+          directory of the main repository</b> (which is the working directory when the binary \
+          runs under Bazel), <b>not</b> relative to the runfiles root. As a result it does not \
+          begin with the file's repository as a path segment: a file in the main repository omits \
+          it entirely (e.g. <code>pkg/file</code>), while a file in an external repository takes \
+          the form <code>../&lt;repo name>/pkg/file</code>. Use <a \
+          href="#rlocation_path">rlocation_path</a> for the runfiles-root-relative path that \
+          includes the repository segment and can be passed to a runfiles library's \
+          <code>rlocation</code> function.""")
   String getRunfilesPathString();
+
+  @StarlarkMethod(
+      name = "rlocation_path",
+      structField = true,
+      doc =
+          """
+          The runfiles-relative path of this file, i.e. the path that this file can be looked up \
+          under using a runfiles library's <code>rlocation</code> function when it is in the \
+          runfiles of a binary. It consists of the file's repository's runfiles directory name \
+          (the canonical repository name for files in an external repository, or <code>_main</code> \
+          for files in the main repository) followed by the file's <a href="#short_path">short_path\
+          </a>.<p>Unlike <a href="#short_path">short_path</a>, this value is the same regardless of \
+          which repository the consuming target lives in, which makes it suitable for use in \
+          <a href="../builtins/Args.html#add_all">Args.add_all()</a> <code>map_each</code> \
+          callbacks, where <a href="../builtins/ctx.html#workspace_name">ctx.workspace_name</a> is \
+          not available.""")
+  String getRlocationPathString();
 
   @StarlarkMethod(
       name = "path",

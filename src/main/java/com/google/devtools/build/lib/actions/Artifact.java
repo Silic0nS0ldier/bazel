@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.Artifact.SourceArtifact;
 import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.IsArtifactForNestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -682,6 +683,39 @@ public abstract sealed class Artifact
   @Override
   public final String getRunfilesPathString() {
     return getRunfilesPath().getPathString();
+  }
+
+  /**
+   * Returns the runfiles-relative path of this artifact, i.e. the path that this artifact is looked
+   * up under by a runfiles library's {@code rlocation} function.
+   *
+   * <p>Unlike {@link #getRunfilesPath}, which is relative to the main repository's runfiles
+   * directory, this path is relative to the root of the runfiles tree and thus includes the
+   * repository's runfiles directory name as its first segment.
+   */
+  public final PathFragment getRlocationPath() {
+    return runfilesPathToRlocationPath(getRunfilesPath());
+  }
+
+  /**
+   * Converts a runfiles path (relative to the main repository's runfiles directory, as returned by
+   * {@link #getRunfilesPath}) to a runfiles-tree-relative {@code rlocation} path.
+   */
+  public static PathFragment runfilesPathToRlocationPath(PathFragment runfilesPath) {
+    // Runfiles paths of external artifacts are prefixed with "../<repo name>"; strip the "../" to
+    // obtain the runfiles-tree-relative path "<repo name>/...".
+    if (runfilesPath.startsWith(LabelConstants.EXTERNAL_RUNFILES_PATH_PREFIX)) {
+      return runfilesPath.relativeTo(LabelConstants.EXTERNAL_RUNFILES_PATH_PREFIX);
+    }
+    // Runfiles paths of main-repository artifacts are relative to the main repository's runfiles
+    // directory, so prepend its name.
+    return PathFragment.create(RepositoryName.MAIN_REPOSITORY_DIRECTORY_NAME)
+        .getRelative(runfilesPath);
+  }
+
+  @Override
+  public final String getRlocationPathString() {
+    return getRlocationPath().getPathString();
   }
 
   public final String prettyPrint() {
