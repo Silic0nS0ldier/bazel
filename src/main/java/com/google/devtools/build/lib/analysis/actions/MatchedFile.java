@@ -20,56 +20,56 @@ import com.google.devtools.build.lib.actions.ExecutionResolvedArgument;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.PathMapper;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
-import com.google.devtools.build.lib.starlarkbuildapi.SelectedFileApi;
+import com.google.devtools.build.lib.starlarkbuildapi.MatchedFileApi;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.StarlarkSemantics;
 
 /**
- * Opaque handle returned by {@code ctx.actions.select_file} and {@code
- * ctx.actions.select_directory}: resolves to exactly one file or one directory at execution time.
+ * Opaque handle returned by {@code ctx.actions.match_file} and {@code
+ * ctx.actions.match_directory}: resolves to exactly one file or one directory at execution time.
  *
- * @see FileSelectionSpec
+ * @see FileMatchSpec
  */
 @AutoCodec
-public final class SelectedFile implements SelectedFileApi, ExecutionResolvedArgument {
+public final class MatchedFile implements MatchedFileApi, ExecutionResolvedArgument {
 
-  private final FileSelectionSpec spec;
+  private final FileMatchSpec spec;
 
   @AutoCodec.Instantiator
-  public SelectedFile(FileSelectionSpec spec) {
+  public MatchedFile(FileMatchSpec spec) {
     this.spec = spec;
   }
 
-  public FileSelectionSpec getSpec() {
+  public FileMatchSpec getSpec() {
     return spec;
   }
 
   public boolean isDirectory() {
-    return spec.getCardinality() == FileSelectionSpec.Cardinality.SINGLE_DIRECTORY;
+    return spec.getCardinality() == FileMatchSpec.Cardinality.SINGLE_DIRECTORY;
   }
 
   /**
-   * Renders the resolved file's (possibly path-mapped) exec path, used when this selection is an
+   * Renders the resolved file's (possibly path-mapped) exec path, used when this match is an
    * action's {@code executable}.
    *
    * <p>Resolution results are only reachable when the provider implements {@link
-   * FileSelectionResolver} — the consuming action wraps its provider before spawn construction,
-   * and the selection is auto-registered as an input selection, so a lookup miss can only mean
+   * FileMatchResolver} — the consuming action wraps its provider before spawn construction,
+   * and the match is auto-registered as an input match, so a lookup miss can only mean
    * analysis-time rendering (fingerprinting, aquery, progress messages). Those render the stable
    * placeholder form; the placeholder is also this argument's fingerprint contribution, while the
-   * filter callback's identity is separately digested via the action's input-selection specs.
+   * filter callback's identity is separately digested via the action's input-match specs.
    */
   @Override
   public String expandToCommandLine(
       @Nullable InputMetadataProvider inputMetadataProvider, PathMapper pathMapper)
       throws CommandLineExpansionException {
-    if (inputMetadataProvider instanceof FileSelectionResolver resolver) {
-      ImmutableList<Artifact> resolved = resolver.getResolvedSelection(spec);
+    if (inputMetadataProvider instanceof FileMatchResolver resolver) {
+      ImmutableList<Artifact> resolved = resolver.getResolvedMatch(spec);
       if (resolved != null) {
         if (resolved.size() != 1) {
           throw new CommandLineExpansionException(
-              "file selection used as executable resolved to " + resolved.size() + " files");
+              "file match used as executable resolved to " + resolved.size() + " files");
         }
         return pathMapper.getMappedExecPathString(resolved.get(0));
       }
@@ -93,7 +93,7 @@ public final class SelectedFile implements SelectedFileApi, ExecutionResolvedArg
 
   @Override
   public boolean equals(Object o) {
-    return o instanceof SelectedFile that && spec.equals(that.spec);
+    return o instanceof MatchedFile that && spec.equals(that.spec);
   }
 
   @Override

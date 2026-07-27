@@ -14,27 +14,27 @@
 package com.google.devtools.build.lib.analysis.actions;
 
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
-import com.google.devtools.build.lib.starlarkbuildapi.FileSelectionApi;
+import com.google.devtools.build.lib.starlarkbuildapi.MatchedFilesApi;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.StarlarkSemantics;
 
 /**
- * Opaque handle returned by {@code ctx.actions.select_files}: resolves to a set of files (and,
+ * Opaque handle returned by {@code ctx.actions.match_files}: resolves to a set of files (and,
  * optionally, directories) at execution time.
  *
- * @see FileSelectionSpec
+ * @see FileMatchSpec
  */
 @AutoCodec
-public final class FileSelection implements FileSelectionApi {
+public final class MatchedFiles implements MatchedFilesApi {
 
-  private final FileSelectionSpec spec;
+  private final FileMatchSpec spec;
 
   @AutoCodec.Instantiator
-  public FileSelection(FileSelectionSpec spec) {
+  public MatchedFiles(FileMatchSpec spec) {
     this.spec = spec;
   }
 
-  public FileSelectionSpec getSpec() {
+  public FileMatchSpec getSpec() {
     return spec;
   }
 
@@ -52,7 +52,7 @@ public final class FileSelection implements FileSelectionApi {
 
   @Override
   public boolean equals(Object o) {
-    return o instanceof FileSelection that && spec.equals(that.spec);
+    return o instanceof MatchedFiles that && spec.equals(that.spec);
   }
 
   @Override

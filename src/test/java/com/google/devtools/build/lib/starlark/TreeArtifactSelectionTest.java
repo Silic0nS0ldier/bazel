@@ -30,11 +30,11 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 /**
- * Integration tests for the tree artifact selection API ({@code ctx.actions.pick_file},
- * {@code pick_directory}, and the {@code select_*} family).
+ * Integration tests for the tree artifact match API ({@code ctx.actions.pick_file},
+ * {@code pick_directory}, and the {@code match_*} family).
  *
  * <p>Picks are exercised end-to-end (they resolve to genuine {@code TreeFileArtifact}s that flow
- * through the existing input-staging machinery). The {@code select_*} tests cover the analysis-time
+ * through the existing input-staging machinery). The {@code match_*} tests cover the analysis-time
  * surface: flag guarding, source typing, dedup, and the top-level-def contract.
  */
 @RunWith(JUnit4.class)
@@ -445,13 +445,13 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFile_regularFileSource_fails() throws Exception {
+  public void matchFile_regularFileSource_fails() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
             f = ctx.actions.declare_file(ctx.attr.name + ".txt")
             ctx.actions.write(f, "x")
-            sel = ctx.actions.select_file(sources = [f], include = ["**"])
+            sel = ctx.actions.match_file(sources = [f], include = ["**"])
             return [DefaultInfo(files = depset([tree]))]
         """);
     RecordingOutErr recordingOutErr = new RecordingOutErr();
@@ -463,11 +463,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_duplicateSource_fails() throws Exception {
+  public void matchFiles_duplicateSource_fails() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree, tree])
+            sel = ctx.actions.match_files(sources = [tree, tree])
             return [DefaultInfo(files = depset([tree]))]
         """);
     RecordingOutErr recordingOutErr = new RecordingOutErr();
@@ -479,12 +479,12 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_selectFileResultAsSource_fails() throws Exception {
+  public void matchFiles_matchFileResultAsSource_fails() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            inner = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
-            sel = ctx.actions.select_files(sources = [inner])
+            inner = ctx.actions.match_file(sources = [tree], include = ["bin/data"])
+            sel = ctx.actions.match_files(sources = [inner])
             return [DefaultInfo(files = depset([tree]))]
         """);
     RecordingOutErr recordingOutErr = new RecordingOutErr();
@@ -493,15 +493,15 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
 
     assertThat(recordingOutErr.errAsLatin1())
-        .contains("a select_file result may not be a source");
+        .contains("a match_file result may not be a source");
   }
 
   @Test
-  public void selectFiles_nonTopLevelFilter_fails() throws Exception {
+  public void matchFiles_nonTopLevelFilter_fails() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], filter = lambda c: c)
+            sel = ctx.actions.match_files(sources = [tree], filter = lambda c: c)
             return [DefaultInfo(files = depset([tree]))]
         """);
     RecordingOutErr recordingOutErr = new RecordingOutErr();
@@ -513,11 +513,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_invalidGlobPattern_fails() throws Exception {
+  public void matchFiles_invalidGlobPattern_fails() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["a/../b"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["a/../b"])
             return [DefaultInfo(files = depset([tree]))]
         """);
     RecordingOutErr recordingOutErr = new RecordingOutErr();
@@ -529,11 +529,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFile_reprIsStablePlaceholder() throws Exception {
+  public void matchFile_reprIsStablePlaceholder() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/*"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/*"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.write(out, repr(sel))
             return [DefaultInfo(files = depset([out]))]
@@ -542,17 +542,17 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     buildTarget("//test:consume");
 
     String repr = readOutput("test/consume.out");
-    assertThat(repr).startsWith("select_file(sources = [");
+    assertThat(repr).startsWith("match_file(sources = [");
     assertThat(repr).contains("include = [\"bin/*\"]");
     assertThat(repr).endsWith(")");
   }
 
   @Test
-  public void selectFile_defaultIncludeOmittedFromRepr() throws Exception {
+  public void matchFile_defaultIncludeOmittedFromRepr() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree])
+            sel = ctx.actions.match_file(sources = [tree])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.write(out, repr(sel))
             return [DefaultInfo(files = depset([out]))]
@@ -564,16 +564,16 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThat(readOutput("test/consume.out")).doesNotContain("include");
   }
 
-  // --- Selections resolved as action inputs (execution-time) -------------------------------------
+  // --- Matches resolved as action inputs (execution-time) -------------------------------------
 
   @Test
-  public void selectFile_stagesResolvedFileAsInput() throws Exception {
+  public void matchFile_stagesResolvedFileAsInput() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
-    // The tree itself is not an input; only the selection is. If the resolved child is staged, it
+    // The tree itself is not an input; only the match is. If the resolved child is staged, it
     // appears at its exec path (tree.path + "/bin/data") and the copy succeeds.
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/data"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 inputs = [sel],
@@ -589,11 +589,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_stagesAllMatchedFiles() throws Exception {
+  public void matchFiles_stagesAllMatchedFiles() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 inputs = [sel],
@@ -610,7 +610,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_filterNarrowsResolvedSet() throws Exception {
+  public void matchFiles_filterNarrowsResolvedSet() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     write(
         "test/consume.bzl",
@@ -620,7 +620,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
 
         def _consume_impl(ctx):
             tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
-            sel = ctx.actions.select_files(
+            sel = ctx.actions.match_files(
                 sources = [tree], include = ["**"], filter = _only_data)
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
@@ -642,11 +642,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFile_noMatch_failsConsumingAction() throws Exception {
+  public void matchFile_noMatch_failsConsumingAction() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/missing"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/missing"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 inputs = [sel],
@@ -664,11 +664,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFile_ambiguous_failsConsumingAction() throws Exception {
+  public void matchFile_ambiguous_failsConsumingAction() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["**"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 inputs = [sel],
@@ -686,11 +686,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_emptyDisallowed_failsConsumingAction() throws Exception {
+  public void matchFiles_emptyDisallowed_failsConsumingAction() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["nope/**"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["nope/**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 inputs = [sel],
@@ -708,11 +708,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectFiles_allowEmpty_succeedsWithNoInputs() throws Exception {
+  public void matchFiles_allowEmpty_succeedsWithNoInputs() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(
+            sel = ctx.actions.match_files(
                 sources = [tree], include = ["nope/**"], allow_empty = True)
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
@@ -728,7 +728,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThat(readOutput("test/consume.out")).isEqualTo("ok");
   }
 
-  // --- Selections on command lines (Args) ---------------------------------------------------------
+  // --- Matches on command lines (Args) ---------------------------------------------------------
 
   @Test
   public void argsAddAll_expandsSelectionToResolvedPaths() throws Exception {
@@ -737,7 +737,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     // resolution order (sorted by tree-relative path: bin/data, then lib/deep/other).
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["bin/**", "lib/**"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["bin/**", "lib/**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             args = ctx.actions.args()
             args.add_all([sel])
@@ -756,11 +756,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void argsAdd_scalarSelectedFile_rendersResolvedPath() throws Exception {
+  public void argsAdd_scalarMatchedFile_rendersResolvedPath() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/data"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             args = ctx.actions.args()
             args.add(sel)
@@ -789,7 +789,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
 
         def _consume_impl(ctx):
             tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
-            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             args = ctx.actions.args()
             args.add_all([sel], map_each = _basename)
@@ -817,12 +817,12 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   @Test
   public void argsSelection_notAnInput_failsWithActionableError() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
-    // The selection appears on the command line but not in inputs: its resolution never runs, so
+    // The match appears on the command line but not in inputs: its resolution never runs, so
     // expansion fails with a pointer at the missing 'inputs' entry. The tree is passed as a plain
     // input so the action is otherwise well-formed.
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            sel = ctx.actions.match_files(sources = [tree], include = ["**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             args = ctx.actions.args()
             args.add_all([sel])
@@ -843,11 +843,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void argsAdd_fileSelection_failsAtAnalysis() throws Exception {
+  public void argsAdd_fileMatch_failsAtAnalysis() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree])
+            sel = ctx.actions.match_files(sources = [tree])
             args = ctx.actions.args()
             args.add(sel)
             return [DefaultInfo(files = depset([tree]))]
@@ -861,11 +861,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void argsAddAll_depsetOfSelections_failsAtAnalysis() throws Exception {
+  public void argsAddAll_depsetOfMatches_failsAtAnalysis() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/data"])
             args = ctx.actions.args()
             args.add_all(depset([sel]))
             return [DefaultInfo(files = depset([tree]))]
@@ -876,10 +876,10 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
 
     assertThat(recordingOutErr.errAsLatin1())
-        .contains("depsets of file selections cannot be added to Args");
+        .contains("depsets of file matches cannot be added to Args");
   }
 
-  // --- SelectedFile as executable / in tools ------------------------------------------------------
+  // --- MatchedFile as executable / in tools ------------------------------------------------------
 
   private void writeToolExtractFixture() throws Exception {
     // An extract rule whose tree contains an executable script at bin/tool.sh that writes a fixed
@@ -904,13 +904,13 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void selectedFileAsExecutable_runsResolvedTool() throws Exception {
+  public void matchedFileAsExecutable_runsResolvedTool() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeToolExtractFixture();
-    // The executable selection is auto-registered as an input selection; no 'inputs' needed.
+    // The executable match is auto-registered as an input match; no 'inputs' needed.
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/tool.sh"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/tool.sh"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run(
                 executable = sel,
@@ -930,7 +930,7 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            sel = ctx.actions.select_directory(sources = [tree], include = ["bin"])
+            sel = ctx.actions.match_directory(sources = [tree], include = ["bin"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run(
                 executable = sel,
@@ -945,16 +945,16 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
 
     assertThat(recordingOutErr.errAsLatin1())
-        .contains("'executable' must be a selection from select_file");
+        .contains("'executable' must be a match from match_file");
   }
 
   @Test
-  public void selectedFileInTools_stagesResolvedFile() throws Exception {
+  public void matchedFileInTools_stagesResolvedFile() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeToolExtractFixture();
     writeConsumeRule(
         """
-            sel = ctx.actions.select_file(sources = [tree], include = ["bin/tool.sh"])
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/tool.sh"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             ctx.actions.run_shell(
                 tools = [sel],

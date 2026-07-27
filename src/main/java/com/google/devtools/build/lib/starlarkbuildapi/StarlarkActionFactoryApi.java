@@ -39,21 +39,21 @@ import net.starlark.java.eval.StarlarkValue;
             + " href=\"../builtins/ctx.html#actions\"><code>ctx.actions</code></a>.")
 public interface StarlarkActionFactoryApi extends StarlarkValue {
 
-  static final String SELECT_SOURCES_DOC =
+  static final String MATCH_SOURCES_DOC =
       "A sequence of directory artifacts (tree artifacts or <code>pick_directory</code> results), "
-          + "<code>SelectedFile</code>s returned by <code>select_directory</code>, and/or "
-          + "<code>FileSelection</code>s. Order is significant (it defines result and "
+          + "<code>MatchedFile</code>s returned by <code>match_directory</code>, and/or "
+          + "<code>MatchedFiles</code>s. Order is significant (it defines result and "
           + "disambiguation order) and duplicates are rejected. Accepting prior results as sources "
-          + "makes refinement free: a broad selection can be narrowed, and a dynamically located "
-          + "root can be selected within.";
-  static final String SELECT_INCLUDE_DOC =
+          + "makes refinement free: a broad match can be narrowed, and a dynamically located "
+          + "root can be matched within.";
+  static final String MATCH_INCLUDE_DOC =
       "A list of glob patterns, with the semantics of package <code>glob()</code> "
           + "(<code>*</code> within a segment, <code>**</code> across segments), matched against "
-          + "paths relative to each source's root. The default <code>['**']</code> selects "
+          + "paths relative to each source's root. The default <code>['**']</code> matches "
           + "everything.";
-  static final String SELECT_EXCLUDE_DOC =
+  static final String MATCH_EXCLUDE_DOC =
       "A list of glob patterns to subtract from the <code>include</code> matches.";
-  static final String SELECT_FILTER_DOC =
+  static final String MATCH_FILTER_DOC =
       "An optional Starlark function receiving the list of pattern-matched candidates as "
           + "<code>File</code> objects (sorted; <code>tree_relative_path</code> available on each) "
           + "and returning the subset to keep, as a list. It runs after pattern matching, must be "
@@ -228,7 +228,7 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
                     + "another <a href=\"#pick_directory\"><code>pick_directory</code></a> result. "
                     + "Its generating action must already be known, so the directory must come "
                     + "from a dependency rather than be declared by the same target; for the "
-                    + "same-target case use <a href=\"#select_file\"><code>select_file</code></a>.",
+                    + "same-target case use <a href=\"#match_file\"><code>match_file</code></a>.",
             allowedTypes = {@ParamType(type = FileApi.class)}),
         @Param(
             name = "path",
@@ -261,9 +261,9 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
   FileApi pickDirectory(FileApi directory, String path) throws EvalException;
 
   @StarlarkMethod(
-      name = "select_file",
+      name = "match_file",
       doc =
-          "Returns a <a href=\"../builtins/SelectedFile.html\"><code>SelectedFile</code></a>: an "
+          "Returns a <a href=\"../builtins/MatchedFile.html\"><code>MatchedFile</code></a>: an "
               + "opaque handle that resolves, at execution time, to <b>exactly one regular file</b>"
               + " matched inside the given directory artifacts. This is an experimental API guarded"
               + " by <code>--experimental_tree_artifact_selection</code>.\n\n"
@@ -273,24 +273,24 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               + ", and as an action's <code>executable</code> or in <code>tools</code>. Resolving "
               + "to zero or more than one file fails the consuming action.",
       parameters = {
-        @Param(name = "sources", doc = SELECT_SOURCES_DOC, named = true, positional = true),
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
         @Param(
             name = "include",
-            doc = SELECT_INCLUDE_DOC,
+            doc = MATCH_INCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "['**']"),
         @Param(
             name = "exclude",
-            doc = SELECT_EXCLUDE_DOC,
+            doc = MATCH_EXCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "[]"),
         @Param(
             name = "filter",
-            doc = SELECT_FILTER_DOC,
+            doc = MATCH_FILTER_DOC,
             named = true,
             positional = false,
             allowedTypes = {
@@ -299,36 +299,36 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             },
             defaultValue = "None")
       })
-  SelectedFileApi selectFile(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+  MatchedFileApi matchFile(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
       Object filter) throws EvalException;
 
   @StarlarkMethod(
-      name = "select_directory",
+      name = "match_directory",
       doc =
-          "Like <a href=\"#select_file\"><code>select_file</code></a>, but resolves to <b>exactly "
+          "Like <a href=\"#match_file\"><code>match_file</code></a>, but resolves to <b>exactly "
               + "one directory</b>. The result may also be passed as a <code>sources</code> element"
-              + " to the <code>select_*</code> functions, enabling selection below a dynamically "
+              + " to the <code>match_*</code> functions, enabling match below a dynamically "
               + "located root. This is an experimental API guarded by "
               + "<code>--experimental_tree_artifact_selection</code>.",
       parameters = {
-        @Param(name = "sources", doc = SELECT_SOURCES_DOC, named = true, positional = true),
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
         @Param(
             name = "include",
-            doc = SELECT_INCLUDE_DOC,
+            doc = MATCH_INCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "['**']"),
         @Param(
             name = "exclude",
-            doc = SELECT_EXCLUDE_DOC,
+            doc = MATCH_EXCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "[]"),
         @Param(
             name = "filter",
-            doc = SELECT_FILTER_DOC,
+            doc = MATCH_FILTER_DOC,
             named = true,
             positional = false,
             allowedTypes = {
@@ -337,13 +337,13 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             },
             defaultValue = "None")
       })
-  SelectedFileApi selectDirectory(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+  MatchedFileApi matchDirectory(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
       Object filter) throws EvalException;
 
   @StarlarkMethod(
-      name = "select_files",
+      name = "match_files",
       doc =
-          "Returns a <a href=\"../builtins/FileSelection.html\"><code>FileSelection</code></a>: an "
+          "Returns a <a href=\"../builtins/MatchedFiles.html\"><code>MatchedFiles</code></a>: an "
               + "opaque handle that resolves, at execution time, to the <b>set</b> of files (and, "
               + "when <code>exclude_directories = False</code>, directories) matched inside the "
               + "given directory artifacts. This is an experimental API guarded by "
@@ -352,24 +352,24 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               + "<a href=\"../builtins/Args.html\"><code>Args</code></a> via "
               + "<code>add_all</code>/<code>add_joined</code>.",
       parameters = {
-        @Param(name = "sources", doc = SELECT_SOURCES_DOC, named = true, positional = true),
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
         @Param(
             name = "include",
-            doc = SELECT_INCLUDE_DOC,
+            doc = MATCH_INCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "['**']"),
         @Param(
             name = "exclude",
-            doc = SELECT_EXCLUDE_DOC,
+            doc = MATCH_EXCLUDE_DOC,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
             defaultValue = "[]"),
         @Param(
             name = "filter",
-            doc = SELECT_FILTER_DOC,
+            doc = MATCH_FILTER_DOC,
             named = true,
             positional = false,
             allowedTypes = {
@@ -389,13 +389,13 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
         @Param(
             name = "allow_empty",
             doc =
-                "When False (the default), a selection resolving to zero members fails the "
+                "When False (the default), a match resolving to zero members fails the "
                     + "consuming action.",
             named = true,
             positional = false,
             defaultValue = "False")
       })
-  FileSelectionApi selectFiles(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+  MatchedFilesApi matchFiles(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
       Object filter, boolean excludeDirectories, boolean allowEmpty) throws EvalException;
 
   @StarlarkMethod(
@@ -656,14 +656,14 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               @ParamType(type = FileApi.class),
               @ParamType(type = String.class),
               @ParamType(type = FilesToRunProviderApi.class),
-              @ParamType(type = SelectedFileApi.class),
+              @ParamType(type = MatchedFileApi.class),
             },
             named = true,
             positional = false,
             doc =
                 "The executable file to be called by the action. May be a <a"
-                    + " href=\"../builtins/SelectedFile.html\">SelectedFile</a> from <a"
-                    + " href=\"#select_file\">select_file</a>, in which case the executable is"
+                    + " href=\"../builtins/MatchedFile.html\">MatchedFile</a> from <a"
+                    + " href=\"#match_file\">match_file</a>, in which case the executable is"
                     + " resolved from its source directory at execution time and staged without"
                     + " runfiles."),
         @Param(

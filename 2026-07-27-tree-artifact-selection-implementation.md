@@ -17,7 +17,7 @@ Two largely independent workstreams, mirroring the proposal's tiers;
 - **Picks** are a Starlark surface over an existing internal concept.
   `TreeFileArtifact` already models "a file inside a tree artifact", already has the right equality semantics, and most consuming machinery already handles it.
   The work is an API, one relaxed invariant, one reframed error, and extension of the declarative surfaces (runfiles, completion, BEP) that have never seen a *standalone* child.
-- **Selections** are new machinery, but every load-bearing mechanism has a battle-tested precedent: input discovery (`CppCompileAction` header pruning, `EnhancedStarlarkAction`), scheduling dependencies, execution-time Starlark evaluation (`StarlarkMapActionTemplate`), and late-expanding non-file input kinds (Fileset).
+- **Matches** are new machinery, but every load-bearing mechanism has a battle-tested precedent: input discovery (`CppCompileAction` header pruning, `EnhancedStarlarkAction`), scheduling dependencies, execution-time Starlark evaluation (`StarlarkMapActionTemplate`), and late-expanding non-file input kinds (Fileset).
   The work is composing them, not inventing.
 
 Everything ships behind a single flag and in independently landable phases; each phase leaves the tree green and the feature coherent for the surface area it covers.
@@ -28,8 +28,8 @@ Everything ships behind a single flag and in independently landable phases; each
 |---|---|
 | Pick (`pick_file`/`pick_directory`) | Analysis-time `TreeFileArtifact` via `TreeFileArtifact.createTreeOutput` (`actions/Artifact.java:1131`); directory picks reuse the subtree `SpecialArtifact` representation that `template_ctx.declare_subdirectory` introduced |
 | Pick existence check | The existing missing-child check in `ActionExecutionFunction.getAndCheckInputSkyValue` (`skyframe/ActionExecutionFunction.java:1124`), reframed from `NONDETERMINISTIC_TREE_ARTIFACT` |
-| Selection resolution point | Input discovery: source trees in `getSchedulingDependencies()`, resolution in `discoverInputs()`, concrete children installed via `updateInputs()` — the `CppCompileAction` pattern (`rules/cpp/CppCompileAction.java:1256`, `:634`, `:1204`) |
-| Selection cache granularity | The discovered-inputs action cache path (`actions/ActionCacheChecker.java:491-512`, `actions/cache/ActionCache.java` `discoveredInputPaths`) — cache entries list and digest only resolved children |
+| Match resolution point | Input discovery: source trees in `getSchedulingDependencies()`, resolution in `discoverInputs()`, concrete children installed via `updateInputs()` — the `CppCompileAction` pattern (`rules/cpp/CppCompileAction.java:1256`, `:634`, `:1204`) |
+| Match cache granularity | The discovered-inputs action cache path (`actions/ActionCacheChecker.java:491-512`, `actions/cache/ActionCache.java` `discoveredInputPaths`) — cache entries list and digest only resolved children |
 | `filter` callback evaluation | The `StarlarkMapActionTemplate.generateActionsForInputArtifacts` model (`analysis/actions/StarlarkMapActionTemplate.java:206-268`): full `StarlarkThread.create`, debug print handler, `EvalException` → action failure |
 | `filter` identity in action keys | Function name + `BazelModuleContext.bzlTransitiveDigest` (`StarlarkMapActionTemplate.java:337-338`) — **not** evaluate-at-fingerprint, which cannot see tree children at analysis time (the `b/160181927` soundness hole in `StarlarkCustomCommandLine.java:520-526`) |
 | Top-level-def restriction | `StarlarkActionFactory.validateIsTopLevelStarlarkFunction` (`analysis/starlark/StarlarkActionFactory.java:1083`) |
@@ -47,7 +47,7 @@ Rationale: the feature affects action execution (input discovery, spawn construc
 
 - Add `experimental_tree_artifact_selection` to `CoreOptions` and a `BuildConfigurationValue` accessor (model: `allowMapDirectory()`, `analysis/config/BuildConfigurationValue.java:793`).
 - Define the two Starlark value types following the `ExpandedDirectory` pattern (`starlarkbuildapi/ExpandedDirectoryApi.java`; impl at `StarlarkMapActionTemplate.java:455`);
-  - `starlarkbuildapi/SelectedFileApi.java` and `starlarkbuildapi/FileSelectionApi.java`, `@StarlarkBuiltin`, no methods beyond documentation surface in v1.
+  - `starlarkbuildapi/MatchedFileApi.java` and `starlarkbuildapi/MatchedFilesApi.java`, `@StarlarkBuiltin`, no methods beyond documentation surface in v1.
   - Implementations under `analysis/actions/`, immutable, `repr(Printer)` emitting the stable placeholder form specified in the proposal (return-only types need no global registration).
   - `@AutoCodec` serialization for both (they will be embedded in actions and must survive analysis caching / Skymeld serialization).
 
@@ -100,24 +100,24 @@ These are the "assumes Starlark-visible artifact ⇒ analysis-declared node" sur
 
 **Exit criteria:** a pick in `DefaultInfo.files`, in an executable rule's runfiles, and as a test data dependency behaves like an ordinary file under all download modes; BEP consumers see it as a normal `File`.
 
-# Phase 3 — Selection core: types, resolution, inputs
+# Phase 3 — Match core: types, resolution, inputs
 
-The heart of the dynamic tier: `select_file` / `select_directory` / `select_files` resolving during input discovery.
+The heart of the dynamic tier: `match_file` / `match_directory` / `match_files` resolving during input discovery.
 
 **API layer.**
-- Three methods on `StarlarkActionFactory`; shared validation (sources are directory artifacts / selections, patterns are valid globs, `filter` passes `validateIsTopLevelStarlarkFunction`).
-- The selection spec object (sources, include, exclude, filter reference, cardinality, flags) is the payload of both Starlark types; specs are structurally comparable so identical declarations dedupe.
+- Three methods on `StarlarkActionFactory`; shared validation (sources are directory artifacts / matches, patterns are valid globs, `filter` passes `validateIsTopLevelStarlarkFunction`).
+- The match spec object (sources, include, exclude, filter reference, cardinality, flags) is the payload of both Starlark types; specs are structurally comparable so identical declarations dedupe.
 
 **Resolution engine** (new, `analysis/actions/` or `actions/`):
 - Given specs plus an `InputMetadataProvider`, produce ordered `ImmutableList<TreeFileArtifact>`;
-  1. children from `getTreeMetadata(source).getChildren()` per source (selection sources recurse; `select_directory` sources contribute children below the resolved directory),
+  1. children from `getTreeMetadata(source).getChildren()` per source (match sources recurse; `match_directory` sources contribute children below the resolved directory),
   2. glob matching against `getTreeRelativePathString()` — reuse the pattern compiler behind package globbing rather than writing a new matcher,
   3. `filter` evaluation on the model of `StarlarkMapActionTemplate.java:233-258`: fresh `Mutability`, `StarlarkThread.create` with the captured `StarlarkSemantics`, debug print handler, candidates presented as the `TreeFileArtifact`s themselves (they already expose `tree_relative_path`), result validated as a subset,
   4. ordering, cardinality (`exactly one` / `allow_empty`), and kind checks, with the proposal's error messages.
 - Memoise per (spec, source-metadata) within a build; Skyframe's per-action discovery memoisation makes cross-action caching an optimisation, not a correctness need.
 
 **Consuming-action integration** (`analysis/actions/StarlarkAction.java`):
-- When any input is a selection, build the enhanced variant (the `EnhancedStarlarkAction` split already exists for `unused_inputs_list`/shadowed actions, `StarlarkAction.java:223-521`);
+- When any input is a match, build the enhanced variant (the `EnhancedStarlarkAction` split already exists for `unused_inputs_list`/shadowed actions, `StarlarkAction.java:223-521`);
   - Source trees are declared as ordinary inputs, **not** merely scheduling dependencies. *(Corrected during implementation: `SkyframeInputMetadataProvider.getTreeMetadata` returns `null`, so a tree that is only a scheduling dependency has no metadata available during `discoverInputs`. Trees must be in the action's input map — i.e. declared inputs — to be resolvable. They are then pruned in `discoverInputs`, so they are not staged and not in the cache key.)*
   - `discoversInputs()` returns true; `discoverInputs()` runs the resolution engine against the now-available tree metadata and installs the non-tree inputs + resolved children via `updateInputs()`, pruning the declared source trees.
   - `getAllowedDerivedInputs()` returns mandatory inputs plus source trees (the cache uses it to re-resolve stored child paths, `ActionCacheChecker.getCachedInputs`, `:747`).
@@ -126,47 +126,47 @@ The heart of the dynamic tier: `select_file` / `select_directory` / `select_file
   One remote-specific verification: `MerkleTreeComputer` handles individual `TreeFileArtifact` inputs correctly and its per-tree subtree cache (`remote/merkletree/MerkleTreeComputer.java:747-801`, keyed on aggregate tree metadata) is never consulted for a pruned subset.
 
 **Action key.**
-`computeKey` contributions per selection: sources' exec paths, include/exclude, cardinality/flags, and filter identity as function name + `bzlTransitiveDigest` — deliberately *not* evaluation-based (unsound before metadata exists) and deliberately including the callback digest (body edits invalidate; resolved-set digests then keep the cache honest on the input side).
+`computeKey` contributions per match: sources' exec paths, include/exclude, cardinality/flags, and filter identity as function name + `bzlTransitiveDigest` — deliberately *not* evaluation-based (unsound before metadata exists) and deliberately including the callback digest (body edits invalidate; resolved-set digests then keep the cache honest on the input side).
 
-**Exit criteria:** selections as `inputs` work under local/sandbox/remote/BwoB; changing an unselected sibling does not re-execute the consumer (the granularity test); empty/ambiguous/kind failures match the proposal; incremental correctness under `--track_incremental_state` and analysis-cache round trips (types serialize).
+**Exit criteria:** matches as `inputs` work under local/sandbox/remote/BwoB; changing an unselected sibling does not re-execute the consumer (the granularity test); empty/ambiguous/kind failures match the proposal; incremental correctness under `--track_incremental_state` and analysis-cache round trips (types serialize).
 
 # Phase 4 — Args integration *(implemented)*
 
 The blocker originally recorded here — `expand(...)` (`:899`) receives only an `InputMetadataProvider`, no action handle, and pruned source trees have no metadata in it — dissolved without new expansion-API plumbing, via a **capability-carrying provider wrapper**;
 
-- The enhanced action stores per-spec resolution results (a `volatile ImmutableMap<FileSelectionSpec, ImmutableList<Artifact>>`, populated in `discoverInputs`, deliberately transient: re-discovery repopulates it under rewinding, and cache hits never expand).
-- `EnhancedStarlarkAction.getSpawn` wraps the context's provider in `SelectionResolvingInputMetadataProvider` (delegates all metadata queries, additionally implements the new `FileSelectionResolver` interface); `ActionExecutionContext.withInputMetadataProvider` was made public for this.
-- `StarlarkCustomCommandLine` resolves selections through an `instanceof FileSelectionResolver` check: vector values are spliced with resolved artifacts *before* directory expansion and `map_each` (so `map_each` sees real `File`s); scalar `add`/`add(format=)` values resolve to the single artifact and ride the existing `DerivedArtifact` path-mapping cases.
-- **Not-an-input error**: a resolver miss (selection in `Args` but never registered on the action) throws `CommandLineExpansionException` with a pointer at `inputs` — the moral equivalent of the "directory must be an input" invariant (`:410-418`).
-- **Fingerprinting**: selection values contribute `UUID + position + spec.addToFingerprint(...)` and are excluded from value-stream digesting and `map_each` fingerprint application — spec identity, never expansion, sidestepping `b/160181927`. Identical at analysis time (null provider) and execution-time `getKey`, so keys stay phase-consistent.
-- **Placeholder rendering**: with a null provider (aquery `--include_commandline`, `describeKey`, progress args, extra-action spawn info) selections render their stable placeholder string; placeholders bypass `map_each` (batch-splitting around them) since the callback expects `File`s.
-- **Depsets**: `add_all(depset-of-selections)` is rejected at analysis time (`Depset.getElementClass()` yields the `@StarlarkBuiltin` API interface — check assignability against `SelectedFileApi`/`FileSelectionApi`, not the impl classes). Depset fingerprinting memoises per nested set and cannot host per-action resolution.
-- `Args.add` rejects `FileSelection` (multi-valued) and directory-typed `SelectedFile`s.
-- Build note: the selection value types moved out of `analysis_cluster` into a fine-grained `analysis:actions/file_selection` target — `starlark_custom_command_line` and `starlark/args` sit *below* the cluster and would otherwise cycle.
+- The enhanced action stores per-spec resolution results (a `volatile ImmutableMap<FileMatchSpec, ImmutableList<Artifact>>`, populated in `discoverInputs`, deliberately transient: re-discovery repopulates it under rewinding, and cache hits never expand).
+- `EnhancedStarlarkAction.getSpawn` wraps the context's provider in `MatchResolvingInputMetadataProvider` (delegates all metadata queries, additionally implements the new `FileMatchResolver` interface); `ActionExecutionContext.withInputMetadataProvider` was made public for this.
+- `StarlarkCustomCommandLine` resolves matches through an `instanceof FileMatchResolver` check: vector values are spliced with resolved artifacts *before* directory expansion and `map_each` (so `map_each` sees real `File`s); scalar `add`/`add(format=)` values resolve to the single artifact and ride the existing `DerivedArtifact` path-mapping cases.
+- **Not-an-input error**: a resolver miss (match in `Args` but never registered on the action) throws `CommandLineExpansionException` with a pointer at `inputs` — the moral equivalent of the "directory must be an input" invariant (`:410-418`).
+- **Fingerprinting**: match values contribute `UUID + position + spec.addToFingerprint(...)` and are excluded from value-stream digesting and `map_each` fingerprint application — spec identity, never expansion, sidestepping `b/160181927`. Identical at analysis time (null provider) and execution-time `getKey`, so keys stay phase-consistent.
+- **Placeholder rendering**: with a null provider (aquery `--include_commandline`, `describeKey`, progress args, extra-action spawn info) matches render their stable placeholder string; placeholders bypass `map_each` (batch-splitting around them) since the callback expects `File`s.
+- **Depsets**: `add_all(depset-of-matches)` is rejected at analysis time (`Depset.getElementClass()` yields the `@StarlarkBuiltin` API interface — check assignability against `MatchedFileApi`/`MatchedFilesApi`, not the impl classes). Depset fingerprinting memoises per nested set and cannot host per-action resolution.
+- `Args.add` rejects `MatchedFiles` (multi-valued) and directory-typed `MatchedFile`s.
+- Build note: the match value types moved out of `analysis_cluster` into a fine-grained `analysis:actions/file_selection` target — `starlark_custom_command_line` and `starlark/args` sit *below* the cluster and would otherwise cycle.
 
-# Phase 5 — `SelectedFile` as executable and in tools *(implemented)*
+# Phase 5 — `MatchedFile` as executable and in tools *(implemented)*
 
-- `SpawnAction.Builder.setExecutable(SelectedFile)` stores the selection as the raw `executableArg`; `CommandLines.SingletonCommandLine` gained a case for the new `lib.actions.ExecutionResolvedArgument` interface (which `SelectedFile` implements), rendering the resolved child's (path-mapped) exec path as argv[0] at expansion. With a null or non-resolver provider it renders the placeholder — safe because `AbstractCommandLine.addToFingerprint` fingerprints with a null provider, and the true spawn path always has the wrapper (the factory auto-registers the executable's spec as an input selection, forcing the enhanced action).
+- `SpawnAction.Builder.setExecutable(MatchedFile)` stores the match as the raw `executableArg`; `CommandLines.SingletonCommandLine` gained a case for the new `lib.actions.ExecutionResolvedArgument` interface (which `MatchedFile` implements), rendering the resolved child's (path-mapped) exec path as argv[0] at expansion. With a null or non-resolver provider it renders the placeholder — safe because `AbstractCommandLine.addToFingerprint` fingerprints with a null provider, and the true spawn path always has the wrapper (the factory auto-registers the executable's spec as an input match, forcing the enhanced action).
 - The executable-bit precheck is **dropped**: `FileArtifactValue` carries no executable bit and Bazel stages outputs (tree children included) executable; a genuinely non-executable file fails at spawn time with the OS error. Proposal updated.
-- `tools` accepts `SelectedFile`/`FileSelection`; both register as input selections (staged, no runfiles — matching bare-`File` tools).
+- `tools` accepts `MatchedFile`/`MatchedFiles`; both register as input matches (staged, no runfiles — matching bare-`File` tools).
 - Progress message and `describeKey` render the placeholder via the same null-provider path as Phase 4.
 
 # Phase 6 — aquery structured output
 
 Mechanical per the exploration; the pattern is regular but touches many files.
 
-- `src/main/protobuf/analysis_v2.proto`: `FileSelection` message (id, cardinality, source artifact ids, include, exclude, filter function label, flags); `repeated FileSelection file_selections` in `ActionGraphContainer`; `repeated uint32 file_selection_ids` (and `selected_executable_id`) on `Action`.
+- `src/main/protobuf/analysis_v2.proto`: `MatchedFiles` message (id, cardinality, source artifact ids, include, exclude, filter function label, flags); `repeated MatchedFiles file_selections` in `ActionGraphContainer`; `repeated uint32 file_selection_ids` (and `selected_executable_id`) on `Action`.
   Command lines keep placeholder *strings* in `Action.arguments` — there is no command-line-fragment table today and this plan does not introduce one.
-- New `KnownFileSelections extends BaseCache` (`skyframe/actiongraph/v2/`), `outputFileSelection` on `AqueryOutputHandler` and its three implementations (`StreamedConsumingOutputHandler`, `MonolithicOutputHandler`, `AqueryConsumingOutputHandler`), wiring in `ActionGraphDump.dumpSingleAction` (`:272-281` vicinity).
+- New `KnownMatchedFiless extends BaseCache` (`skyframe/actiongraph/v2/`), `outputMatchedFiles` on `AqueryOutputHandler` and its three implementations (`StreamedConsumingOutputHandler`, `MonolithicOutputHandler`, `AqueryConsumingOutputHandler`), wiring in `ActionGraphDump.dumpSingleAction` (`:272-281` vicinity).
 - Text format: placeholder branch in `ActionGraphTextOutputFormatterCallback.writeText` (`:229-254`), following the `(TreeArtifact)` suffix precedent.
 
 # Phase 7 — Hardening and graduation
 
-- **Rewinding:** lost-input recovery for resolved children must rewind the tree's generating action; the recent tree-artifact CAS-miss rewinding fixes ([#30065](https://github.com/bazelbuild/bazel/issues/30065), [#30103](https://github.com/bazelbuild/bazel/issues/30103)) are the adjacent, freshly exercised machinery — add selection/pick cases to those regression suites.
-- **Shared actions / conflict checking:** two configured targets declaring identical actions with selections must compare equal (spec-based `computeKey` gives this; test it).
+- **Rewinding:** lost-input recovery for resolved children must rewind the tree's generating action; the recent tree-artifact CAS-miss rewinding fixes ([#30065](https://github.com/bazelbuild/bazel/issues/30065), [#30103](https://github.com/bazelbuild/bazel/issues/30103)) are the adjacent, freshly exercised machinery — add match/pick cases to those regression suites.
+- **Shared actions / conflict checking:** two configured targets declaring identical actions with matches must compare equal (spec-based `computeKey` gives this; test it).
 - **Skymeld:** interleaved analysis/execution exercises the deferred-owner binding from Phase 1 and discovery scheduling from Phase 3 under concurrency; dedicated tests.
-- **Path mapping:** selections resolve to children whose paths may be mapped (`PathMapper` flows through both `SpawnInputExpander` and `StarlarkCustomCommandLine`); verify placeholder fingerprinting composes with `--experimental_output_paths=strip`.
-- **Memory:** interned selection specs; confirm no retained `InputMetadataProvider` references after resolution (the `clearInputMetadataProvider` lesson, `StarlarkCustomCommandLine.java:1292`).
+- **Path mapping:** matches resolve to children whose paths may be mapped (`PathMapper` flows through both `SpawnInputExpander` and `StarlarkCustomCommandLine`); verify placeholder fingerprinting composes with `--experimental_output_paths=strip`.
+- **Memory:** interned match specs; confirm no retained `InputMetadataProvider` references after resolution (the `clearInputMetadataProvider` lesson, `StarlarkCustomCommandLine.java:1292`).
 - Flag flip plan: experimental → `--incompatible`-free graduation once rules_js/toolchain-style consumers validate against the prototype, mirroring the lazy-downloads PR process.
 
 # Test strategy
@@ -175,7 +175,7 @@ Mechanical per the exploration; the pattern is regular but touches many files.
 - **Analysis tests:** type errors on forbidden surfaces (`DefaultInfo`, depsets, outputs); provider forwarding; `repr` stability.
 - **Execution integration** (Java integration tests + shell tests): the Phase-1/3 exit-criteria scenarios across strategies — local, `linux-sandbox`, remote (`build_bazel_remote_execution` test fixture), BwoB minimal/toplevel; incrementality assertions via action-count metrics (sibling-churn non-invalidation is *the* headline behaviour and needs a direct test).
 - **Query:** aquery text + proto golden tests; cquery `--output=files` / `--output=starlark`; BEP golden for picks in output groups.
-- **Benchmark:** an extracted-SDK scenario (thousands-of-children tree, three-file consumer) comparing whole-tree input vs selection on clean/incremental builds — the evidence for the graduation case, and for the copy-action/alias positioning debate.
+- **Benchmark:** an extracted-SDK scenario (thousands-of-children tree, three-file consumer) comparing whole-tree input vs match on clean/incremental builds — the evidence for the graduation case, and for the copy-action/alias positioning debate.
 
 # Sequencing and independence
 
@@ -185,18 +185,18 @@ Phase 0 ──► Phase 1 ──► Phase 2        (picks: usable end-to-end aft
                    └──► Phase 5 ──────┘
 ```
 
-Phases 1-2 (picks) deliver standalone value and de-risk the artifact-layer invariant changes before selections build on the same child-handling paths.
+Phases 1-2 (picks) deliver standalone value and de-risk the artifact-layer invariant changes before matches build on the same child-handling paths.
 Phase 3 is the largest single unit; 4 and 5 are parallel once it lands.
-A minimal credible prototype for proposal review is Phases 0, 1, and 3 with `select_file`-as-executable pulled forward from Phase 5 (the lazy-downloads toolchain demo needs exactly that slice).
+A minimal credible prototype for proposal review is Phases 0, 1, and 3 with `match_file`-as-executable pulled forward from Phase 5 (the lazy-downloads toolchain demo needs exactly that slice).
 
 # Open implementation questions
 
 - **Deferred owner binding** (Phase 1) is the only invariant change in `Artifact.java`, the most central class in Bazel; the alternative — restricting picks to *dependency* trees in v1 and lifting the same-target restriction later — halves the risk at real expressiveness cost (the extract-then-pick-in-one-rule pattern).
   Decide after prototyping the binding hook.
-- **Where resolution results live for `Args`/executable reuse:** discovery installs children as inputs, but the per-selection resolved lists must also reach spawn construction and command-line expansion; likely a small per-action resolved-selections map on the enhanced action instance, populated during discovery.
+- **Where resolution results live for `Args`/executable reuse:** discovery installs children as inputs, but the per-match resolved lists must also reach spawn construction and command-line expansion; likely a small per-action resolved-matches map on the enhanced action instance, populated during discovery.
   Needs care under action rewinding (re-discovery must repopulate).
-  *(Resolved — see Phase 4. The map lives on the enhanced action as sketched; the missing link — expansion has no action handle — closed by wrapping the `InputMetadataProvider` the action already controls at `getSpawn` time with a `FileSelectionResolver`-capable delegate, discovered by expansion via `instanceof`. No `CommandLines.expand` signature change was needed. Rewinding is covered because the field is transient and re-discovery repopulates it before any re-execution.)*
-- **`getSchedulingDependencies()` composition:** the enhanced Starlark action already uses it for shadowed actions (`StarlarkAction.java:316-321`); merging shadowed-action deps with selection sources is straightforward but the interaction is untested territory.
+  *(Resolved — see Phase 4. The map lives on the enhanced action as sketched; the missing link — expansion has no action handle — closed by wrapping the `InputMetadataProvider` the action already controls at `getSpawn` time with a `FileMatchResolver`-capable delegate, discovered by expansion via `instanceof`. No `CommandLines.expand` signature change was needed. Rewinding is covered because the field is transient and re-discovery repopulates it before any re-execution.)*
+- **`getSchedulingDependencies()` composition:** the enhanced Starlark action already uses it for shadowed actions (`StarlarkAction.java:316-321`); merging shadowed-action deps with match sources is straightforward but the interaction is untested territory.
 - **Subtree picks vs `pick_directory` representation:** reusing subtree `SpecialArtifact`s assumes `map_directory`'s subtree support is general enough for arbitrary nesting; if it proves template-expansion-specific, `pick_directory` needs its own artifact flavour, which would ripple through `ActionInputMap`'s grandparent walk.
   Validate first in Phase 1.
-  *(Resolved — the gap was narrower than the original validation suggested. Routing a subtree as a standalone input NPE'd in `ArtifactFunction.compute` (`ActionExecutionValue.getTreeArtifactValue(subtree)` is `null`; the generating action records only the root tree's value), but everything below Skyframe — `ActionInputMap`'s grandparent walk, `SpawnInputExpander`, prefetch — already handled subtree inputs from the `map_directory` flow. The fix is a single branch in `ArtifactFunction`: a subtree node depends on the root tree's own artifact node (`env.getValue(Artifact.key(root))`, which transparently covers template-generated roots) and derives a sub-view, matching children by exec path (the root's aggregated value can hold children parented to template-output subtrees, so parent-relative paths are not reliable) and re-parenting onto the subtree unless already so parented. An empty sub-view — missing path or fileless directory, indistinguishable in tree metadata — is rejected at the consumer with the missing-path error, in `ActionExecutionFunction.getAndCheckInputSkyValue`. `pick_directory` is consequently live; directory-typed selection members remain deferred because they arrive through input discovery rather than declared-input request, a separate admission path.)*
+  *(Resolved — the gap was narrower than the original validation suggested. Routing a subtree as a standalone input NPE'd in `ArtifactFunction.compute` (`ActionExecutionValue.getTreeArtifactValue(subtree)` is `null`; the generating action records only the root tree's value), but everything below Skyframe — `ActionInputMap`'s grandparent walk, `SpawnInputExpander`, prefetch — already handled subtree inputs from the `map_directory` flow. The fix is a single branch in `ArtifactFunction`: a subtree node depends on the root tree's own artifact node (`env.getValue(Artifact.key(root))`, which transparently covers template-generated roots) and derives a sub-view, matching children by exec path (the root's aggregated value can hold children parented to template-output subtrees, so parent-relative paths are not reliable) and re-parenting onto the subtree unless already so parented. An empty sub-view — missing path or fileless directory, indistinguishable in tree metadata — is rejected at the consumer with the missing-path error, in `ActionExecutionFunction.getAndCheckInputSkyValue`. `pick_directory` is consequently live; directory-typed match members remain deferred because they arrive through input discovery rather than declared-input request, a separate admission path.)*

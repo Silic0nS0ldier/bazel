@@ -19,20 +19,20 @@ import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import javax.annotation.Nullable;
 
 /**
- * Supplies the results of file selection resolution to command-line expansion.
+ * Supplies the results of file match resolution to command-line expansion.
  *
- * <p>Selections are resolved once, during input discovery, against source-tree metadata that is no
+ * <p>Matches are resolved once, during input discovery, against source-tree metadata that is no
  * longer available at spawn construction (the source trees are pruned from the inputs after
  * resolution). The consuming action exposes the stored results by handing spawn construction an
  * {@link InputMetadataProvider} that also implements this interface; expansion code discovers the
  * capability via an {@code instanceof} check.
  */
-public interface FileSelectionResolver {
+public interface FileMatchResolver {
 
   /**
-   * Returns the artifacts a selection resolved to during input discovery, or {@code null} if the
-   * given spec is not among the consuming action's input selections.
+   * Returns the artifacts a match resolved to during input discovery, or {@code null} if the
+   * given spec is not among the consuming action's input matches.
    */
   @Nullable
-  ImmutableList<Artifact> getResolvedSelection(FileSelectionSpec spec);
+  ImmutableList<Artifact> getResolvedMatch(FileMatchSpec spec);
 }

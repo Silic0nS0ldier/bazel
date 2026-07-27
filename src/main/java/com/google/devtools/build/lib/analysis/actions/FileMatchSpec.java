@@ -43,9 +43,9 @@ import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkThread;
 
 /**
- * The immutable payload shared by {@link SelectedFile} and {@link FileSelection}: the sources,
+ * The immutable payload shared by {@link MatchedFile} and {@link MatchedFiles}: the sources,
  * patterns, optional {@code filter} callback, cardinality contract, and flags of a {@code
- * ctx.actions.select_*} call.
+ * ctx.actions.match_*} call.
  *
  * <p>A spec is a pure, execution-time-resolved view over content that already has a generating
  * action; it creates no action and moves no bytes. {@link #resolve} produces the ordered set of
@@ -56,15 +56,15 @@ import net.starlark.java.eval.StarlarkThread;
  * equal.
  */
 @AutoCodec
-public final class FileSelectionSpec {
+public final class FileMatchSpec {
 
-  /** What a selection resolves to, and how it is enforced. */
+  /** What a match resolves to, and how it is enforced. */
   public enum Cardinality {
-    /** Exactly one regular file ({@code select_file}). */
+    /** Exactly one regular file ({@code match_file}). */
     SINGLE_FILE,
-    /** Exactly one directory ({@code select_directory}). */
+    /** Exactly one directory ({@code match_directory}). */
     SINGLE_DIRECTORY,
-    /** A set ({@code select_files}). */
+    /** A set ({@code match_files}). */
     SET
   }
 
@@ -78,7 +78,7 @@ public final class FileSelectionSpec {
   private final boolean allowEmpty;
 
   @AutoCodec.Instantiator
-  public FileSelectionSpec(
+  public FileMatchSpec(
       ImmutableList<Object> sources,
       ImmutableList<String> include,
       ImmutableList<String> exclude,
@@ -106,7 +106,7 @@ public final class FileSelectionSpec {
   }
 
   /**
-   * The distinct root tree artifacts backing this selection (transitively through selection
+   * The distinct root tree artifacts backing this match (transitively through match
    * sources), used to declare the consuming action's scheduling dependencies.
    */
   public ImmutableSet<SpecialArtifact> getSourceTreeArtifacts() {
@@ -120,8 +120,8 @@ public final class FileSelectionSpec {
     for (Object source : sources) {
       switch (source) {
         case SpecialArtifact tree -> out.add(tree.isSubTreeArtifact() ? tree.getParent() : tree);
-        case SelectedFile sf -> collectSourceTrees(sf.getSpec().sources, out);
-        case FileSelection fs -> collectSourceTrees(fs.getSpec().sources, out);
+        case MatchedFile sf -> collectSourceTrees(sf.getSpec().sources, out);
+        case MatchedFiles fs -> collectSourceTrees(fs.getSpec().sources, out);
         default -> {}
       }
     }
@@ -131,15 +131,15 @@ public final class FileSelectionSpec {
   private record Candidate(Artifact artifact, int sourceIndex, String matchPath) {}
 
   /**
-   * Resolves this selection against the given metadata, returning the ordered members (files as
+   * Resolves this match against the given metadata, returning the ordered members (files as
    * {@link TreeFileArtifact}s, directories as subtree {@link SpecialArtifact}s).
    *
-   * @throws SelectionResolutionException if the cardinality/kind contract is violated, a source's
+   * @throws MatchResolutionException if the cardinality/kind contract is violated, a source's
    *     metadata is unavailable, or the {@code filter} callback misbehaves
    */
   public ImmutableList<Artifact> resolve(
       InputMetadataProvider metadataProvider, EventHandler eventHandler)
-      throws SelectionResolutionException, InterruptedException {
+      throws MatchResolutionException, InterruptedException {
     boolean includeDirectories =
         cardinality == Cardinality.SINGLE_DIRECTORY || !excludeDirectories;
 
@@ -181,7 +181,7 @@ public final class FileSelectionSpec {
       boolean includeDirectories,
       InputMetadataProvider metadataProvider,
       EventHandler eventHandler)
-      throws SelectionResolutionException, InterruptedException {
+      throws MatchResolutionException, InterruptedException {
     switch (source) {
       case SpecialArtifact special -> {
         SpecialArtifact root = special.isSubTreeArtifact() ? special.getParent() : special;
@@ -189,8 +189,8 @@ public final class FileSelectionSpec {
             special.isSubTreeArtifact() ? special.getParentRelativePath() : PathFragment.EMPTY_FRAGMENT;
         return fromTree(root, prefix, sourceIndex, includeDirectories, metadataProvider);
       }
-      case SelectedFile sf -> {
-        // A select_directory result: resolve it to its one directory, then take children below it.
+      case MatchedFile sf -> {
+        // A match_directory result: resolve it to its one directory, then take children below it.
         ImmutableList<Artifact> resolved = sf.getSpec().resolve(metadataProvider, eventHandler);
         SpecialArtifact dir = (SpecialArtifact) resolved.get(0);
         return fromTree(
@@ -200,7 +200,7 @@ public final class FileSelectionSpec {
             includeDirectories,
             metadataProvider);
       }
-      case FileSelection fs -> {
+      case MatchedFiles fs -> {
         // A prior set: its resolved members are the candidates, matched by their own tree-relative
         // path (relative to their own tree's root).
         List<Candidate> out = new ArrayList<>();
@@ -210,8 +210,8 @@ public final class FileSelectionSpec {
         return out;
       }
       default ->
-          throw new SelectionResolutionException(
-              "internal error: unexpected selection source " + Starlark.type(source));
+          throw new MatchResolutionException(
+              "internal error: unexpected match source " + Starlark.type(source));
     }
   }
 
@@ -226,10 +226,10 @@ public final class FileSelectionSpec {
       int sourceIndex,
       boolean includeDirectories,
       InputMetadataProvider metadataProvider)
-      throws SelectionResolutionException {
+      throws MatchResolutionException {
     TreeArtifactValue tree = metadataProvider.getTreeMetadata(root);
     if (tree == null) {
-      throw new SelectionResolutionException(
+      throw new MatchResolutionException(
           String.format(
               "metadata for source tree artifact %s (produced by %s) is not available",
               root.getExecPathString(), root.getArtifactOwner().getLabel()));
@@ -271,11 +271,11 @@ public final class FileSelectionSpec {
   }
 
   private List<Candidate> applyFilter(List<Candidate> matched, EventHandler eventHandler)
-      throws SelectionResolutionException, InterruptedException {
+      throws MatchResolutionException, InterruptedException {
     ImmutableList<Artifact> candidateArtifacts =
         matched.stream().map(Candidate::artifact).collect(ImmutableList.toImmutableList());
     Object returnValue;
-    try (Mutability mu = Mutability.create("file selection filter")) {
+    try (Mutability mu = Mutability.create("file match filter")) {
       StarlarkThread thread = StarlarkThread.createTransient(mu, semantics);
       thread.setPrintHandler(Event.makeDebugPrintHandler(eventHandler));
       returnValue =
@@ -285,11 +285,11 @@ public final class FileSelectionSpec {
               ImmutableList.of(StarlarkList.immutableCopyOf(candidateArtifacts)),
               /* kwargs= */ ImmutableMap.of());
     } catch (EvalException e) {
-      throw new SelectionResolutionException(
+      throw new MatchResolutionException(
           String.format("filter function %s failed: %s", filter.getName(), e.getMessage()));
     }
     if (!(returnValue instanceof StarlarkList<?> keptList)) {
-      throw new SelectionResolutionException(
+      throw new MatchResolutionException(
           String.format(
               "filter function %s must return a list, got %s",
               filter.getName(), Starlark.type(returnValue)));
@@ -299,7 +299,7 @@ public final class FileSelectionSpec {
     List<Candidate> kept = new ArrayList<>();
     for (Object element : keptList) {
       if (!(element instanceof Artifact artifact) || !allowed.contains(artifact)) {
-        throw new SelectionResolutionException(
+        throw new MatchResolutionException(
             String.format(
                 "filter function %s returned %s, which was not among the candidates",
                 filter.getName(), Starlark.repr(element, semantics)));
@@ -315,30 +315,30 @@ public final class FileSelectionSpec {
     return kept;
   }
 
-  private void checkKinds(List<Candidate> kept) throws SelectionResolutionException {
+  private void checkKinds(List<Candidate> kept) throws MatchResolutionException {
     for (Candidate c : kept) {
       boolean isDirectory = c.artifact().isTreeArtifact();
       if (cardinality == Cardinality.SINGLE_FILE && isDirectory) {
-        throw new SelectionResolutionException(
-            String.format("select_file matched a directory: %s", c.matchPath()));
+        throw new MatchResolutionException(
+            String.format("match_file matched a directory: %s", c.matchPath()));
       }
       if (cardinality == Cardinality.SINGLE_DIRECTORY && !isDirectory) {
-        throw new SelectionResolutionException(
-            String.format("select_directory matched a regular file: %s", c.matchPath()));
+        throw new MatchResolutionException(
+            String.format("match_directory matched a regular file: %s", c.matchPath()));
       }
     }
   }
 
   private void checkCardinality(ImmutableList<Artifact> result)
-      throws SelectionResolutionException {
+      throws MatchResolutionException {
     switch (cardinality) {
       case SINGLE_FILE, SINGLE_DIRECTORY -> {
         if (result.isEmpty()) {
-          throw new SelectionResolutionException(
+          throw new MatchResolutionException(
               describe() + " resolved to no matches, but exactly one is required");
         }
         if (result.size() > 1) {
-          throw new SelectionResolutionException(
+          throw new MatchResolutionException(
               describe()
                   + " resolved to more than one match; narrow the pattern or add a filter. Matches: "
                   + Artifact.asExecPaths(result));
@@ -346,9 +346,9 @@ public final class FileSelectionSpec {
       }
       case SET -> {
         if (result.isEmpty() && !allowEmpty) {
-          throw new SelectionResolutionException(
+          throw new MatchResolutionException(
               describe()
-                  + " resolved to no matches. Set allow_empty = True to permit an empty selection.");
+                  + " resolved to no matches. Set allow_empty = True to permit an empty match.");
         }
       }
     }
@@ -373,7 +373,7 @@ public final class FileSelectionSpec {
     return false;
   }
 
-  /** Contributes this selection's identity to a consuming action's key. */
+  /** Contributes this match's identity to a consuming action's key. */
   public void addToFingerprint(ActionKeyContext actionKeyContext, Fingerprint fp) {
     fp.addString(cardinality.name());
     fp.addBoolean(excludeDirectories);
@@ -383,8 +383,8 @@ public final class FileSelectionSpec {
     for (Object source : sources) {
       switch (source) {
         case Artifact artifact -> fp.addPath(artifact.getExecPath());
-        case SelectedFile sf -> sf.getSpec().addToFingerprint(actionKeyContext, fp);
-        case FileSelection fs -> fs.getSpec().addToFingerprint(actionKeyContext, fp);
+        case MatchedFile sf -> sf.getSpec().addToFingerprint(actionKeyContext, fp);
+        case MatchedFiles fs -> fs.getSpec().addToFingerprint(actionKeyContext, fp);
         default -> {}
       }
     }
@@ -437,9 +437,9 @@ public final class FileSelectionSpec {
 
   private String functionName() {
     return switch (cardinality) {
-      case SINGLE_FILE -> "select_file";
-      case SINGLE_DIRECTORY -> "select_directory";
-      case SET -> "select_files";
+      case SINGLE_FILE -> "match_file";
+      case SINGLE_DIRECTORY -> "match_directory";
+      case SET -> "match_files";
     };
   }
 
@@ -448,9 +448,9 @@ public final class FileSelectionSpec {
       return artifact.getExecPathString();
     }
     StringBuilder sb = new StringBuilder();
-    if (source instanceof SelectedFile sf) {
+    if (source instanceof MatchedFile sf) {
       sf.getSpec().appendPlaceholder(sb);
-    } else if (source instanceof FileSelection fs) {
+    } else if (source instanceof MatchedFiles fs) {
       fs.getSpec().appendPlaceholder(sb);
     }
     return sb.toString();
@@ -467,7 +467,7 @@ public final class FileSelectionSpec {
     if (this == o) {
       return true;
     }
-    if (!(o instanceof FileSelectionSpec that)) {
+    if (!(o instanceof FileMatchSpec that)) {
       return false;
     }
     return cardinality == that.cardinality
@@ -485,9 +485,9 @@ public final class FileSelectionSpec {
         cardinality, excludeDirectories, allowEmpty, sources, include, exclude, filter);
   }
 
-  /** Thrown when a selection cannot be resolved; converted to an action failure by the consumer. */
-  public static final class SelectionResolutionException extends Exception {
-    public SelectionResolutionException(String message) {
+  /** Thrown when a match cannot be resolved; converted to an action failure by the consumer. */
+  public static final class MatchResolutionException extends Exception {
+    public MatchResolutionException(String message) {
       super(message);
     }
   }

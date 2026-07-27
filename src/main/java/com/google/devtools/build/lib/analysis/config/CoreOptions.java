@@ -821,8 +821,8 @@ public abstract class CoreOptions extends FragmentOptions implements Cloneable {
       metadataTags = {OptionMetadataTag.EXPERIMENTAL, OptionMetadataTag.NON_CONFIGURABLE},
       help =
           "If enabled, Bazel allows the use of ctx.actions.pick_file(),"
-              + " ctx.actions.pick_directory(), ctx.actions.select_file(),"
-              + " ctx.actions.select_directory() and ctx.actions.select_files(), which reference"
+              + " ctx.actions.pick_directory(), ctx.actions.match_file(),"
+              + " ctx.actions.match_directory() and ctx.actions.match_files(), which reference"
               + " statically known paths (picks) or dynamically resolved contents (selections) of"
               + " directory artifacts without staging the whole tree.")
   public abstract boolean getExperimentalTreeArtifactSelection();

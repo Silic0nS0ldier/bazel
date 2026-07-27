@@ -21,20 +21,20 @@ import net.starlark.java.eval.StarlarkValue;
  * An opaque handle to a set of files (and, optionally, directories) dynamically resolved from one
  * or more directory artifacts at execution time.
  *
- * <p>Returned by {@code ctx.actions.select_files}. Because the resolved members' exec paths are
- * unknown until the source trees' contents are known, a {@code FileSelection} is not a collection
+ * <p>Returned by {@code ctx.actions.match_files}. Because the resolved members' exec paths are
+ * unknown until the source trees' contents are known, a {@code MatchedFiles} is not a collection
  * of {@link FileApi}s and may appear only on surfaces that already tolerate execution-time
  * resolution: action inputs and {@code Args}.
  */
 @StarlarkBuiltin(
-    name = "FileSelection",
+    name = "MatchedFiles",
     category = DocCategory.BUILTIN,
     doc =
         "An opaque handle to a set of files (and, optionally, directories) dynamically resolved "
             + "from one or more directory artifacts at execution time. Returned by "
-            + "<a href=\"#select_files\"><code>select_files</code></a>. It is not a collection of "
+            + "<a href=\"#match_files\"><code>match_files</code></a>. It is not a collection of "
             + "<a href=\"../builtins/File.html\"><code>File</code></a>s: it may be used as an "
             + "action input and expanded in <a href=\"../builtins/Args.html\"><code>Args</code></a>"
             + " via <code>add_all</code>/<code>add_joined</code>, but not as an output, in "
             + "<code>DefaultInfo</code>, in runfiles, or in a depset.")
-public interface FileSelectionApi extends StarlarkValue {}
+public interface MatchedFilesApi extends StarlarkValue {}

@@ -37,10 +37,10 @@ import com.google.devtools.build.lib.actions.FilesetOutputTree;
 import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.PathMapper;
 import com.google.devtools.build.lib.actions.SingleStringArgFormatter;
-import com.google.devtools.build.lib.analysis.actions.FileSelection;
-import com.google.devtools.build.lib.analysis.actions.FileSelectionResolver;
-import com.google.devtools.build.lib.analysis.actions.FileSelectionSpec;
-import com.google.devtools.build.lib.analysis.actions.SelectedFile;
+import com.google.devtools.build.lib.analysis.actions.MatchedFiles;
+import com.google.devtools.build.lib.analysis.actions.FileMatchResolver;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec;
+import com.google.devtools.build.lib.analysis.actions.MatchedFile;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryMapping;
@@ -171,7 +171,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
         UUID.fromString("528af376-4233-4c27-be4d-b0ff24ed68db");
     private static final UUID TERMINATE_WITH_UUID =
         UUID.fromString("a4e5e090-0dbd-4d41-899a-77cfbba58655");
-    private static final UUID FILE_SELECTION_UUID =
+    private static final UUID FILE_MATCH_UUID =
         UUID.fromString("3c1d8b6e-52f7-4a19-9e0d-8b47c6a2f014");
 
     private final boolean isNestedSet;
@@ -309,10 +309,10 @@ public class StarlarkCustomCommandLine extends CommandLine {
         originalValues = arguments.subList(argi, argi + count);
         argi += count;
       }
-      // File selections resolve to their concrete artifacts (or, without an input metadata
+      // File matches resolve to their concrete artifacts (or, without an input metadata
       // provider, to placeholders) before directory expansion and map_each, so downstream stages
       // only ever see files.
-      originalValues = maybeResolveSelections(inputMetadataProvider, originalValues);
+      originalValues = maybeResolveMatches(inputMetadataProvider, originalValues);
       List<Object> expandedValues =
           maybeExpandDirectories(inputMetadataProvider, originalValues, pathMapper);
       List<Object /* String | DerivedArtifact */> values;
@@ -522,23 +522,23 @@ public class StarlarkCustomCommandLine extends CommandLine {
         int count = hasSingleArg ? 1 : (Integer) arguments.get(argi++);
         List<Object> rawValues = arguments.subList(argi, argi + count);
         argi += count;
-        // File selections contribute their spec identity (with their position, to keep the
+        // File matches contribute their spec identity (with their position, to keep the
         // fingerprint order-sensitive) and never their expansion, which is unsound before input
         // metadata exists and stays consistent between the analysis- and execution-time keys. The
         // resolved set is instead keyed on the input side by the discovered-inputs cache path.
-        if (hasSelection(rawValues)) {
-          List<Object> nonSelectionValues = new ArrayList<>(rawValues.size());
+        if (hasMatch(rawValues)) {
+          List<Object> nonMatchValues = new ArrayList<>(rawValues.size());
           for (int i = 0; i < rawValues.size(); i++) {
-            FileSelectionSpec spec = selectionSpecOf(rawValues.get(i));
+            FileMatchSpec spec = matchSpecOf(rawValues.get(i));
             if (spec != null) {
-              fingerprint.addUUID(FILE_SELECTION_UUID);
+              fingerprint.addUUID(FILE_MATCH_UUID);
               fingerprint.addInt(i);
               spec.addToFingerprint(actionKeyContext, fingerprint);
             } else {
-              nonSelectionValues.add(rawValues.get(i));
+              nonMatchValues.add(rawValues.get(i));
             }
           }
-          rawValues = nonSelectionValues;
+          rawValues = nonMatchValues;
         }
         List<Object> maybeExpandedValues =
             maybeExpandDirectories(
@@ -946,7 +946,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
                 values, vali, builder, inputMetadataProvider, pathMapper, mainRepoMapping);
       } else if (item == SINGLE_FORMATTED_ARG_MARKER) {
         String format = (String) recipeElems[++recipei];
-        Object arg = maybeResolveScalarSelection(values.get(vali++), inputMetadataProvider);
+        Object arg = maybeResolveScalarMatch(values.get(vali++), inputMetadataProvider);
         switch (expandToCommandLine(arg, mainRepoMapping)) {
           case DerivedArtifact derivedArtifact ->
               builder.addPreprocessedArg(
@@ -956,7 +956,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
           default -> throw new AssertionError("Unexpected object type: " + arg);
         }
       } else if (item == PLAIN_ARG_MARKER) {
-        Object arg = maybeResolveScalarSelection(values.get(vali++), inputMetadataProvider);
+        Object arg = maybeResolveScalarMatch(values.get(vali++), inputMetadataProvider);
         builder.addArg(expandToCommandLine(arg, mainRepoMapping));
       } else {
         throw new AssertionError("Unexpected recipe item: " + item);
@@ -1049,7 +1049,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
                     values, vali, line, inputMetadataProvider, pathMapper, mainRepoMapping);
           } else if (item == SINGLE_FORMATTED_ARG_MARKER) {
             String format = (String) recipeElems[recipei++];
-            Object arg = maybeResolveScalarSelection(values.get(vali++), inputMetadataProvider);
+            Object arg = maybeResolveScalarMatch(values.get(vali++), inputMetadataProvider);
             switch (expandToCommandLine(arg, mainRepoMapping)) {
               case DerivedArtifact derivedArtifact ->
                   line.addPreprocessedArg(
@@ -1059,7 +1059,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
               default -> throw new AssertionError("Unexpected object type: " + arg);
             }
           } else if (item == PLAIN_ARG_MARKER) {
-            Object arg = maybeResolveScalarSelection(values.get(vali++), inputMetadataProvider);
+            Object arg = maybeResolveScalarMatch(values.get(vali++), inputMetadataProvider);
             line.addArg(expandToCommandLine(arg, mainRepoMapping));
           } else {
             throw new AssertionError("Unexpected recipe item: " + item);
@@ -1118,7 +1118,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
   }
 
   /**
-   * Fingerprints a scalar argument. File selections contribute their spec identity, never their
+   * Fingerprints a scalar argument. File matches contribute their spec identity, never their
    * expansion — matching the vector-arg treatment.
    */
   private static void addScalarToFingerprint(
@@ -1126,9 +1126,9 @@ public class StarlarkCustomCommandLine extends CommandLine {
       Fingerprint fingerprint,
       Object arg,
       @Nullable RepositoryMapping mainRepoMapping) {
-    FileSelectionSpec spec = selectionSpecOf(arg);
+    FileMatchSpec spec = matchSpecOf(arg);
     if (spec != null) {
-      fingerprint.addUUID(VectorArg.FILE_SELECTION_UUID);
+      fingerprint.addUUID(VectorArg.FILE_MATCH_UUID);
       spec.addToFingerprint(actionKeyContext, fingerprint);
       return;
     }
@@ -1172,14 +1172,14 @@ public class StarlarkCustomCommandLine extends CommandLine {
   }
 
   /**
-   * Placeholder for a file selection rendered without input metadata (action-key fingerprinting
+   * Placeholder for a file match rendered without input metadata (action-key fingerprinting
    * takes the spec-digest path instead, so this shows up only in analysis-time renderings such as
    * aquery {@code --include_commandline} and progress messages).
    */
-  private static final class SelectionPlaceholder {
+  private static final class MatchPlaceholder {
     private final String rendered;
 
-    SelectionPlaceholder(FileSelectionSpec spec) {
+    MatchPlaceholder(FileMatchSpec spec) {
       StringBuilder sb = new StringBuilder();
       spec.appendPlaceholder(sb);
       this.rendered = sb.toString();
@@ -1192,17 +1192,17 @@ public class StarlarkCustomCommandLine extends CommandLine {
   }
 
   @Nullable
-  private static FileSelectionSpec selectionSpecOf(Object object) {
+  private static FileMatchSpec matchSpecOf(Object object) {
     return switch (object) {
-      case SelectedFile selectedFile -> selectedFile.getSpec();
-      case FileSelection fileSelection -> fileSelection.getSpec();
+      case MatchedFile matchedFile -> matchedFile.getSpec();
+      case MatchedFiles fileMatch -> fileMatch.getSpec();
       default -> null;
     };
   }
 
-  private static boolean hasSelection(List<Object> values) {
+  private static boolean hasMatch(List<Object> values) {
     for (int i = 0; i < values.size(); i++) {
-      if (selectionSpecOf(values.get(i)) != null) {
+      if (matchSpecOf(values.get(i)) != null) {
         return true;
       }
     }
@@ -1210,80 +1210,80 @@ public class StarlarkCustomCommandLine extends CommandLine {
   }
 
   /**
-   * Resolves a selection through the {@link FileSelectionResolver} capability of the consuming
-   * action's metadata provider. A miss means the selection was never registered as an action input,
+   * Resolves a match through the {@link FileMatchResolver} capability of the consuming
+   * action's metadata provider. A miss means the match was never registered as an action input,
    * so its resolution never ran — a user error, reported as an expansion failure.
    */
-  private static ImmutableList<Artifact> resolveSelection(
-      FileSelectionSpec spec, InputMetadataProvider inputMetadataProvider)
+  private static ImmutableList<Artifact> resolveMatch(
+      FileMatchSpec spec, InputMetadataProvider inputMetadataProvider)
       throws CommandLineExpansionException {
-    if (inputMetadataProvider instanceof FileSelectionResolver resolver) {
-      ImmutableList<Artifact> resolved = resolver.getResolvedSelection(spec);
+    if (inputMetadataProvider instanceof FileMatchResolver resolver) {
+      ImmutableList<Artifact> resolved = resolver.getResolvedMatch(spec);
       if (resolved != null) {
         return resolved;
       }
     }
     throw new CommandLineExpansionException(
         String.format(
-            "file selection %s is used in the command line but is not an input of the action;"
-                + " pass the selection to the action's 'inputs' as well",
-            new SelectionPlaceholder(spec)));
+            "file match %s is used in the command line but is not an input of the action;"
+                + " pass the match to the action's 'inputs' as well",
+            new MatchPlaceholder(spec)));
   }
 
   /**
-   * Replaces file selections among {@code originalValues} with their resolved artifacts, or with
-   * {@link SelectionPlaceholder}s when no input metadata is available. Returns the original list
-   * when it contains no selections.
+   * Replaces file matches among {@code originalValues} with their resolved artifacts, or with
+   * {@link MatchPlaceholder}s when no input metadata is available. Returns the original list
+   * when it contains no matches.
    */
-  private static List<Object> maybeResolveSelections(
+  private static List<Object> maybeResolveMatches(
       @Nullable InputMetadataProvider inputMetadataProvider, List<Object> originalValues)
       throws CommandLineExpansionException {
-    if (!hasSelection(originalValues)) {
+    if (!hasMatch(originalValues)) {
       return originalValues;
     }
     List<Object> resolvedValues = new ArrayList<>(originalValues.size());
     for (Object value : originalValues) {
-      FileSelectionSpec spec = selectionSpecOf(value);
+      FileMatchSpec spec = matchSpecOf(value);
       if (spec == null) {
         resolvedValues.add(value);
       } else if (inputMetadataProvider == null) {
-        resolvedValues.add(new SelectionPlaceholder(spec));
+        resolvedValues.add(new MatchPlaceholder(spec));
       } else {
-        resolvedValues.addAll(resolveSelection(spec, inputMetadataProvider));
+        resolvedValues.addAll(resolveMatch(spec, inputMetadataProvider));
       }
     }
     return resolvedValues;
   }
 
   /**
-   * Resolves a scalar file selection from {@code Args.add} to its single artifact, its placeholder
-   * string when no input metadata is available, or the value unchanged when it is not a selection.
+   * Resolves a scalar file match from {@code Args.add} to its single artifact, its placeholder
+   * string when no input metadata is available, or the value unchanged when it is not a match.
    */
-  private static Object maybeResolveScalarSelection(
+  private static Object maybeResolveScalarMatch(
       Object arg, @Nullable InputMetadataProvider inputMetadataProvider)
       throws CommandLineExpansionException {
-    FileSelectionSpec spec = selectionSpecOf(arg);
+    FileMatchSpec spec = matchSpecOf(arg);
     if (spec == null) {
       return arg;
     }
     if (inputMetadataProvider == null) {
-      return new SelectionPlaceholder(spec).toString();
+      return new MatchPlaceholder(spec).toString();
     }
-    ImmutableList<Artifact> resolved = resolveSelection(spec, inputMetadataProvider);
+    ImmutableList<Artifact> resolved = resolveMatch(spec, inputMetadataProvider);
     if (resolved.size() != 1) {
       throw new CommandLineExpansionException(
           String.format(
-              "file selection %s used as a single argument resolved to %d files",
-              new SelectionPlaceholder(spec), resolved.size()));
+              "file match %s used as a single argument resolved to %d files",
+              new MatchPlaceholder(spec), resolved.size()));
     }
     return resolved.get(0);
   }
 
   /**
-   * Like {@link #applyMapEach}, but emits {@link SelectionPlaceholder}s directly as strings rather
+   * Like {@link #applyMapEach}, but emits {@link MatchPlaceholder}s directly as strings rather
    * than passing them to the {@code map_each} callback, which expects {@code File}s. Placeholders
    * appear only in analysis-time renderings (no input metadata), where the callback cannot run on
-   * a selection's members anyway.
+   * a match's members anyway.
    */
   private static void applyMapEachSkippingPlaceholders(
       StarlarkCallable mapFn,
@@ -1296,7 +1296,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
       throws CommandLineExpansionException, InterruptedException {
     boolean hasPlaceholder = false;
     for (int i = 0; i < originalValues.size(); i++) {
-      if (originalValues.get(i) instanceof SelectionPlaceholder) {
+      if (originalValues.get(i) instanceof MatchPlaceholder) {
         hasPlaceholder = true;
         break;
       }
@@ -1310,7 +1310,7 @@ public class StarlarkCustomCommandLine extends CommandLine {
     int start = 0;
     for (int i = 0; i <= originalValues.size(); i++) {
       boolean atPlaceholder =
-          i < originalValues.size() && originalValues.get(i) instanceof SelectionPlaceholder;
+          i < originalValues.size() && originalValues.get(i) instanceof MatchPlaceholder;
       if (i == originalValues.size() || atPlaceholder) {
         if (start < i) {
           applyMapEach(

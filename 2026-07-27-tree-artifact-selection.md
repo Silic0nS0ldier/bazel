@@ -17,12 +17,12 @@ This proposal adds two complementary primitives;
 
 - **Picks** — `ctx.actions.pick_file(directory, path)` and `ctx.actions.pick_directory(directory, path)` return a genuine `File` for a statically known path inside a directory artifact.
   The exec path is fully determined at analysis time; only existence is deferred to execution.
-- **Selections** — `ctx.actions.select_file`, `ctx.actions.select_directory`, and `ctx.actions.select_files` return opaque handles to dynamically resolved contents (glob patterns and/or a Starlark callback) of one or more directory artifacts.
+- **Matches** — `ctx.actions.match_file`, `ctx.actions.match_directory`, and `ctx.actions.match_files` return opaque handles to dynamically resolved contents (glob patterns and/or a Starlark callback) of one or more directory artifacts.
   The single forms resolve to exactly one file or directory; the plural form resolves to a set.
   Resolution happens at execution time, when the source trees' contents are known.
 
 Picks behave like ordinary derived files everywhere (`inputs`, `executable`, `Args`, providers, `DefaultInfo`, runfiles) and remain fully visible to `aquery`, `cquery`, and BEP.
-Selections are confined to surfaces that already tolerate execution-time resolution — action inputs and `Args`, plus (for a single selected file) `executable` and `tools` — which keeps every declarative surface well-defined by construction: `aquery` renders a selection as a structured placeholder, and `cquery`'s file-oriented outputs never encounter one.
+Matches are confined to surfaces that already tolerate execution-time resolution — action inputs and `Args`, plus (for a single selected file) `executable` and `tools` — which keeps every declarative surface well-defined by construction: `aquery` renders a match as a structured placeholder, and `cquery`'s file-oriented outputs never encounter one.
 
 Together with [Lazy Downloads](2026-07-03-lazy-downloads.md) this closes the loop on moving acquisition out of repository rules: download an archive lazily, extract it with an ordinary action, and consume individual files from the result — without a repository rule, without a spawn per file, and without materialising the parts of the tree the build never touches.
 
@@ -48,7 +48,7 @@ What exists today;
 - **Ecosystem workarounds.**
   [`bazel-lib`'s `directory_path`](https://github.com/bazel-contrib/bazel-lib/blob/222a5bf32e8b6a546059cfff85fe01af7164e596/lib/directory_path.bzl) standardises a `DirectoryPathInfo` provider — literally a (tree artifact, relative path) pair — because "otherwise there is no way to give a Bazel label for it".
   Since no engine support exists, every consumer that needs a real file (e.g. an `executable`) pays a copy spawn to extract it, and every consumer that accepts the provider must be taught about it individually.
-  [`bazel-skylib`'s `select_file`](https://github.com/bazelbuild/bazel-skylib/blob/5c071b5006bb9799981d04d74a28bdee2f000d4a/rules/select_file.bzl) predates it and operates on the analysis-time file list, so it cannot see inside a tree artifact at all.
+  [`bazel-skylib`'s `match_file`](https://github.com/bazelbuild/bazel-skylib/blob/5c071b5006bb9799981d04d74a28bdee2f000d4a/rules/match_file.bzl) predates it and operates on the analysis-time file list, so it cannot see inside a tree artifact at all.
 
 ## Why lazy downloads sharpen this
 
@@ -107,7 +107,7 @@ Because a pick is a `File` with an analysis-time exec path, it is usable everywh
 - In `Args`, via any of `add`, `add_all`, `add_joined`; the rendered path is known at analysis time.
 - In `DefaultInfo` (`files`, `executable`, runfiles), `OutputGroupInfo`, and arbitrary providers, including inside depsets.
 - As the `target_file` of `ctx.actions.symlink`.
-- As a source for further picks (`pick_directory` results) and for selections (see below).
+- As a source for further picks (`pick_directory` results) and for matches (see below).
 
 The one thing a pick cannot be is an action *output*: its content is owned by the tree's generating action.
 
@@ -128,23 +128,23 @@ An action consuming a pick depends on the tree's generating action, exactly as i
 Its *input set*, however, contains only the picked child: the Merkle tree references one child, the action cache key digests one child, sibling changes inside the tree do not invalidate the consumer, and under Build without the Bytes only that child is fetched for local execution (the prefetcher already supports partial tree staging, [#16333](https://github.com/bazelbuild/bazel/issues/16333)).
 A `pick_directory` stages its subtree.
 
-## Selections
+## Matches
 
 ```starlark
 # Exactly one file, path unknown until the archive is extracted.
-node = ctx.actions.select_file(
+node = ctx.actions.match_file(
     sources = [extracted],
     include = ["node-*/bin/node"],
 )
 
 # Exactly one directory.
-root = ctx.actions.select_directory(
+root = ctx.actions.match_directory(
     sources = [extracted],
     include = ["node-*"],
 )
 
 # A set of files.
-libs = ctx.actions.select_files(
+libs = ctx.actions.match_files(
     sources = [extracted_a, extracted_b],
     include = ["lib/**/*.so"],
     exclude = ["lib/**/debug/**"],
@@ -153,15 +153,15 @@ libs = ctx.actions.select_files(
 
 Three functions share one parameter shape and differ in cardinality contract and result type;
 
-- `ctx.actions.select_file(sources, include = ["**"], exclude = [], filter = None)` returns a `SelectedFile`: an opaque handle that resolves to **exactly one regular file**.
-- `ctx.actions.select_directory(sources, include = ["**"], exclude = [], filter = None)` returns a `SelectedFile` that resolves to **exactly one directory**.
-- `ctx.actions.select_files(sources, include = ["**"], exclude = [], filter = None, exclude_directories = True, allow_empty = False)` returns a `FileSelection`: an opaque handle that resolves to a **set**.
+- `ctx.actions.match_file(sources, include = ["**"], exclude = [], filter = None)` returns a `MatchedFile`: an opaque handle that resolves to **exactly one regular file**.
+- `ctx.actions.match_directory(sources, include = ["**"], exclude = [], filter = None)` returns a `MatchedFile` that resolves to **exactly one directory**.
+- `ctx.actions.match_files(sources, include = ["**"], exclude = [], filter = None, exclude_directories = True, allow_empty = False)` returns a `MatchedFiles`: an opaque handle that resolves to a **set**.
 
 All results are opaque, immutable values; the shared parameters;
 
-- `sources` (sequence, mandatory): directory artifacts (tree artifacts, `pick_directory` results), `SelectedFile`s from `select_directory`, and/or `FileSelection`s.
+- `sources` (sequence, mandatory): directory artifacts (tree artifacts, `pick_directory` results), `MatchedFile`s from `match_directory`, and/or `MatchedFiles`s.
   Order is significant (it defines result and disambiguation order) and duplicates are rejected.
-  Accepting prior results as sources makes refinement free: a broad selection can be narrowed, and a dynamically located root can be selected *within*, without re-stating anything.
+  Accepting prior results as sources makes refinement free: a broad match can be narrowed, and a dynamically located root can be selected *within*, without re-stating anything.
 - `include` / `exclude` (lists of strings): glob patterns with the semantics of package `glob()` (`*` within a path segment, `**` across segments), matched against paths relative to each source's root.
   The default `include = ["**"]` selects everything, which makes the pure-callback form natural.
 - `filter` (callable): a Starlark function receiving the list of pattern-matched candidates as `File` objects (sorted; `tree_relative_path` available on each) and returning the subset to keep, as a list.
@@ -171,57 +171,57 @@ All results are opaque, immutable values; the shared parameters;
   Cross-file logic is the reason `filter` receives the whole list rather than one file at a time — "keep the highest version", "take the first match per basename", and overlay-style resolution are all single-pass list functions.
   For the single forms, `filter` is the disambiguator: when patterns alone cannot guarantee one match, the callback narrows the field.
 
-And the `select_files`-only parameters;
+And the `match_files`-only parameters;
 
 - `exclude_directories` (bool): when `False`, patterns may also match directories, which join the result as directory handles; consuming one stages its subtree, like a `pick_directory` (as *action inputs*, directory members are deferred in v1 — see [Implementation findings](#implementation-findings-v1-prototype)).
   The default matches package `glob()`.
-- `allow_empty` (bool): when `False` (the default, matching `--incompatible_disallow_empty_glob`), a selection resolving to zero files fails the consuming action.
+- `allow_empty` (bool): when `False` (the default, matching `--incompatible_disallow_empty_glob`), a match resolving to zero files fails the consuming action.
 
 The single forms have no `allow_empty`: an optional single file is incoherent (there is nothing for a consumer to stage), so **exactly one** is the contract.
 Resolution to zero candidates or to more than one fails the consuming action, the latter listing the surviving matches so the fix (a tighter pattern or a `filter`) is evident.
-`select_file` resolving to a directory, or `select_directory` to a regular file, fails identically to the equivalent pick mismatch.
+`match_file` resolving to a directory, or `match_directory` to a regular file, fails identically to the equivalent pick mismatch.
 
 Two degenerate cases fall out rather than needing features;
 
-- `select_file([a, b, c], include = ["bin/tool"])` expresses "the `bin/tool` from whichever of these trees has one" — the multi-source single-file need that picks deliberately do not cover, because *which parent wins* is not an analysis-time fact (with more than one provider, the exactly-one contract forces an explicit `filter` rather than a silent precedence rule).
-- `select_file([ctx.actions.select_directory([tree], include = ["node-*"])], include = ["bin/node"])` is "pick inside a root I had to find first": static picks stay static, and dynamic roots compose through `sources`.
+- `match_file([a, b, c], include = ["bin/tool"])` expresses "the `bin/tool` from whichever of these trees has one" — the multi-source single-file need that picks deliberately do not cover, because *which parent wins* is not an analysis-time fact (with more than one provider, the exactly-one contract forces an explicit `filter` rather than a silent precedence rule).
+- `match_file([ctx.actions.match_directory([tree], include = ["node-*"])], include = ["bin/node"])` is "pick inside a root I had to find first": static picks stay static, and dynamic roots compose through `sources`.
 
 **Resolution.**
-A selection resolves when a consuming action needs its input set (or executable), after all source trees' generating actions have completed;
+A match resolves when a consuming action needs its input set (or executable), after all source trees' generating actions have completed;
 
-1. Each source contributes its captured children (for a selection source, its own resolved result; for a `select_directory` source, the children below the resolved directory).
+1. Each source contributes its captured children (for a match source, its own resolved result; for a `match_directory` source, the children below the resolved directory).
 2. `include`/`exclude` patterns filter by tree-relative path.
 3. `filter`, if present, maps the candidate list to the kept list.
 4. The result is ordered by source position, then lexicographically by tree-relative path; the cardinality contract (`exactly one`, or `allow_empty`) is enforced.
 
-Resolution is deterministic given the sources' metadata, so it is memoised: any number of actions consuming the same selection against the same tree contents resolve it once.
+Resolution is deterministic given the sources' metadata, so it is memoised: any number of actions consuming the same match against the same tree contents resolve it once.
 Two sources may both contain `lib/a.so`; a resolved *set* then simply contains both children (distinct artifacts, distinct exec paths).
 Duplicate *rendered* strings on a command line, or collisions under a downstream materialisation, are the consumer's concern, as they are for any other input list.
 
-**Where selections may appear.**
+**Where matches may appear.**
 Both types share the base surfaces;
 
 - **Action inputs** (`ctx.actions.run`, `run_shell`): in the `inputs` sequence alongside `File`s and depsets.
   The action's staged inputs, Merkle tree, prefetch set, and action cache key are computed from the *resolved* files — exactly as if they had been declared directly.
   A sibling change that does not alter the resolved result (paths and digests) does not invalidate the consumer.
-- **`Args`**: a `FileSelection` via `add_all` / `add_joined` expands to the resolved files at execution time, in resolution order, with `map_each`, `format_each`, `before_each`, `uniquify`, and friends applying to the expansion; a `SelectedFile` may additionally be passed to `add` (and to `map_each`-style formatting) as a single value, rendering its resolved exec path.
-  Passing a selection to `Args` does not by itself add files as inputs (matching the existing behaviour of `Args` versus `inputs`); a selection is typically passed to both.
-- **Custom provider fields**, as a plain value or inside lists/dicts, so rules can forward a selection to consumers (e.g. an extraction rule exposing "my headers", or a toolchain rule exposing "the compiler") without materialising anything.
-  Selections may not be placed in depsets; see [Open questions](#open-questions).
+- **`Args`**: a `MatchedFiles` via `add_all` / `add_joined` expands to the resolved files at execution time, in resolution order, with `map_each`, `format_each`, `before_each`, `uniquify`, and friends applying to the expansion; a `MatchedFile` may additionally be passed to `add` (and to `map_each`-style formatting) as a single value, rendering its resolved exec path.
+  Passing a match to `Args` does not by itself add files as inputs (matching the existing behaviour of `Args` versus `inputs`); a match is typically passed to both.
+- **Custom provider fields**, as a plain value or inside lists/dicts, so rules can forward a match to consumers (e.g. an extraction rule exposing "my headers", or a toolchain rule exposing "the compiler") without materialising anything.
+  Matches may not be placed in depsets; see [Open questions](#open-questions).
 
-A `SelectedFile` from `select_file` is additionally accepted where a single runnable file is;
+A `MatchedFile` from `match_file` is additionally accepted where a single runnable file is;
 
 - As the **`executable`** of `ctx.actions.run`.
   Spawn construction already happens at execution time; the resolved file becomes argv[0] and joins the staged inputs.
   *(The executable-bit precheck originally specified here is dropped — see [Implementation findings](#implementation-findings-v1-prototype); a non-executable file fails at spawn time.)*
-  Since a bare `File` executable carries no runfiles today, a `SelectedFile` executable behaves identically: no runfiles.
+  Since a bare `File` executable carries no runfiles today, a `MatchedFile` executable behaves identically: no runfiles.
 - In **`tools`**, staging the resolved file (again with no implied runfiles).
 
-A `SelectedFile` from `select_directory` is additionally accepted as a **source** to the `select_*` functions, enabling selection below a dynamically located root.
+A `MatchedFile` from `match_directory` is additionally accepted as a **source** to the `match_*` functions, enabling matching below a dynamically located root.
 It is deliberately *not* accepted by `pick_file`/`pick_directory`: picks promise analysis-time exec paths, and a pick below a dynamic root cannot keep that promise.
-"Pick an exact path under a dynamic root" is spelled `select_file(sources = [root], include = ["<the path>"])`, which is the same operation with the honest (deferred) type.
+"Pick an exact path under a dynamic root" is spelled `match_file(sources = [root], include = ["<the path>"])`, which is the same operation with the honest (deferred) type.
 
-Everywhere else — `outputs`, `DefaultInfo`, `OutputGroupInfo`, runfiles, `ctx.actions.symlink` — any selection is a type error at analysis time.
+Everywhere else — `outputs`, `DefaultInfo`, `OutputGroupInfo`, runfiles, `ctx.actions.symlink` — any match is a type error at analysis time.
 These exclusions are what make the introspection story below hold by construction rather than by caveat.
 When a genuine `File` is needed from a dynamic result, materialise it (see [Interaction with related proposals](#interaction-with-related-proposals)).
 
@@ -231,51 +231,51 @@ Neither primitive creates an action, spawns anything, or moves bytes.
 Both are resolved views over content that already has a generating action;
 
 - **Dependency edges** are those of the sources' generating actions.
-  Consuming a pick or selection orders the consumer after the tree's producer, never differently from consuming the tree itself.
+  Consuming a pick or match orders the consumer after the tree's producer, never differently from consuming the tree itself.
 - **Input pruning** is the material change.
   Today `tree → consumer` means the whole tree is staged, uploaded into Merkle trees, digested into cache keys, and (under BwoB, for local execution) downloaded.
-  With picks and selections the consumer's footprint is the resolved subset.
+  With picks and matches the consumer's footprint is the resolved subset.
   For the SDK-archive case this converts costs proportional to the archive into costs proportional to use.
 - **Action cache keys** digest the resolved set (path plus content digest per member), which is precisely the treatment declared inputs get today.
   A `filter` body change invalidates consumers only if it changes the resolved set — the same observable-effect keying that `map_each` command lines already have.
-- **Errors** (missing pick, empty or ambiguous selection, kind mismatch, `filter` returning foreign files) fail the consuming action, attributed with the pick/selection spec, the source trees, and their generating targets.
+- **Errors** (missing pick, empty or ambiguous match, kind mismatch, `filter` returning foreign files) fail the consuming action, attributed with the pick/match spec, the source trees, and their generating targets.
 - **Concurrency**: resolution is pure metadata work on the execution thread; the callback runs in a restricted Starlark environment (no `ctx`, no I/O), like `map_each` and `map_directory` implementations.
 
 ## Introspection
 
-The guiding rule: **picks are ordinary files everywhere; selections appear only where a placeholder is honest.**
+The guiding rule: **picks are ordinary files everywhere; matches appear only where a placeholder is honest.**
 
 **`bazel aquery`.**
 A pick input or output reference prints as its exec path, indistinguishable from any other file, because nothing about it is unknown.
-A selection — in an action's inputs, as its executable, or in a command line — prints as a structured placeholder carrying everything Bazel knows before execution;
+A match — in an action's inputs, as its executable, or in a command line — prints as a structured placeholder carrying everything Bazel knows before execution;
 
 ```
 $ bazel aquery '//app:compile_native'
 action 'Compiling app'
   Mnemonic: SdkCompile
-  Executable: select_file(sources = [bazel-out/downloads-extract/bin/external/sdk+/dist],
+  Executable: match_file(sources = [bazel-out/downloads-extract/bin/external/sdk+/dist],
                           include = ["sdk-*/bin/cc"])
   ...
   Inputs: [bazel-out/k8-fastbuild/bin/app/main.c,
-           select_files(sources = [bazel-out/downloads-extract/bin/external/sdk+/sysroot],
+           match_files(sources = [bazel-out/downloads-extract/bin/external/sdk+/sysroot],
                         include = ["lib/**/*.so"],
                         exclude = ["lib/**/debug/**"],
                         filter = @rules_sdk//sdk:defs.bzl%_newest_only)]
 ```
 
-Command lines built from selection-backed `Args` render the same placeholder tokens in place of the expansion (including argv[0] when the executable is a `SelectedFile`).
+Command lines built from match-backed `Args` render the same placeholder tokens in place of the expansion (including argv[0] when the executable is a `MatchedFile`).
 The proto/textproto/jsonproto formats gain a `file_selections` table (id, cardinality, source artifact ids, include, exclude, filter function label, flags) referenced from `inputs`, from `executable`, and from command-line fragments, mirroring how tree artifacts are represented pre-expansion today.
 `--skyframe_state` and post-execution aquery may additionally report resolved sets when available, but the placeholder form is the contract.
 
 **`bazel cquery`.**
-Handled by construction rather than by rendering: every cquery surface that enumerates files (`--output=files`, label outputs, `--output_groups`) only ever traverses `File`s, and selections cannot reach those surfaces.
+Handled by construction rather than by rendering: every cquery surface that enumerates files (`--output=files`, label outputs, `--output_groups`) only ever traverses `File`s, and matches cannot reach those surfaces.
 Picks appear with concrete exec paths.
-The one place a selection can surface is `--output=starlark` touching a custom provider; `repr()` of a `SelectedFile` or `FileSelection` is a stable single-line form of the same placeholder aquery uses.
+The one place a match can surface is `--output=starlark` touching a custom provider; `repr()` of a `MatchedFile` or `MatchedFiles` is a stable single-line form of the same placeholder aquery uses.
 No cquery output format needs to learn anything new.
 
 **BEP.**
 Picks can appear in `NamedSetOfFiles` (they carry concrete paths, and materialise on request like any BwoB output).
-Selections cannot appear, because they cannot enter `DefaultInfo` or output groups.
+Matches cannot appear, because they cannot enter `DefaultInfo` or output groups.
 
 ## Interaction with related proposals
 
@@ -286,10 +286,10 @@ No repository rule, and no step in the chain materialises more than the build ac
 
 **[Copy Action](https://github.com/bazelbuild/proposals/pull/396).**
 Complementary in both directions.
-Selections eliminate the copies that exist only to *reference* tree content (the `DirectoryPathInfo` + copy-spawn pattern).
-Conversely, the copy action is the natural materialisation escape hatch: `ctx.actions.copy(input = <FileSelection>, output = <declared directory>)` turns a dynamic selection into a genuine tree artifact, and `ctx.actions.copy(input = <SelectedFile>, output = <declared file>)` gives a dynamically located file a static exec path and a genuine `File` — for when the result is required in a `DefaultInfo`, a runfiles entry, or an API boundary that demands `File`s.
+Matches eliminate the copies that exist only to *reference* tree content (the `DirectoryPathInfo` + copy-spawn pattern).
+Conversely, the copy action is the natural materialisation escape hatch: `ctx.actions.copy(input = <MatchedFiles>, output = <declared directory>)` turns a dynamic match into a genuine tree artifact, and `ctx.actions.copy(input = <MatchedFile>, output = <declared file>)` gives a dynamically located file a static exec path and a genuine `File` — for when the result is required in a `DefaultInfo`, a runfiles entry, or an API boundary that demands `File`s.
 One native action either way, rather than a spawn per file.
-This proposal reserves selection-typed `input` support as a copy-action extension rather than specifying it here.
+This proposal reserves match-typed `input` support as a copy-action extension rather than specifying it here.
 
 **[Artifact Alias](https://github.com/bazelbuild/proposals/blob/7b6fc2d20723489693c1a28f751c3f3ba33168f2/designs/2026-07-20-artifact-alias.md).**
 Also complementary: `ctx.actions.alias(output = out, actual = <pick>)` would give tree-child content a second, analysis-time exec path with no bytes moved — useful when the child must appear at a canonical location.
@@ -298,7 +298,7 @@ This proposal takes no position between copy and alias; it supplies both with a 
 
 ## Example: npm package, end to end
 
-Continuing the `npm_import` sketch from [Lazy Downloads](2026-07-03-lazy-downloads.md#example-npm_import): the tarball download and extraction are unchanged; picks and selections replace what would otherwise be `directory_path` targets and copy spawns.
+Continuing the `npm_import` sketch from [Lazy Downloads](2026-07-03-lazy-downloads.md#example-npm_import): the tarball download and extraction are unchanged; picks and matches replace what would otherwise be `directory_path` targets and copy spawns.
 
 ```starlark
 def _npm_import_impl(ctx):
@@ -316,7 +316,7 @@ def _npm_import_impl(ctx):
 
     # Type declarations for downstream type-checkers: a dynamic subset,
     # forwarded without materialising anything.
-    types = ctx.actions.select_files(
+    types = ctx.actions.match_files(
         sources = [extracted],
         include = ["package/**/*.d.ts", "package/**/*.d.mts"],
         allow_empty = True,
@@ -350,17 +350,17 @@ Node.js archives extract to a versioned root (`node-v22.1.0-linux-x64/...`), whi
 ```starlark
 def _node_toolchain_impl(ctx):
     dist = ctx.attr.dist[DefaultInfo].files.to_list()[0]  # extracted archive (tree artifact)
-    root = ctx.actions.select_directory(sources = [dist], include = ["node-*"])
+    root = ctx.actions.match_directory(sources = [dist], include = ["node-*"])
     return [platform_common.ToolchainInfo(
-        node = ctx.actions.select_file(sources = [root], include = ["bin/node"]),
-        headers = ctx.actions.select_directory(sources = [root], include = ["include/node"]),
+        node = ctx.actions.match_file(sources = [root], include = ["bin/node"]),
+        headers = ctx.actions.match_directory(sources = [root], include = ["include/node"]),
     )]
 
 def _run_js_impl(ctx):
     toolchain = ctx.toolchains["//node:toolchain_type"]
     out = ctx.actions.declare_file(ctx.label.name + ".out")
     ctx.actions.run(
-        executable = toolchain.node,  # SelectedFile as executable
+        executable = toolchain.node,  # MatchedFile as executable
         arguments = [ctx.file.entry.path, out.path],
         inputs = [ctx.file.entry],
         outputs = [out],
@@ -376,23 +376,23 @@ No repository rule ran, and the archive never touched the local machine.
 This proposal does not seek to solve;
 
 - **Materialisation.**
-  Turning a selection into a real tree artifact, or re-homing a pick to a new exec path, belongs to the copy action and artifact alias proposals respectively; see [Interaction with related proposals](#interaction-with-related-proposals).
+  Turning a match into a real tree artifact, or re-homing a pick to a new exec path, belongs to the copy action and artifact alias proposals respectively; see [Interaction with related proposals](#interaction-with-related-proposals).
 - **Source directories.**
-  Picks and selections operate on directory *artifacts*, whose contents Bazel captures and digests.
+  Picks and matches operate on directory *artifacts*, whose contents Bazel captures and digests.
   Source directories lack that metadata contract; if they ever gain it, extending these APIs is natural but separate.
 - **Dynamic outputs.**
   Nothing here lets an action's *output* set be dynamic beyond what tree artifacts and `map_directory` already provide.
-  Selections describe existing content; they do not declare new content.
-- **Selections in runfiles, output groups, and depsets.**
+  Matches describe existing content; they do not declare new content.
+- **Matches in runfiles, output groups, and depsets.**
   Deliberately excluded from the initial surface; see [Open questions](#open-questions).
 - **Fileset revival.**
-  Selections are per-consumer resolved input views, not a new artifact kind in the graph; the restriction list exists precisely to avoid re-growing Fileset's special-case surface.
+  Matches are per-consumer resolved input views, not a new artifact kind in the graph; the restriction list exists precisely to avoid re-growing Fileset's special-case surface.
 
 # Backward-compatibility
 
 All changes are additive and opt-in;
 
-- Five new functions — `ctx.actions.pick_file`, `ctx.actions.pick_directory`, `ctx.actions.select_file`, `ctx.actions.select_directory`, `ctx.actions.select_files` — and two new types, `SelectedFile` and `FileSelection`.
+- Five new functions — `ctx.actions.pick_file`, `ctx.actions.pick_directory`, `ctx.actions.match_file`, `ctx.actions.match_directory`, `ctx.actions.match_files` — and two new types, `MatchedFile` and `MatchedFiles`.
 - New optional input, executable, and tool kinds on existing action-creation and `Args` APIs.
 - A new aquery proto table and placeholder rendering.
 
@@ -404,14 +404,14 @@ The experimental phase should exercise both under local, sandboxed, and remote s
 
 # Implementation findings (v1 prototype)
 
-A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and *file* selections (`select_file`, and `select_files`/`select_file` over regular files) as action inputs, resolved during input discovery.
+A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and *file* matches (`match_file`, and `match_files`/`match_file` over regular files) as action inputs, resolved during input discovery.
 Building it surfaced four constraints that revise claims above and scope the first release.
 
 - **Subtree-input routing had to be built; `pick_directory` now works, dynamic directory members remain deferred.**
-  A directory pick or a directory-typed selection member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.
+  A directory pick or a directory-typed match member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.
   The gap turned out to be Skyframe-only — `ActionInputMap` and staging already understood subtree inputs (from `map_directory`) — and was closed by teaching `ArtifactFunction` to serve a subtree as a *derived sub-view*: the subtree's node depends on the root tree's own artifact node and filters/re-parents the children beneath the picked path.
   **`pick_directory` therefore works as specified** (consuming one stages exactly its subtree), including picks below picks and template-generated roots; a pick of a path with no files under it fails the consumer with the missing-path error (tree artifacts do not record empty directories, so "missing" and "empty" are indistinguishable — the error says so).
-  Still deferred: **directory members of a *selection* as action inputs** — those surface as discovered inputs at execution time, a different admission path than a declared input (`select_directory` results remain usable as *sources* and everywhere else).
+  Still deferred: **directory members of a *match* as action inputs** — those surface as discovered inputs at execution time, a different admission path than a declared input (`match_directory` results remain usable as *sources* and everywhere else).
   The materialisation escape hatch (copy action) covers that remaining case.
 
 - **A pick can co-exist with its origin, but that required lifting a tree-artifact nesting ban in `ActionInputMap`.**
@@ -428,25 +428,28 @@ Building it surfaced four constraints that revise claims above and scope the fir
   The prototype therefore declares source trees as ordinary inputs so discovery can read their metadata, then **prunes them in `discoverInputs`**, leaving only the resolved children in the staged input set and the action cache key.
   The observable end state (footprint proportional to use) matches the proposal; the mechanism is prune-after-declare rather than scheduling-dependency.
 
-- **Reusing a resolved selection inside `Args` (or as an `executable`) needed a provider-wrapping mechanism, not the sketched re-resolution.**
-  Command-line expansion receives an `InputMetadataProvider` but no handle to the consuming action, and once the source trees are pruned their metadata is absent from that provider — so a selection appearing in `Args` can neither re-resolve (no tree metadata) nor read the discovery result (no action handle) directly.
-  The prototype resolves this without new expansion-API plumbing: the consuming action captures per-selection resolution results during input discovery, and at spawn construction hands expansion an `InputMetadataProvider` *wrapper* that additionally serves those results (expansion discovers the capability via an `instanceof` check).
+- **Reusing a resolved match inside `Args` (or as an `executable`) needed a provider-wrapping mechanism, not the sketched re-resolution.**
+  Command-line expansion receives an `InputMetadataProvider` but no handle to the consuming action, and once the source trees are pruned their metadata is absent from that provider — so a match appearing in `Args` can neither re-resolve (no tree metadata) nor read the discovery result (no action handle) directly.
+  The prototype resolves this without new expansion-API plumbing: the consuming action captures per-match resolution results during input discovery, and at spawn construction hands expansion an `InputMetadataProvider` *wrapper* that additionally serves those results (expansion discovers the capability via an `instanceof` check).
   With that in place `Args` (`add`, `add_all`, `add_joined`, including `map_each` over resolved files), `executable`, and `tools` all work as specified;
-  a selection referenced in `Args` without also being an input fails expansion with an actionable error (matching the `Args`-versus-`inputs` contract above), while `executable`/`tools` selections are registered as input selections automatically.
+  a match referenced in `Args` without also being an input fails expansion with an actionable error (matching the `Args`-versus-`inputs` contract above), while `executable`/`tools` matches are registered as input matches automatically.
   Two consequences diverge slightly from the text above;
-  - action keys digest the selection's *spec identity* (sources, patterns, flags, filter name + module digest) in place of the expansion, so keys are computable before metadata exists — invalidation of the resolved set rides on the discovered-inputs cache path instead;
-  - the executable-bit check on a `SelectedFile` executable is dropped: `FileArtifactValue` does not track an executable bit, and Bazel stages action outputs (including tree children) executable, so the check has nothing sound to read. A non-executable selected file fails at spawn time with the OS error.
-  Selections in *depsets* passed to `add_all` are rejected at analysis time: depset fingerprinting is memoised per nested set, which cannot accommodate per-action resolution.
+  - action keys digest the match's *spec identity* (sources, patterns, flags, filter name + module digest) in place of the expansion, so keys are computable before metadata exists — invalidation of the resolved set rides on the discovered-inputs cache path instead;
+  - the executable-bit check on a `MatchedFile` executable is dropped: `FileArtifactValue` does not track an executable bit, and Bazel stages action outputs (including tree children) executable, so the check has nothing sound to read. A non-executable selected file fails at spawn time with the OS error.
+  Matches in *depsets* passed to `add_all` are rejected at analysis time: depset fingerprinting is memoised per nested set, which cannot accommodate per-action resolution.
 
 # Open questions
 
-- **Naming.**
-  The `select_*` family risks association with configurable-attribute `select()`; `match_*` and `glob_*` are the fallback candidates.
-  `pick_file`/`pick_directory` deliberately echo `declare_file`/`declare_directory`, and the pick/select verb split is itself the static/dynamic signal: same word, same tier.
-- **Selections in depsets.**
-  Forwarding via plain provider fields covers the known use cases, but transitive aggregation (a dependency chain each contributing selections) would want depset participation.
+- **Naming (resolved).**
+  The dynamic family was originally `select_*`, which had two problems: `select` and `pick` are synonyms, so the names gave no signal about the tiers sitting on opposite sides of the analysis/execution boundary; and `select` collides with configurable-attribute `select()`, an unrelated concept that appears constantly in the same `.bzl` files.
+  It is now `match_*` (`match_file`/`match_directory`/`match_files`), returning `MatchedFile`/`MatchedFiles` — a verb that names the actual interface (glob patterns plus a `filter` predicate) and is semantically distant from `pick` (exact, static).
+  `pick_file`/`pick_directory` still deliberately echo `declare_file`/`declare_directory`.
+  `glob_*` and `find_*` were the other candidates; `glob_*` risked implying eager loading-time behaviour like BUILD-file `glob()`, and `match_*` reads most naturally across the singular (`match_file`) and set (`match_files`) forms.
+  The umbrella feature name and flag stay "tree artifact selection" — "selection" as the *area* (picking or matching parts of a tree) is fine; the problem was only the dynamic-tier *verb*.
+- **Matches in depsets.**
+  Forwarding via plain provider fields covers the known use cases, but transitive aggregation (a dependency chain each contributing matches) would want depset participation.
   Admitting an opaque non-`File` into depsets that eventually feed `inputs` widens the blast radius considerably; deferred until demanded by evidence.
-- **Selections in runfiles.**
+- **Matches in runfiles.**
   Runfiles trees are built late enough that filtered runfiles are implementable, and "runtime data subset of an extracted archive" is a plausible ask.
   Deferred; the copy-action materialisation route covers it meanwhile.
 - **Eager validation option.**
@@ -475,13 +478,13 @@ Picks are exactly this pair *with* engine support; the provider falls out as unn
 Route all tree-content access through action templates.
 Rejected: it conflates referencing with transforming.
 Obtaining one file costs an action template plus a copy spawn per file, outputs must live inside the template's declared output directories (so the result is another tree, recursing the problem for single-file needs), and template outputs cannot be an `executable` or feed providers as individual files.
-`map_directory` remains the right tool for its actual job — per-child action generation — and selections deliberately reuse its callback conventions.
+`map_directory` remains the right tool for its actual job — per-child action generation — and matches deliberately reuse its callback conventions.
 
-## Selection as an action producing a filtered tree
+## Matching as an action producing a filtered tree
 
-Make `select_files` register a native action that links matched files into a fresh tree artifact.
-Rejected as the *primitive*: the result is still opaque (no file handles, so no `executable`, no single-file `Args` placement), every consumer pays materialisation whether needed or not, and an action node per selection bloats the graph.
-It also already exists as composition: a selection piped through the copy action yields precisely this, for the cases that want it.
+Make `match_files` register a native action that links matched files into a fresh tree artifact.
+Rejected as the *primitive*: the result is still opaque (no file handles, so no `executable`, no single-file `Args` placement), every consumer pays materialisation whether needed or not, and an action node per match bloats the graph.
+It also already exists as composition: a match piped through the copy action yields precisely this, for the cases that want it.
 
 ## Requiring rulesets to declare archive contents
 

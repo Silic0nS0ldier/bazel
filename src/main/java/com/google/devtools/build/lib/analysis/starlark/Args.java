@@ -23,16 +23,16 @@ import com.google.devtools.build.lib.actions.CommandLines.CommandLineAndParamFil
 import com.google.devtools.build.lib.actions.ParamFileInfo;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.actions.SingleStringArgFormatter;
-import com.google.devtools.build.lib.analysis.actions.FileSelection;
-import com.google.devtools.build.lib.analysis.actions.SelectedFile;
+import com.google.devtools.build.lib.analysis.actions.MatchedFiles;
+import com.google.devtools.build.lib.analysis.actions.MatchedFile;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryMapping;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.starlarkbuildapi.CommandLineArgsApi;
-import com.google.devtools.build.lib.starlarkbuildapi.FileSelectionApi;
-import com.google.devtools.build.lib.starlarkbuildapi.SelectedFileApi;
+import com.google.devtools.build.lib.starlarkbuildapi.MatchedFilesApi;
+import com.google.devtools.build.lib.starlarkbuildapi.MatchedFileApi;
 import com.google.devtools.build.lib.supplier.InterruptibleSupplier;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.ArrayList;
@@ -457,17 +457,17 @@ public abstract class Args implements CommandLineArgsApi {
       validateFormatString("format_joined", formatJoined);
       StarlarkCustomCommandLine.VectorArg.Builder vectorArg;
       if (value instanceof Depset starlarkNestedSet) {
-        // Selections resolve per consuming action during command line expansion, but depset
+        // Matches resolve per consuming action during command line expansion, but depset
         // fingerprinting memoises per nested set — the identity-based digest would be shared
         // across actions with different resolutions. Lists are cheap to fingerprint per element,
-        // so selections are restricted to them. The element class is the @StarlarkBuiltin-carrying
+        // so matches are restricted to them. The element class is the @StarlarkBuiltin-carrying
         // API interface, hence the interface-side check.
         Class<?> elementClass = starlarkNestedSet.getElementClass();
         if (elementClass != null
-            && (SelectedFileApi.class.isAssignableFrom(elementClass)
-                || FileSelectionApi.class.isAssignableFrom(elementClass))) {
+            && (MatchedFileApi.class.isAssignableFrom(elementClass)
+                || MatchedFilesApi.class.isAssignableFrom(elementClass))) {
           throw Starlark.errorf(
-              "depsets of file selections cannot be added to Args; pass selections in a list");
+              "depsets of file matches cannot be added to Args; pass matches in a list");
         }
         if (mapEach == null && Label.class.equals(starlarkNestedSet.getElementClass())) {
           // We don't want to eagerly check whether all labels reference targets in the main repo,
@@ -493,9 +493,9 @@ public abstract class Args implements CommandLineArgsApi {
           if (expandDirectories && isDirectory(object)) {
             directoryArtifacts.add((Artifact) object);
           }
-          if (object instanceof SelectedFile selectedFile && selectedFile.isDirectory()) {
+          if (object instanceof MatchedFile matchedFile && matchedFile.isDirectory()) {
             throw Starlark.errorf(
-                "directory selections are not yet supported on command lines; select a file, or"
+                "directory matches are not yet supported on command lines; match a single file with match_file, or"
                     + " materialise the directory with a copy action");
           }
           // Labels referencing targets in the main repo are stringified as //pkg:name and thus
@@ -552,7 +552,7 @@ public abstract class Args implements CommandLineArgsApi {
         value = s.intern();
       }
       validateNoDirectory(value);
-      validateScalarSelection(value);
+      validateScalarMatch(value);
       validateFormatString("format", format);
       if (format == null) {
         commandLine.add(value);
@@ -570,15 +570,15 @@ public abstract class Args implements CommandLineArgsApi {
       }
     }
 
-    private static void validateScalarSelection(Object value) throws EvalException {
-      if (value instanceof FileSelection) {
+    private static void validateScalarMatch(Object value) throws EvalException {
+      if (value instanceof MatchedFiles) {
         throw Starlark.errorf(
-            "Cannot add a selection from select_files to Args#add since it may resolve to"
+            "Cannot add a match from match_files to Args#add since it may resolve to"
                 + " multiple values. Use Args#add_all or Args#add_joined.");
       }
-      if (value instanceof SelectedFile selectedFile && selectedFile.isDirectory()) {
+      if (value instanceof MatchedFile matchedFile && matchedFile.isDirectory()) {
         throw Starlark.errorf(
-            "directory selections are not yet supported on command lines; select a file, or"
+            "directory matches are not yet supported on command lines; match a single file with match_file, or"
                 + " materialise the directory with a copy action");
       }
     }

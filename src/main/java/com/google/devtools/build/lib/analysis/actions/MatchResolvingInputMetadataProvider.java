@@ -30,30 +30,30 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 /**
- * An {@link InputMetadataProvider} that additionally serves selection resolution results captured
+ * An {@link InputMetadataProvider} that additionally serves match resolution results captured
  * during input discovery.
  *
- * <p>All metadata queries delegate to the wrapped provider; only {@link FileSelectionResolver}
+ * <p>All metadata queries delegate to the wrapped provider; only {@link FileMatchResolver}
  * lookups are answered from the stored map. Consuming actions wrap their execution context's
- * provider with this before spawn construction so command-line expansion can render selections.
+ * provider with this before spawn construction so command-line expansion can render matches.
  */
-public final class SelectionResolvingInputMetadataProvider
-    implements InputMetadataProvider, FileSelectionResolver {
+public final class MatchResolvingInputMetadataProvider
+    implements InputMetadataProvider, FileMatchResolver {
 
   private final InputMetadataProvider delegate;
-  private final ImmutableMap<FileSelectionSpec, ImmutableList<Artifact>> resolvedSelections;
+  private final ImmutableMap<FileMatchSpec, ImmutableList<Artifact>> resolvedMatches;
 
-  public SelectionResolvingInputMetadataProvider(
+  public MatchResolvingInputMetadataProvider(
       InputMetadataProvider delegate,
-      ImmutableMap<FileSelectionSpec, ImmutableList<Artifact>> resolvedSelections) {
+      ImmutableMap<FileMatchSpec, ImmutableList<Artifact>> resolvedMatches) {
     this.delegate = delegate;
-    this.resolvedSelections = resolvedSelections;
+    this.resolvedMatches = resolvedMatches;
   }
 
   @Override
   @Nullable
-  public ImmutableList<Artifact> getResolvedSelection(FileSelectionSpec spec) {
-    return resolvedSelections.get(spec);
+  public ImmutableList<Artifact> getResolvedMatch(FileMatchSpec spec) {
+    return resolvedMatches.get(spec);
   }
 
   @Override

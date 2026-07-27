@@ -1159,7 +1159,7 @@ message StarlarkAction {
     STARLARK_ACTION_UNKNOWN = 0 [(metadata) = { exit_code: 37 }];
     UNUSED_INPUT_LIST_READ_FAILURE = 1 [(metadata) = { exit_code: 36 }];
     UNUSED_INPUT_LIST_FILE_NOT_FOUND = 2 [(metadata) = { exit_code: 1 }];
-    FILE_SELECTION_RESOLUTION_FAILURE = 3 [(metadata) = { exit_code: 1 }];
+    FILE_MATCH_RESOLUTION_FAILURE = 3 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;

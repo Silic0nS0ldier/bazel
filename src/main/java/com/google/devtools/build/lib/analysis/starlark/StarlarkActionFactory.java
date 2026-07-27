@@ -45,11 +45,11 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.ShToolchain;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.BuildInfoFileWriteAction;
-import com.google.devtools.build.lib.analysis.actions.FileSelection;
-import com.google.devtools.build.lib.analysis.actions.FileSelectionSpec;
-import com.google.devtools.build.lib.analysis.actions.FileSelectionSpec.Cardinality;
+import com.google.devtools.build.lib.analysis.actions.MatchedFiles;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec.Cardinality;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
-import com.google.devtools.build.lib.analysis.actions.SelectedFile;
+import com.google.devtools.build.lib.analysis.actions.MatchedFile;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.PathMappers;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
@@ -246,12 +246,12 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
     // v1 requires the tree's generating action to be known. This holds for trees obtained from
     // dependencies, but not for a tree the current target itself just declared (owners are assigned
     // after rule implementation returns). Referencing a path inside a same-target tree is expressed
-    // with select_file, whose resolution is deferred to execution by design.
+    // with match_file, whose resolution is deferred to execution by design.
     if (!root.hasGeneratingActionKey()) {
       throw Starlark.errorf(
           "%s: 'directory' is declared by the current target, whose generating actions are not yet "
               + "known, so it cannot be picked from. To reference a path inside a directory the "
-              + "same target declares, use select_file(sources = [directory], include = [\"%s\"]).",
+              + "same target declares, use match_file(sources = [directory], include = [\"%s\"]).",
           what, treeRelPath.getPathString());
     }
 
@@ -288,12 +288,12 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
   }
 
   @Override
-  public SelectedFile selectFile(
+  public MatchedFile matchFile(
       Sequence<?> sources, Sequence<?> include, Sequence<?> exclude, Object filter)
       throws EvalException {
-    return new SelectedFile(
-        buildSelectionSpec(
-            "actions.select_file",
+    return new MatchedFile(
+        buildMatchSpec(
+            "actions.match_file",
             sources,
             include,
             exclude,
@@ -304,12 +304,12 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
   }
 
   @Override
-  public SelectedFile selectDirectory(
+  public MatchedFile matchDirectory(
       Sequence<?> sources, Sequence<?> include, Sequence<?> exclude, Object filter)
       throws EvalException {
-    return new SelectedFile(
-        buildSelectionSpec(
-            "actions.select_directory",
+    return new MatchedFile(
+        buildMatchSpec(
+            "actions.match_directory",
             sources,
             include,
             exclude,
@@ -320,7 +320,7 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
   }
 
   @Override
-  public FileSelection selectFiles(
+  public MatchedFiles matchFiles(
       Sequence<?> sources,
       Sequence<?> include,
       Sequence<?> exclude,
@@ -328,9 +328,9 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       boolean excludeDirectories,
       boolean allowEmpty)
       throws EvalException {
-    return new FileSelection(
-        buildSelectionSpec(
-            "actions.select_files",
+    return new MatchedFiles(
+        buildMatchSpec(
+            "actions.match_files",
             sources,
             include,
             exclude,
@@ -340,7 +340,7 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
             allowEmpty));
   }
 
-  private FileSelectionSpec buildSelectionSpec(
+  private FileMatchSpec buildMatchSpec(
       String what,
       Sequence<?> sources,
       Sequence<?> include,
@@ -364,7 +364,7 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
     ImmutableList.Builder<Object> normalizedSources = ImmutableList.builder();
     HashSet<Object> seen = new HashSet<>();
     for (Object source : sources) {
-      Object normalized = validateSelectionSource(source, what);
+      Object normalized = validateMatchSource(source, what);
       if (!seen.add(normalized)) {
         throw Starlark.errorf(
             "%s: duplicate source %s in 'sources'", what, Starlark.repr(source, getSemantics()));
@@ -385,7 +385,7 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       filterFn = fn;
     }
 
-    return new FileSelectionSpec(
+    return new FileMatchSpec(
         normalizedSources.build(),
         includePatterns,
         excludePatterns,
@@ -397,19 +397,19 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
   }
 
   /** Validates a single {@code sources} element and returns the value to store in the spec. */
-  private static Object validateSelectionSource(Object source, String what) throws EvalException {
+  private static Object validateMatchSource(Object source, String what) throws EvalException {
     switch (source) {
-      case SelectedFile selectedFile -> {
-        if (!selectedFile.isDirectory()) {
+      case MatchedFile matchedFile -> {
+        if (!matchedFile.isDirectory()) {
           throw Starlark.errorf(
-              "%s: a select_file result may not be a source; only select_directory results, "
-                  + "FileSelections, and directory artifacts are accepted",
+              "%s: a match_file result may not be a source; only match_directory results, "
+                  + "MatchedFiless, and directory artifacts are accepted",
               what);
         }
-        return selectedFile;
+        return matchedFile;
       }
-      case FileSelection fileSelection -> {
-        return fileSelection;
+      case MatchedFiles fileMatch -> {
+        return fileMatch;
       }
       case Artifact artifact -> {
         if (!artifact.isTreeArtifact()) {
@@ -422,7 +422,7 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       }
       default ->
           throw Starlark.errorf(
-              "%s: 'sources' element must be a directory artifact, SelectedFile, or FileSelection, "
+              "%s: 'sources' element must be a directory artifact, MatchedFile, or MatchedFiles, "
                   + "got %s",
               what, Starlark.type(source));
     }
@@ -701,23 +701,23 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
         checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
       }
       builder.setExecutable((FilesToRunProvider) executableUnchecked);
-    } else if (executableUnchecked instanceof SelectedFile selectedFile) {
+    } else if (executableUnchecked instanceof MatchedFile matchedFile) {
       if (!getRuleContext().getConfiguration().allowTreeArtifactSelection()) {
         throw Starlark.errorf(
-            "file selections require --experimental_tree_artifact_selection");
+            "file matches require --experimental_tree_artifact_selection");
       }
-      if (selectedFile.isDirectory()) {
+      if (matchedFile.isDirectory()) {
         throw Starlark.errorf(
-            "'executable' must be a selection from select_file, not select_directory");
+            "'executable' must be a match from match_file, not match_directory");
       }
       if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
         checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
       }
-      builder.setExecutable(selectedFile);
+      builder.setExecutable(matchedFile);
       // The resolved executable must be staged and its resolution result must reach spawn
-      // construction; registering the spec as an input selection provides both. The executable
+      // construction; registering the spec as an input match provides both. The executable
       // runs without runfiles — tree children cannot carry them.
-      builder.addInputSelections(ImmutableList.of(selectedFile.getSpec()));
+      builder.addInputMatchSpecs(ImmutableList.of(matchedFile.getSpec()));
     } else {
       // Should have been verified by Starlark before this function is called
       throw new IllegalStateException();
@@ -1005,32 +1005,32 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       throws EvalException {
     if (inputs instanceof Sequence<?> inputSequence) {
       // A heterogeneous list of Files and (behind --experimental_tree_artifact_selection) file
-      // selections, which are resolved to concrete children during the action's input discovery.
+      // matches, which are resolved to concrete children during the action's input discovery.
       ImmutableList.Builder<Artifact> artifactInputs = ImmutableList.builder();
-      List<FileSelectionSpec> selectionInputs = new ArrayList<>();
+      List<FileMatchSpec> matchSpecInputs = new ArrayList<>();
       for (Object input : inputSequence) {
         switch (input) {
           case Artifact artifact -> artifactInputs.add(artifact);
-          case SelectedFile selectedFile -> {
-            if (selectedFile.isDirectory()) {
+          case MatchedFile matchedFile -> {
+            if (matchedFile.isDirectory()) {
               throw Starlark.errorf(
-                  "a select_directory result may not be used as an action input directly; select "
-                      + "its files with select_files, or use it as a source to another select_*");
+                  "a match_directory result may not be used as an action input directly; match "
+                      + "its files with match_files, or use it as a source to another match_*");
             }
-            selectionInputs.add(selectedFile.getSpec());
+            matchSpecInputs.add(matchedFile.getSpec());
           }
-          case FileSelection fileSelection -> selectionInputs.add(fileSelection.getSpec());
+          case MatchedFiles fileMatch -> matchSpecInputs.add(fileMatch.getSpec());
           default ->
               throw Starlark.errorf(
-                  "expected value of type 'File', 'SelectedFile' or 'FileSelection' for a member of"
+                  "expected value of type 'File', 'MatchedFile' or 'MatchedFiles' for a member of"
                       + " parameter 'inputs' but got %s instead",
                   Starlark.type(input));
         }
       }
       builder.addInputs(artifactInputs.build());
-      // addInputSelections also declares each selection's source trees as inputs; discoverInputs
+      // addInputMatchSpecs also declares each match's source trees as inputs; discoverInputs
       // later prunes the trees, replacing them with only the resolved children.
-      builder.addInputSelections(selectionInputs);
+      builder.addInputMatchSpecs(matchSpecInputs);
     } else {
       builder.addTransitiveInputs(Depset.cast(inputs, Artifact.class, "inputs"));
     }
@@ -1091,27 +1091,27 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
                     + "of parameter 'tools' but %s",
                 e.getMessage());
           }
-        } else if (toolUnchecked instanceof SelectedFile selectedTool) {
-          // Selections as tools stage their resolved files without runfiles (tree children cannot
+        } else if (toolUnchecked instanceof MatchedFile matchedTool) {
+          // Matches as tools stage their resolved files without runfiles (tree children cannot
           // carry them), matching bare-File tools from a staging perspective.
-          if (selectedTool.isDirectory()) {
+          if (matchedTool.isDirectory()) {
             throw Starlark.errorf(
-                "directory selections are not yet supported in 'tools'; select files, or"
+                "directory matches are not yet supported in 'tools'; match files with match_files, or"
                     + " materialise the directory with a copy action");
           }
           if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
             checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
           }
-          builder.addInputSelections(ImmutableList.of(selectedTool.getSpec()));
-        } else if (toolUnchecked instanceof FileSelection toolSelection) {
+          builder.addInputMatchSpecs(ImmutableList.of(matchedTool.getSpec()));
+        } else if (toolUnchecked instanceof MatchedFiles toolMatch) {
           if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
             checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
           }
-          builder.addInputSelections(ImmutableList.of(toolSelection.getSpec()));
+          builder.addInputMatchSpecs(ImmutableList.of(toolMatch.getSpec()));
         } else {
           throw Starlark.errorf(
-              "expected value of type 'File, FilesToRunProvider, Depset of Files, SelectedFile or"
-                  + " FileSelection' for a member of parameter 'tools' but got %s instead",
+              "expected value of type 'File, FilesToRunProvider, Depset of Files, MatchedFile or"
+                  + " MatchedFiles' for a member of parameter 'tools' but got %s instead",
               Starlark.type(toolUnchecked));
         }
       }

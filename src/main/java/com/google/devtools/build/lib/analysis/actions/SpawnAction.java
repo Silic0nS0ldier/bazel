@@ -987,9 +987,9 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     }
 
     /**
-     * Sets the executable as a file selection, resolved to a concrete file at execution time.
+     * Sets the executable as a file match, resolved to a concrete file at execution time.
      *
-     * <p>The caller is responsible for registering the selection as an input selection on the
+     * <p>The caller is responsible for registering the match as an input match on the
      * consuming action so that the resolved file is staged and the resolution result is available
      * to command-line expansion.
      *
@@ -997,7 +997,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
      * or {@link #setShellCommand}.
      */
     @CanIgnoreReturnValue
-    public Builder setExecutable(SelectedFile executable) {
+    public Builder setExecutable(MatchedFile executable) {
       this.executableArg = executable;
       this.executableArgs = null;
       return this;

@@ -137,7 +137,7 @@ java_library(
         ":actions/buildinfo_file_write_action",
         ":actions/compression",
         ":actions/custom_command_line",
-        ":actions/file_selection",
+        ":actions/file_match",
         ":actions/lazy_write_nested_set_of_tuple_action",
         ":actions/parameter_file_write_action",
         ":actions/path_mappers",
@@ -1703,7 +1703,7 @@ java_library(
     name = "starlark/args",
     srcs = ["starlark/Args.java"],
     deps = [
-        ":actions/file_selection",
+        ":actions/file_match",
         ":starlark/starlark_custom_command_line",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
@@ -1723,13 +1723,13 @@ java_library(
 )
 
 java_library(
-    name = "actions/file_selection",
+    name = "actions/file_match",
     srcs = [
-        "actions/FileSelection.java",
-        "actions/FileSelectionResolver.java",
-        "actions/FileSelectionSpec.java",
-        "actions/SelectedFile.java",
-        "actions/SelectionResolvingInputMetadataProvider.java",
+        "actions/MatchedFiles.java",
+        "actions/FileMatchResolver.java",
+        "actions/FileMatchSpec.java",
+        "actions/MatchedFile.java",
+        "actions/MatchResolvingInputMetadataProvider.java",
     ],
     deps = [
         "//src/main/java/com/google/devtools/build/lib/actions",
@@ -1820,7 +1820,7 @@ java_library(
     name = "starlark/starlark_custom_command_line",
     srcs = ["starlark/StarlarkCustomCommandLine.java"],
     deps = [
-        ":actions/file_selection",
+        ":actions/file_match",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/actions:commandline_item",
