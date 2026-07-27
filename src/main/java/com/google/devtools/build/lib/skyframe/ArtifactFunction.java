@@ -140,6 +140,42 @@ public final class ArtifactFunction implements SkyFunction {
 
     Artifact.DerivedArtifact derivedArtifact = (DerivedArtifact) artifact;
 
+    // A subtree artifact (e.g. a ctx.actions.pick_directory result) has no value of its own in the
+    // generating action's ActionExecutionValue — the action records a TreeArtifactValue only for
+    // the root tree. Depend on the root tree's own artifact node (which also covers
+    // template-generated trees) and derive a sub-view containing the children under the subtree,
+    // re-parented to it. An empty sub-view means the picked path does not exist (or holds no
+    // files — tree artifacts do not record empty directories); consumers reject it with an
+    // actionable error.
+    if (artifact.isSubTreeArtifact()) {
+      SpecialArtifact subTree = (SpecialArtifact) artifact;
+      SpecialArtifact root = subTree.getParent();
+      TreeArtifactValue rootValue = (TreeArtifactValue) env.getValue(Artifact.key(root));
+      if (rootValue == null) {
+        return null;
+      }
+      // The root's children may be parented to the root itself or (in the action-template flow) to
+      // subtree outputs of expanded actions, so locate them by exec path rather than
+      // parent-relative path. Children already parented to the requested subtree are kept as-is,
+      // preserving their identity; others are re-parented onto it.
+      PathFragment rootPath = root.getExecPath();
+      PathFragment prefix = subTree.getParentRelativePath();
+      TreeArtifactValue.Builder subValue = TreeArtifactValue.newBuilder(subTree);
+      for (Map.Entry<TreeFileArtifact, FileArtifactValue> child :
+          rootValue.getChildValues().entrySet()) {
+        TreeFileArtifact childArtifact = child.getKey();
+        PathFragment childPath = childArtifact.getExecPath().relativeTo(rootPath);
+        if (childPath.startsWith(prefix) && !childPath.equals(prefix)) {
+          subValue.putChild(
+              childArtifact.getParent().equals(subTree)
+                  ? childArtifact
+                  : TreeFileArtifact.createTreeOutput(subTree, childPath.relativeTo(prefix)),
+              child.getValue());
+        }
+      }
+      return subValue.build();
+    }
+
     RemoteAnalysisCacheReaderDepsProvider remoteCachingDependencies =
         cachingDependenciesSupplier.get();
     if (remoteCachingDependencies.mode().isRetrievalEnabled()

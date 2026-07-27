@@ -548,7 +548,11 @@ public class ActionExecutionContext implements Closeable, ActionContext.ActionCo
     }
   }
 
-  private ActionExecutionContext withInputMetadataProvider(
+  /**
+   * Creates a new {@link ActionExecutionContext} with the given {@link InputMetadataProvider} in
+   * place of the current one. Typically used to wrap the current provider with extra capabilities.
+   */
+  public ActionExecutionContext withInputMetadataProvider(
       InputMetadataProvider newInputMetadataProvider) {
     return new ActionExecutionContext(
         executor,

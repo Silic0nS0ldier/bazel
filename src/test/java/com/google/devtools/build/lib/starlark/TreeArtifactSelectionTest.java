@@ -143,21 +143,68 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void pickDirectory_notYetSupported_failsWithActionableError() throws Exception {
-    // v1 does not support consuming a picked subdirectory as an action input (subtree-input
-    // routing is unimplemented). The API rejects it with a message pointing at the alternatives.
+  public void pickDirectory_stagesSubtreeAsInput() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // Only the picked subtree is an input; its files are staged at their original exec paths
+    // (under the root tree's path), so the copy of lib/deep/other succeeds.
+    writeConsumeRule(
+        """
+            sub = ctx.actions.pick_directory(tree, "lib")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sub],
+                outputs = [out],
+                command = "cp %s/deep/other %s" % (sub.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("deepworld");
+  }
+
+  @Test
+  public void pickFile_fromPickedDirectory_collapsesToRootChild() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
     writeConsumeRule(
         """
-            headers = ctx.actions.pick_directory(tree, "lib/deep")
-            return [DefaultInfo(files = depset([tree]))]
+            sub = ctx.actions.pick_directory(tree, "lib/deep")
+            pick = ctx.actions.pick_file(sub, "other")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [pick],
+                outputs = [out],
+                command = "cp %s %s" % (pick.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
         """);
-    RecordingOutErr recordingOutErr = new RecordingOutErr();
-    this.outErr = recordingOutErr;
 
-    assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
+    buildTarget("//test:consume");
 
-    assertThat(recordingOutErr.errAsLatin1()).contains("pick_directory() is not yet supported");
+    assertThat(readOutput("test/consume.out")).isEqualTo("deepworld");
+  }
+
+  @Test
+  public void pickDirectory_missingPath_failsConsumingAction() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule(
+        """
+            sub = ctx.actions.pick_directory(tree, "nonexistent")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sub],
+                outputs = [out],
+                command = "touch %s" % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    BuildFailedException e =
+        assertThrows(BuildFailedException.class, () -> buildTarget("//test:consume"));
+
+    assertThat(e.getDetailedExitCode().getFailureDetail().getMessage())
+        .contains("does not exist in tree artifact");
   }
 
   @Test
@@ -495,5 +542,245 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     buildTarget("//test:consume");
 
     assertThat(readOutput("test/consume.out")).isEqualTo("ok");
+  }
+
+  // --- Selections on command lines (Args) ---------------------------------------------------------
+
+  @Test
+  public void argsAddAll_expandsSelectionToResolvedPaths() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The command receives the resolved children's exec paths as arguments and cats them.
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            args = ctx.actions.args()
+            args.add_all([sel])
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                arguments = [args],
+                command = 'cat "$@" > %s' % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("hellodeepworld");
+  }
+
+  @Test
+  public void argsAdd_scalarSelectedFile_rendersResolvedPath() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            args = ctx.actions.args()
+            args.add(sel)
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                arguments = [args],
+                command = 'cp "$1" %s' % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("hello");
+  }
+
+  @Test
+  public void argsAddAll_mapEachRunsOnResolvedFiles() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    write(
+        "test/consume.bzl",
+        """
+        def _basename(f):
+            return f.basename
+
+        def _consume_impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            args = ctx.actions.args()
+            args.add_all([sel], map_each = _basename)
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                arguments = [args],
+                command = 'echo "$@" > %s' % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        consume = rule(
+            implementation = _consume_impl,
+            attrs = {"src": attr.label()},
+        )
+        """);
+
+    buildTarget("//test:consume");
+
+    String output = readOutput("test/consume.out");
+    assertThat(output).contains("data");
+    assertThat(output).contains("other");
+  }
+
+  @Test
+  public void argsSelection_notAnInput_failsWithActionableError() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The selection appears on the command line but not in inputs: its resolution never runs, so
+    // expansion fails with a pointer at the missing 'inputs' entry. The tree is passed as a plain
+    // input so the action is otherwise well-formed.
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            args = ctx.actions.args()
+            args.add_all([sel])
+            ctx.actions.run_shell(
+                inputs = [tree],
+                outputs = [out],
+                arguments = [args],
+                command = "touch %s" % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    BuildFailedException e =
+        assertThrows(BuildFailedException.class, () -> buildTarget("//test:consume"));
+
+    assertThat(e.getDetailedExitCode().getFailureDetail().getMessage())
+        .contains("is not an input of the action");
+  }
+
+  @Test
+  public void argsAdd_fileSelection_failsAtAnalysis() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_files(sources = [tree])
+            args = ctx.actions.args()
+            args.add(sel)
+            return [DefaultInfo(files = depset([tree]))]
+        """);
+    RecordingOutErr recordingOutErr = new RecordingOutErr();
+    this.outErr = recordingOutErr;
+
+    assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
+
+    assertThat(recordingOutErr.errAsLatin1()).contains("Use Args#add_all or Args#add_joined");
+  }
+
+  @Test
+  public void argsAddAll_depsetOfSelections_failsAtAnalysis() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_file(sources = [tree], include = ["bin/data"])
+            args = ctx.actions.args()
+            args.add_all(depset([sel]))
+            return [DefaultInfo(files = depset([tree]))]
+        """);
+    RecordingOutErr recordingOutErr = new RecordingOutErr();
+    this.outErr = recordingOutErr;
+
+    assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
+
+    assertThat(recordingOutErr.errAsLatin1())
+        .contains("depsets of file selections cannot be added to Args");
+  }
+
+  // --- SelectedFile as executable / in tools ------------------------------------------------------
+
+  private void writeToolExtractFixture() throws Exception {
+    // An extract rule whose tree contains an executable script at bin/tool.sh that writes a fixed
+    // marker to the path given as its first argument.
+    write(
+        "test/extract.bzl",
+        """
+        def _extract_impl(ctx):
+            out = ctx.actions.declare_directory(ctx.attr.name + "_tree")
+            ctx.actions.run_shell(
+                outputs = [out],
+                command = (
+                    "mkdir -p {d}/bin; " +
+                    "printf '#!/bin/sh\\nprintf toolran > $1' > {d}/bin/tool.sh; " +
+                    "chmod +x {d}/bin/tool.sh"
+                ).format(d = out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        extract = rule(implementation = _extract_impl)
+        """);
+  }
+
+  @Test
+  public void selectedFileAsExecutable_runsResolvedTool() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeToolExtractFixture();
+    // The executable selection is auto-registered as an input selection; no 'inputs' needed.
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_file(sources = [tree], include = ["bin/tool.sh"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run(
+                executable = sel,
+                arguments = [out.path],
+                outputs = [out],
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("toolran");
+  }
+
+  @Test
+  public void selectedDirectoryAsExecutable_failsAtAnalysis() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_directory(sources = [tree], include = ["bin"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run(
+                executable = sel,
+                arguments = [out.path],
+                outputs = [out],
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+    RecordingOutErr recordingOutErr = new RecordingOutErr();
+    this.outErr = recordingOutErr;
+
+    assertThrows(ViewCreationFailedException.class, () -> buildTarget("//test:consume"));
+
+    assertThat(recordingOutErr.errAsLatin1())
+        .contains("'executable' must be a selection from select_file");
+  }
+
+  @Test
+  public void selectedFileInTools_stagesResolvedFile() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeToolExtractFixture();
+    writeConsumeRule(
+        """
+            sel = ctx.actions.select_file(sources = [tree], include = ["bin/tool.sh"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                tools = [sel],
+                outputs = [out],
+                command = "%s/bin/tool.sh %s" % (tree.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("toolran");
   }
 }

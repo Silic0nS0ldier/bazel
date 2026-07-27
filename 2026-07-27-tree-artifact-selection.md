@@ -126,7 +126,7 @@ Kind mismatches (a `pick_file` resolving to a directory, or vice versa) fail ide
 **Scheduling and staging.**
 An action consuming a pick depends on the tree's generating action, exactly as if it consumed the whole tree.
 Its *input set*, however, contains only the picked child: the Merkle tree references one child, the action cache key digests one child, sibling changes inside the tree do not invalidate the consumer, and under Build without the Bytes only that child is fetched for local execution (the prefetcher already supports partial tree staging, [#16333](https://github.com/bazelbuild/bazel/issues/16333)).
-A `pick_directory` stages its subtree (deferred in v1 — see [Implementation findings](#implementation-findings-v1-prototype)).
+A `pick_directory` stages its subtree.
 
 ## Selections
 
@@ -173,7 +173,7 @@ All results are opaque, immutable values; the shared parameters;
 
 And the `select_files`-only parameters;
 
-- `exclude_directories` (bool): when `False`, patterns may also match directories, which join the result as directory handles; consuming one stages its subtree, like a `pick_directory` (deferred in v1 — see [Implementation findings](#implementation-findings-v1-prototype)).
+- `exclude_directories` (bool): when `False`, patterns may also match directories, which join the result as directory handles; consuming one stages its subtree, like a `pick_directory` (as *action inputs*, directory members are deferred in v1 — see [Implementation findings](#implementation-findings-v1-prototype)).
   The default matches package `glob()`.
 - `allow_empty` (bool): when `False` (the default, matching `--incompatible_disallow_empty_glob`), a selection resolving to zero files fails the consuming action.
 
@@ -212,7 +212,8 @@ Both types share the base surfaces;
 A `SelectedFile` from `select_file` is additionally accepted where a single runnable file is;
 
 - As the **`executable`** of `ctx.actions.run`.
-  Spawn construction already happens at execution time; the resolved file becomes argv[0] and joins the staged inputs, and its executable bit (as captured from the tree) must be set or the action fails with the resolution error format.
+  Spawn construction already happens at execution time; the resolved file becomes argv[0] and joins the staged inputs.
+  *(The executable-bit precheck originally specified here is dropped — see [Implementation findings](#implementation-findings-v1-prototype); a non-executable file fails at spawn time.)*
   Since a bare `File` executable carries no runfiles today, a `SelectedFile` executable behaves identically: no runfiles.
 - In **`tools`**, staging the resolved file (again with no implied runfiles).
 
@@ -406,11 +407,12 @@ The experimental phase should exercise both under local, sandboxed, and remote s
 A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and *file* selections (`select_file`, and `select_files`/`select_file` over regular files) as action inputs, resolved during input discovery.
 Building it surfaced three constraints that revise claims above and scope the first release.
 
-- **Directory results cannot yet be consumed as standalone action inputs.**
-  A directory pick or a directory-typed selection member is represented as a subtree `SpecialArtifact`, but routing one as an action input on its own fails: `ArtifactFunction` resolves a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree, not for arbitrary subtrees.
-  Consequently the v1 prototype **defers `pick_directory`** (it raises an actionable error pointing at `pick_file`/`select_files`) and **rejects directory members of a selection as action inputs** (`select_directory` results are still usable as *sources*, where no subtree node is materialised).
-  Making the "consuming one stages its subtree" claim hold requires new subtree-input routing across `Artifact.key`, `ArtifactFunction`, `ActionInputMap`, and staging — the [implementation plan](2026-07-27-tree-artifact-selection-implementation.md)'s open question #4.
-  Until then, the materialisation escape hatch (copy action) covers the directory case.
+- **Subtree-input routing had to be built; `pick_directory` now works, dynamic directory members remain deferred.**
+  A directory pick or a directory-typed selection member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.
+  The gap turned out to be Skyframe-only — `ActionInputMap` and staging already understood subtree inputs (from `map_directory`) — and was closed by teaching `ArtifactFunction` to serve a subtree as a *derived sub-view*: the subtree's node depends on the root tree's own artifact node and filters/re-parents the children beneath the picked path.
+  **`pick_directory` therefore works as specified** (consuming one stages exactly its subtree), including picks below picks and template-generated roots; a pick of a path with no files under it fails the consumer with the missing-path error (tree artifacts do not record empty directories, so "missing" and "empty" are indistinguishable — the error says so).
+  Still deferred: **directory members of a *selection* as action inputs** — those surface as discovered inputs at execution time, a different admission path than a declared input (`select_directory` results remain usable as *sources* and everywhere else).
+  The materialisation escape hatch (copy action) covers that remaining case.
 
 - **Source trees must be *declared inputs*, not merely scheduling dependencies, to be resolvable during discovery.**
   The proposal envisioned exposing source trees only as scheduling dependencies (built, metadata-available, unstaged).
@@ -418,10 +420,15 @@ Building it surfaced three constraints that revise claims above and scope the fi
   The prototype therefore declares source trees as ordinary inputs so discovery can read their metadata, then **prunes them in `discoverInputs`**, leaving only the resolved children in the staged input set and the action cache key.
   The observable end state (footprint proportional to use) matches the proposal; the mechanism is prune-after-declare rather than scheduling-dependency.
 
-- **Reusing a resolved selection inside `Args` (or as an `executable`) is blocked by the command-line API, not merely unimplemented.**
-  Command-line expansion receives an `InputMetadataProvider` but no handle to the consuming action, and once the source trees are pruned their metadata is absent from that provider — so a selection appearing in `Args` can neither re-resolve (no tree metadata) nor read the discovery result (no action handle).
-  Selections as action *inputs* work today; `Args` expansion and `SelectedFile`-as-`executable` require either threading a per-action resolved-selection map into command-line expansion, or leaving `Args`-backed trees unpruned (trading the pruning benefit for that selection).
-  This is a real design cost the "resolves through the same engine at expansion time" sketch understates.
+- **Reusing a resolved selection inside `Args` (or as an `executable`) needed a provider-wrapping mechanism, not the sketched re-resolution.**
+  Command-line expansion receives an `InputMetadataProvider` but no handle to the consuming action, and once the source trees are pruned their metadata is absent from that provider — so a selection appearing in `Args` can neither re-resolve (no tree metadata) nor read the discovery result (no action handle) directly.
+  The prototype resolves this without new expansion-API plumbing: the consuming action captures per-selection resolution results during input discovery, and at spawn construction hands expansion an `InputMetadataProvider` *wrapper* that additionally serves those results (expansion discovers the capability via an `instanceof` check).
+  With that in place `Args` (`add`, `add_all`, `add_joined`, including `map_each` over resolved files), `executable`, and `tools` all work as specified;
+  a selection referenced in `Args` without also being an input fails expansion with an actionable error (matching the `Args`-versus-`inputs` contract above), while `executable`/`tools` selections are registered as input selections automatically.
+  Two consequences diverge slightly from the text above;
+  - action keys digest the selection's *spec identity* (sources, patterns, flags, filter name + module digest) in place of the expansion, so keys are computable before metadata exists — invalidation of the resolved set rides on the discovered-inputs cache path instead;
+  - the executable-bit check on a `SelectedFile` executable is dropped: `FileArtifactValue` does not track an executable bit, and Bazel stages action outputs (including tree children) executable, so the check has nothing sound to read. A non-executable selected file fails at spawn time with the OS error.
+  Selections in *depsets* passed to `add_all` are rejected at analysis time: depset fingerprinting is memoised per nested set, which cannot accommodate per-action resolution.
 
 # Open questions
 

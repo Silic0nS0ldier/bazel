@@ -230,20 +230,6 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
     SpecialArtifact treeLike = (SpecialArtifact) artifact;
     PathFragment relPath = validatePickPath(path, what);
 
-    // v1 limitation: a directory pick would be a subtree SpecialArtifact, and consuming one as a
-    // standalone action input is not yet routed through Skyframe (ArtifactFunction resolves a
-    // subtree's metadata to null — the generating action only records the root tree's value). This
-    // is the plan's open question #4 (subtree-pick representation). Until that lands, reject
-    // directory picks with an actionable message rather than crash at execution.
-    if (expectDirectory) {
-      throw Starlark.errorf(
-          "%s() is not yet supported: consuming a picked subdirectory as an action input is not "
-              + "implemented in this experimental release. Pick the specific files you need with "
-              + "pick_file, or select the subtree's files with "
-              + "select_files(sources = [directory], include = [\"%s/**\"]).",
-          what, relPath.getPathString());
-    }
-
     // Collapse nesting onto the root tree artifact: a pick below a subtree is the same child of the
     // root tree with a combined relative path. This keeps the exec path and owner identical while
     // avoiding a subtree-of-subtree, which createSubTreeArtifact forbids.
@@ -715,6 +701,23 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
         checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
       }
       builder.setExecutable((FilesToRunProvider) executableUnchecked);
+    } else if (executableUnchecked instanceof SelectedFile selectedFile) {
+      if (!getRuleContext().getConfiguration().allowTreeArtifactSelection()) {
+        throw Starlark.errorf(
+            "file selections require --experimental_tree_artifact_selection");
+      }
+      if (selectedFile.isDirectory()) {
+        throw Starlark.errorf(
+            "'executable' must be a selection from select_file, not select_directory");
+      }
+      if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+        checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+      }
+      builder.setExecutable(selectedFile);
+      // The resolved executable must be staged and its resolution result must reach spawn
+      // construction; registering the spec as an input selection provides both. The executable
+      // runs without runfiles — tree children cannot carry them.
+      builder.addInputSelections(ImmutableList.of(selectedFile.getSpec()));
     } else {
       // Should have been verified by Starlark before this function is called
       throw new IllegalStateException();
@@ -1025,13 +1028,9 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
         }
       }
       builder.addInputs(artifactInputs.build());
+      // addInputSelections also declares each selection's source trees as inputs; discoverInputs
+      // later prunes the trees, replacing them with only the resolved children.
       builder.addInputSelections(selectionInputs);
-      // Declare each selection's source trees as inputs so their metadata is available when the
-      // action resolves selections during input discovery. discoverInputs then prunes the trees,
-      // replacing them with only the resolved children.
-      for (FileSelectionSpec spec : selectionInputs) {
-        builder.addInputs(ImmutableList.<Artifact>copyOf(spec.getSourceTreeArtifacts()));
-      }
     } else {
       builder.addTransitiveInputs(Depset.cast(inputs, Artifact.class, "inputs"));
     }
@@ -1092,10 +1091,27 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
                     + "of parameter 'tools' but %s",
                 e.getMessage());
           }
+        } else if (toolUnchecked instanceof SelectedFile selectedTool) {
+          // Selections as tools stage their resolved files without runfiles (tree children cannot
+          // carry them), matching bare-File tools from a staging perspective.
+          if (selectedTool.isDirectory()) {
+            throw Starlark.errorf(
+                "directory selections are not yet supported in 'tools'; select files, or"
+                    + " materialise the directory with a copy action");
+          }
+          if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+            checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+          }
+          builder.addInputSelections(ImmutableList.of(selectedTool.getSpec()));
+        } else if (toolUnchecked instanceof FileSelection toolSelection) {
+          if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+            checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+          }
+          builder.addInputSelections(ImmutableList.of(toolSelection.getSpec()));
         } else {
           throw Starlark.errorf(
-              "expected value of type 'File, FilesToRunProvider or Depset of Files' for a member of"
-                  + " parameter 'tools' but got %s instead",
+              "expected value of type 'File, FilesToRunProvider, Depset of Files, SelectedFile or"
+                  + " FileSelection' for a member of parameter 'tools' but got %s instead",
               Starlark.type(toolUnchecked));
         }
       }

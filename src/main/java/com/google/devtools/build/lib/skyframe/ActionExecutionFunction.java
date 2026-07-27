@@ -1148,6 +1148,29 @@ public class ActionExecutionFunction implements SkyFunction {
           }
         }
       }
+      case TreeArtifactValue treeValue -> {
+        if (input.isSubTreeArtifact() && treeValue.getChildValues().isEmpty()) {
+          // Tree artifacts record files only, so a subtree with no children is indistinguishable
+          // from a missing path — either way the pick addresses nothing stageable.
+          String errorMessage =
+              String.format(
+                  "subdirectory %s does not exist in tree artifact %s (produced by %s), or"
+                      + " contains no files; a ctx.actions.pick_directory referenced a path that"
+                      + " the tree does not contain",
+                  input.getParentRelativePath(),
+                  input.getParent().getExecPathString(),
+                  input.getParent().getArtifactOwner().getLabel());
+          DetailedExitCode detailedExitCode =
+              DetailedExitCode.of(
+                  FailureDetail.newBuilder()
+                      .setMessage(errorMessage)
+                      .setExecution(
+                          Execution.newBuilder().setCode(Code.NONDETERMINISTIC_TREE_ARTIFACT))
+                      .build());
+          throw new ActionExecutionException(
+              errorMessage, action, /* catastrophe= */ false, detailedExitCode);
+        }
+      }
       case MissingArtifactValue missingArtifactValue -> {
         if (!isMandatoryInput.test(input)) {
           return FileArtifactValue.MISSING_FILE_MARKER;

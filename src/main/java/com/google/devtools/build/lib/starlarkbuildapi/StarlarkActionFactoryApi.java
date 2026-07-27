@@ -656,10 +656,16 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               @ParamType(type = FileApi.class),
               @ParamType(type = String.class),
               @ParamType(type = FilesToRunProviderApi.class),
+              @ParamType(type = SelectedFileApi.class),
             },
             named = true,
             positional = false,
-            doc = "The executable file to be called by the action."),
+            doc =
+                "The executable file to be called by the action. May be a <a"
+                    + " href=\"../builtins/SelectedFile.html\">SelectedFile</a> from <a"
+                    + " href=\"#select_file\">select_file</a>, in which case the executable is"
+                    + " resolved from its source directory at execution time and staged without"
+                    + " runfiles."),
         @Param(
             name = "tools",
             allowedTypes = {

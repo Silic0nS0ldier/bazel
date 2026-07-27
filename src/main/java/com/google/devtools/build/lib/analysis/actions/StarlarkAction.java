@@ -161,7 +161,13 @@ public class StarlarkAction extends SpawnAction {
       return this;
     }
 
-    /** Adds file selections to be resolved to concrete children and staged as action inputs. */
+    /**
+     * Adds file selections to be resolved to concrete children and staged as action inputs.
+     *
+     * <p>Each selection's source trees are declared as inputs so their metadata is available when
+     * the action resolves selections during input discovery; {@code discoverInputs} then prunes
+     * the trees, replacing them with only the resolved children.
+     */
     @CanIgnoreReturnValue
     public Builder addInputSelections(List<FileSelectionSpec> selections) {
       if (!selections.isEmpty()) {
@@ -170,6 +176,9 @@ public class StarlarkAction extends SpawnAction {
                 .addAll(this.inputSelections)
                 .addAll(selections)
                 .build();
+        for (FileSelectionSpec spec : selections) {
+          addInputs(ImmutableList.<Artifact>copyOf(spec.getSourceTreeArtifacts()));
+        }
       }
       return this;
     }
@@ -255,6 +264,12 @@ public class StarlarkAction extends SpawnAction {
     private final ImmutableList<FileSelectionSpec> inputSelections;
     // The distinct source tree artifacts backing inputSelections (scheduling deps, not staged).
     private final NestedSet<Artifact> selectionSourceTrees;
+    // Per-spec resolution results captured in discoverInputs so spawn construction (command line
+    // expansion, executable rendering) can consume them after the source trees are pruned.
+    // Transient execution state: repopulated on re-discovery (incremental builds, rewinding) and
+    // deliberately not serialized.
+    @Nullable
+    private volatile ImmutableMap<FileSelectionSpec, ImmutableList<Artifact>> resolvedSelections;
     private boolean inputsDiscovered = false;
     private boolean prunedInputs = false;
 
@@ -484,22 +499,30 @@ public class StarlarkAction extends SpawnAction {
         return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
       }
       NestedSetBuilder<Artifact> children = NestedSetBuilder.stableOrder();
+      Map<FileSelectionSpec, ImmutableList<Artifact>> resolvedBySpec = Maps.newLinkedHashMap();
       for (FileSelectionSpec spec : inputSelections) {
         try {
-          for (Artifact member :
+          ImmutableList<Artifact> resolved =
               spec.resolve(
                   actionExecutionContext.getInputMetadataProvider(),
-                  actionExecutionContext.getEventHandler())) {
-            // Directory members (subtree artifacts) cannot yet be staged as standalone action
-            // inputs — the same v1 limitation as pick_directory. Fail clearly rather than crash.
+                  actionExecutionContext.getEventHandler());
+          for (Artifact member : resolved) {
+            // Directory members (subtree artifacts) surface only at execution time, after the
+            // Skyframe input-request phase — unlike a pick_directory, which is declared at
+            // analysis time and routed as a regular input. Staging them here would need the
+            // discovered-input machinery to admit late subtree nodes; fail clearly until then.
             if (member.isTreeArtifact()) {
               throw new FileSelectionSpec.SelectionResolutionException(
                   "directory members of a selection are not yet supported as action inputs (from "
                       + member.getExecPathString()
-                      + "); select regular files, or materialise the directory with a copy action");
+                      + "); select regular files, pick the directory statically with"
+                      + " pick_directory, or materialise it with a copy action");
             }
             children.add(member);
           }
+          // Duplicate specs (e.g. the same selection in inputs and as executable) resolve
+          // identically; keeping the first is sufficient.
+          resolvedBySpec.putIfAbsent(spec, resolved);
         } catch (FileSelectionSpec.SelectionResolutionException e) {
           throw new ActionExecutionException(
               e.getMessage(),
@@ -509,7 +532,29 @@ public class StarlarkAction extends SpawnAction {
                   createFailureDetail(e.getMessage(), Code.FILE_SELECTION_RESOLUTION_FAILURE)));
         }
       }
+      this.resolvedSelections = ImmutableMap.copyOf(resolvedBySpec);
       return children.build();
+    }
+
+    @Override
+    public Spawn getSpawn(ActionExecutionContext actionExecutionContext)
+        throws CommandLineExpansionException, InterruptedException {
+      if (inputSelections.isEmpty()) {
+        return super.getSpawn(actionExecutionContext);
+      }
+      // discoverInputs always runs before execution for this action (discoversInputs() is true
+      // whenever inputSelections is non-empty), so the resolution results are available. Wrapping
+      // the metadata provider makes them reachable from command line expansion, which has no
+      // handle on the action itself.
+      ImmutableMap<FileSelectionSpec, ImmutableList<Artifact>> resolved = resolvedSelections;
+      if (resolved == null) {
+        throw new IllegalStateException(
+            "input selections were not resolved before spawn construction: " + describe());
+      }
+      return super.getSpawn(
+          actionExecutionContext.withInputMetadataProvider(
+              new SelectionResolvingInputMetadataProvider(
+                  actionExecutionContext.getInputMetadataProvider(), resolved)));
     }
 
     private InputStream getUnusedInputListInputStream(

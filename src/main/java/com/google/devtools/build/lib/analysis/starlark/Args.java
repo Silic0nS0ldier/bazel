@@ -23,12 +23,16 @@ import com.google.devtools.build.lib.actions.CommandLines.CommandLineAndParamFil
 import com.google.devtools.build.lib.actions.ParamFileInfo;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.actions.SingleStringArgFormatter;
+import com.google.devtools.build.lib.analysis.actions.FileSelection;
+import com.google.devtools.build.lib.analysis.actions.SelectedFile;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryMapping;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
 import com.google.devtools.build.lib.starlarkbuildapi.CommandLineArgsApi;
+import com.google.devtools.build.lib.starlarkbuildapi.FileSelectionApi;
+import com.google.devtools.build.lib.starlarkbuildapi.SelectedFileApi;
 import com.google.devtools.build.lib.supplier.InterruptibleSupplier;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.ArrayList;
@@ -453,6 +457,18 @@ public abstract class Args implements CommandLineArgsApi {
       validateFormatString("format_joined", formatJoined);
       StarlarkCustomCommandLine.VectorArg.Builder vectorArg;
       if (value instanceof Depset starlarkNestedSet) {
+        // Selections resolve per consuming action during command line expansion, but depset
+        // fingerprinting memoises per nested set — the identity-based digest would be shared
+        // across actions with different resolutions. Lists are cheap to fingerprint per element,
+        // so selections are restricted to them. The element class is the @StarlarkBuiltin-carrying
+        // API interface, hence the interface-side check.
+        Class<?> elementClass = starlarkNestedSet.getElementClass();
+        if (elementClass != null
+            && (SelectedFileApi.class.isAssignableFrom(elementClass)
+                || FileSelectionApi.class.isAssignableFrom(elementClass))) {
+          throw Starlark.errorf(
+              "depsets of file selections cannot be added to Args; pass selections in a list");
+        }
         if (mapEach == null && Label.class.equals(starlarkNestedSet.getElementClass())) {
           // We don't want to eagerly check whether all labels reference targets in the main repo,
           // so just assume they might not. Nested sets of labels should be rare.
@@ -476,6 +492,11 @@ public abstract class Args implements CommandLineArgsApi {
         for (Object object : starlarkList) {
           if (expandDirectories && isDirectory(object)) {
             directoryArtifacts.add((Artifact) object);
+          }
+          if (object instanceof SelectedFile selectedFile && selectedFile.isDirectory()) {
+            throw Starlark.errorf(
+                "directory selections are not yet supported on command lines; select a file, or"
+                    + " materialise the directory with a copy action");
           }
           // Labels referencing targets in the main repo are stringified as //pkg:name and thus
           // don't require a RepositoryMapping. If a map_each function is provided, default
@@ -531,6 +552,7 @@ public abstract class Args implements CommandLineArgsApi {
         value = s.intern();
       }
       validateNoDirectory(value);
+      validateScalarSelection(value);
       validateFormatString("format", format);
       if (format == null) {
         commandLine.add(value);
@@ -545,6 +567,19 @@ public abstract class Args implements CommandLineArgsApi {
             "Cannot add directories to Args#add since they may expand to multiple values. "
                 + "Either use Args#add_all (if you want expansion) "
                 + "or args.add(directory.path) (if you do not).");
+      }
+    }
+
+    private static void validateScalarSelection(Object value) throws EvalException {
+      if (value instanceof FileSelection) {
+        throw Starlark.errorf(
+            "Cannot add a selection from select_files to Args#add since it may resolve to"
+                + " multiple values. Use Args#add_all or Args#add_joined.");
+      }
+      if (value instanceof SelectedFile selectedFile && selectedFile.isDirectory()) {
+        throw Starlark.errorf(
+            "directory selections are not yet supported on command lines; select a file, or"
+                + " materialise the directory with a copy action");
       }
     }
 
