@@ -68,6 +68,12 @@ public class RemoteOutputChecker implements OutputChecker {
 
   private final ImmutableList<Predicate<String>> patternsToDownload;
   private final ConcurrentArtifactPathTrie pathsToDownload = new ConcurrentArtifactPathTrie();
+  // Exact exec paths of standalone tree children (ctx.actions.pick_file results) that are
+  // themselves top-level outputs. These cannot go in pathsToDownload: a tree child's exec path has
+  // its parent tree's exec path as a prefix, which violates the trie's no-prefix invariant (and the
+  // parent tree may itself be a separately-registered download). They are matched exactly instead,
+  // so `bazel build //x:pick` downloads the picked child and only the child.
+  private final Set<PathFragment> childPathsToDownload = ConcurrentHashMap.newKeySet();
   private final Set<PathFragment> pathsToSkip = ConcurrentHashMap.newKeySet();
 
   public RemoteOutputChecker(
@@ -253,7 +259,13 @@ public class RemoteOutputChecker implements OutputChecker {
 
   /** Marks a file for download. */
   public void addOutputToDownload(ActionInput file) {
-    pathsToDownload.add(file);
+    if (file instanceof TreeFileArtifact) {
+      // A standalone tree child (e.g. a pick_file result) as a top-level output: matched exactly,
+      // outside the prefix trie. See childPathsToDownload.
+      childPathsToDownload.add(file.getExecPath());
+    } else {
+      pathsToDownload.add(file);
+    }
   }
 
   /**
@@ -331,6 +343,7 @@ public class RemoteOutputChecker implements OutputChecker {
       return false;
     }
     return outputsMode == RemoteOutputsMode.ALL
+        || childPathsToDownload.contains(execPath)
         || pathsToDownload.contains(execPath)
         || matchesPattern(execPath)
         || (treeRootExecPath != null && matchesPattern(treeRootExecPath));

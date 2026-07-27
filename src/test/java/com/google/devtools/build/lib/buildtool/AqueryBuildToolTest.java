@@ -19,6 +19,7 @@ import static org.junit.Assert.assertThrows;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Action;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.ActionGraphContainer;
+import com.google.devtools.build.lib.analysis.AnalysisProtosV2.FileMatch;
 import com.google.devtools.build.lib.buildtool.AqueryProcessor.AqueryActionFilterException;
 import com.google.devtools.build.lib.buildtool.util.BuildIntegrationTestCase;
 import com.google.devtools.build.lib.cmdline.TargetPattern;
@@ -159,6 +160,101 @@ public class AqueryBuildToolTest extends BuildIntegrationTestCase {
             .orElseThrow(() -> new AssertionError("No Genrule action found in the action graph."));
 
     assertThat(genruleAction.getProgressMessage()).contains("Executing genrule //x:x");
+  }
+
+  private void writeMatchFixture() throws Exception {
+    write(
+        "x/defs.bzl",
+        """
+        def _extract_impl(ctx):
+            out = ctx.actions.declare_directory(ctx.attr.name + "_tree")
+            ctx.actions.run_shell(
+                outputs = [out],
+                command = "mkdir -p %s/bin && echo -n hi > %s/bin/data" % (out.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        extract = rule(implementation = _extract_impl)
+
+        def _consume_impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            sel = ctx.actions.match_files(sources = [tree], include = ["bin/*"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                command = "cat %s/bin/data > %s" % (tree.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        consume = rule(
+            implementation = _consume_impl,
+            attrs = {"src": attr.label()},
+        )
+        """);
+    write(
+        "x/BUILD",
+        """
+        load(":defs.bzl", "extract", "consume")
+
+        extract(name = "archive")
+        consume(name = "consume", src = ":archive")
+        """);
+  }
+
+  @Test
+  public void aquery_fileMatch_proto_referencesSourceTreeAndPatterns() throws Exception {
+    writeMatchFixture();
+    addOptions("--experimental_tree_artifact_selection");
+    buildTarget("//x:consume");
+
+    addOptions("--output=proto", "--skyframe_state");
+    CommandEnvironment env = runtimeWrapper.newCommand(AqueryCommand.class);
+    ByteArrayOutputStream stdout = captureStdout(env);
+    BlazeCommandResult result =
+        new AqueryProcessor(null, TargetPattern.defaultParser()).dumpActionGraphFromSkyframe(env);
+    assertThat(result.isSuccess()).isTrue();
+
+    ActionGraphContainer container =
+        ActionGraphContainer.parseFrom(stdout.toByteArray(), ExtensionRegistry.getEmptyRegistry());
+
+    assertThat(container.getFileMatchesList()).hasSize(1);
+    FileMatch fileMatch = container.getFileMatches(0);
+    assertThat(fileMatch.getCardinality()).isEqualTo("SET");
+    assertThat(fileMatch.getIncludeList()).containsExactly("bin/*");
+    assertThat(fileMatch.getExcludeDirectories()).isTrue();
+    assertThat(fileMatch.getSourceArtifactIdsList()).isNotEmpty();
+    assertThat(fileMatch.getFilterFunction()).isEmpty();
+
+    // The consuming action references the match.
+    Action consumeAction =
+        container.getActionsList().stream()
+            .filter(a -> !a.getFileMatchIdsList().isEmpty())
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("No action with file_match_ids found."));
+    assertThat(consumeAction.getFileMatchIdsList()).containsExactly(fileMatch.getId());
+  }
+
+  @Test
+  public void aquery_fileMatch_textprotoOutput_serializesFields() throws Exception {
+    writeMatchFixture();
+    addOptions("--experimental_tree_artifact_selection");
+    buildTarget("//x:consume");
+
+    // textproto goes through the streamed v2 proto handler, exercising serialization of the new
+    // file_matches table and Action.file_match_ids field.
+    addOptions("--output=textproto", "--skyframe_state");
+    CommandEnvironment env = runtimeWrapper.newCommand(AqueryCommand.class);
+    ByteArrayOutputStream stdout = captureStdout(env);
+    BlazeCommandResult result =
+        new AqueryProcessor(null, TargetPattern.defaultParser()).dumpActionGraphFromSkyframe(env);
+    assertThat(result.isSuccess()).isTrue();
+
+    String text = stdout.toString(java.nio.charset.StandardCharsets.UTF_8);
+    assertThat(text).contains("file_matches {");
+    assertThat(text).contains("cardinality: \"SET\"");
+    assertThat(text).contains("include: \"bin/*\"");
+    assertThat(text).contains("file_match_ids:");
   }
 
   private ByteArrayOutputStream captureStdout(CommandEnvironment env) {

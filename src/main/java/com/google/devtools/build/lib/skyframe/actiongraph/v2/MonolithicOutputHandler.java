@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.skyframe.actiongraph.v2;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Action;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.ActionGraphContainer;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Artifact;
+import com.google.devtools.build.lib.analysis.AnalysisProtosV2.FileMatch;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.AspectDescriptor;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Configuration;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.DepSetOfFiles;
@@ -75,6 +76,11 @@ public class MonolithicOutputHandler implements AqueryOutputHandler {
   @Override
   public void outputPathFragment(PathFragment message) throws IOException {
     actionGraphContainerBuilder.addPathFragments(message);
+  }
+
+  @Override
+  public void outputFileMatch(FileMatch message) throws IOException {
+    actionGraphContainerBuilder.addFileMatches(message);
   }
 
   @Override

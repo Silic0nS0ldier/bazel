@@ -365,6 +365,51 @@ public final class ActionInputMapTest {
   }
 
   @Test
+  public void putTreeArtifact_treeThenNestedSubtree_coexist() {
+    // A ctx.actions.pick_directory subtree may be an action input alongside its enclosing tree, so
+    // both must coexist in the map. Regression: the trie previously forbade nested tree artifacts
+    // and threw ClassCastException when a subtree was added under an already-present tree.
+    SpecialArtifact tree = createTreeArtifact("tree");
+    SpecialArtifact subtree = createSubTreeArtifact(tree, "subdir");
+    TreeFileArtifact rootChild = TreeFileArtifact.createTreeOutput(tree, "subdir/file");
+    TreeFileArtifact subChild = TreeFileArtifact.createTreeOutput(subtree, "file");
+    FileArtifactValue metadata = TestMetadata.create(1);
+    TreeArtifactValue treeValue =
+        TreeArtifactValue.newBuilder(tree).putChild(rootChild, metadata).build();
+    TreeArtifactValue subValue =
+        TreeArtifactValue.newBuilder(subtree).putChild(subChild, metadata).build();
+
+    map.putTreeArtifact(tree, treeValue);
+    map.putTreeArtifact(subtree, subValue);
+
+    assertThat(map.getInputMetadata(rootChild)).isEqualTo(metadata);
+    assertThat(map.getInputMetadata(subChild)).isEqualTo(metadata);
+    // The shallowest enclosing tree wins for a prefix lookup (its value is a superset).
+    assertThat(map.getEnclosingTreeMetadata(subChild.getExecPath())).isEqualTo(treeValue);
+  }
+
+  @Test
+  public void putTreeArtifact_nestedSubtreeThenTree_coexist() {
+    // Same as above but with the reverse insertion order (subtree before its enclosing tree).
+    SpecialArtifact tree = createTreeArtifact("tree");
+    SpecialArtifact subtree = createSubTreeArtifact(tree, "subdir");
+    TreeFileArtifact subChild = TreeFileArtifact.createTreeOutput(subtree, "file");
+    FileArtifactValue metadata = TestMetadata.create(1);
+    TreeArtifactValue treeValue = TreeArtifactValue.newBuilder(tree).build();
+    TreeArtifactValue subValue =
+        TreeArtifactValue.newBuilder(subtree).putChild(subChild, metadata).build();
+
+    map.putTreeArtifact(subtree, subValue);
+    map.putTreeArtifact(tree, treeValue);
+
+    assertThat(map.getInputMetadata(subChild)).isEqualTo(metadata);
+    // Iteration visits both the enclosing tree and the nested subtree.
+    ArrayList<PathFragment> visited = new ArrayList<>();
+    map.forEachTreeArtifact((path, value) -> visited.add(path));
+    assertThat(visited).containsExactly(tree.getExecPath(), subtree.getExecPath());
+  }
+
+  @Test
   public void getTreeMetadataForPrefix_nonTree() {
     ActionInput file = ActionInputHelper.fromPath("some/file");
     map.put(file, TestMetadata.create(1));

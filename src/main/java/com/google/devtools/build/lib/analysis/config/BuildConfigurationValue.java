@@ -794,6 +794,10 @@ public class BuildConfigurationValue
     return options.getAllowMapDirectory();
   }
 
+  public boolean allowTreeArtifactSelection() {
+    return options.getExperimentalTreeArtifactSelection();
+  }
+
   /** Returns compilation mode. */
   public CompilationMode getCompilationMode() {
     return options.getCompilationMode();

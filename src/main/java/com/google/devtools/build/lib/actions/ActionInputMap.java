@@ -66,13 +66,24 @@ public final class ActionInputMap implements InputMetadataProvider {
 
     // Values in this map are either TrieArtifact (for intermediate directory nodes) or
     // TreeArtifactValue (for terminal nodes). This saves memory by not creating a TrieArtifact for
-    // terminal nodes. This optimization is safe because nested tree artifacts are forbidden.
+    // terminal nodes.
+    //
+    // Normally a node is either an intermediate directory (TrieArtifact, with subFolders) or a
+    // terminal tree (TreeArtifactValue), because tree artifacts do not nest. The exception is a
+    // subtree artifact (e.g. a ctx.actions.pick_directory result) that is an action input
+    // alongside its enclosing tree: then one path is both a terminal tree and an intermediate
+    // directory holding the nested subtree below it. Such a node is represented as a TrieArtifact
+    // whose treeValue holds the terminating tree; treeValue is null in the common non-nested case.
     //
     // We special case when we have a single child in order to save memory. This way, we do not
     // allocate hash maps for path entries with a single child (prefixes of unbranched paths, e.g.
     // [a/b/c/d]/tree{1..n}).
     // Invariant: subFolders is an immutable map iff subFolders.size() <= 1.
     private Map<String, Object> subFolders = ImmutableMap.of();
+
+    // Non-null only when a tree artifact terminates at this (intermediate) node while a more
+    // deeply nested tree artifact lives below it. See the subFolders comment.
+    @Nullable private TreeArtifactValue treeValue;
 
     void add(PathFragment treeExecPath, TreeArtifactValue treeArtifactValue) {
       TrieArtifact current = this;
@@ -83,16 +94,36 @@ public final class ActionInputMap implements InputMetadataProvider {
 
         if (it.hasNext()) {
           // Intermediate node.
-          if (next == null) {
-            var newNode = new TrieArtifact();
-            current.put(segment, newNode);
-            current = newNode;
-          } else {
-            current = (TrieArtifact) next;
-          }
-        } else if (next == null) {
+          current =
+              switch (next) {
+                case null -> {
+                  var newNode = new TrieArtifact();
+                  current.put(segment, newNode);
+                  yield newNode;
+                }
+                case TrieArtifact trie -> trie;
+                // A shallower tree terminates here, but a nested tree must be added below it.
+                // Promote the terminal into an intermediate node that keeps the shallower tree's
+                // value in treeValue while exposing subFolders for the descendant.
+                case TreeArtifactValue shallowerTree -> {
+                  var newNode = new TrieArtifact();
+                  newNode.treeValue = shallowerTree;
+                  current.put(segment, newNode);
+                  yield newNode;
+                }
+                default -> throw new AssertionError(next);
+              };
+        } else {
           // Terminal node.
-          current.put(segment, treeArtifactValue);
+          switch (next) {
+            case null -> current.put(segment, treeArtifactValue);
+            // A more deeply nested tree already lives below this path; attach this (shallower)
+            // tree's value to the existing intermediate node rather than clobbering descendants.
+            case TrieArtifact trie -> trie.treeValue = treeArtifactValue;
+            // Same exec path added again (putTreeArtifact guards against this; handled defensively).
+            case TreeArtifactValue unused -> current.put(segment, treeArtifactValue);
+            default -> throw new AssertionError(next);
+          }
         }
       }
     }
@@ -125,12 +156,21 @@ public final class ActionInputMap implements InputMetadataProvider {
           return val;
         }
         current = (TrieArtifact) next;
+        // A tree terminating at this node (with more nesting below) encloses execPath; the
+        // shallowest enclosing tree wins, matching non-nested behaviour and giving the superset
+        // TreeArtifactValue.
+        if (current.treeValue != null) {
+          return current.treeValue;
+        }
       }
       return null;
     }
 
     void forEachTreeArtifact(
         BiConsumer<PathFragment, TreeArtifactValue> consumer, PathFragment execPath) {
+      if (treeValue != null) {
+        consumer.accept(execPath, treeValue);
+      }
       for (Map.Entry<String, Object> entry : subFolders.entrySet()) {
         PathFragment childPath = execPath.getRelative(entry.getKey());
         switch (entry.getValue()) {

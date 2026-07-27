@@ -31,6 +31,7 @@ message ActionGraphContainer {
   repeated AspectDescriptor aspect_descriptors = 6;
   repeated RuleClass rule_classes = 7;
   repeated PathFragment path_fragments = 8;
+  repeated FileMatch file_matches = 9;
 }
 
 // Represents a single artifact, whether it's a source file or a derived output
@@ -130,6 +131,11 @@ message Action {
   bool is_executable = 19;
 
   reserved 20;
+
+  // The file matches (ctx.actions.match_file / match_directory / match_files) this action
+  // consumes, resolved to concrete tree children at execution time. References FileMatch entries
+  // in the enclosing ActionGraphContainer. Guarded by --experimental_tree_artifact_selection.
+  repeated uint32 file_match_ids = 22;
 }
 
 // Represents a single target (without configuration information) that is
@@ -294,4 +300,37 @@ message PathFragment {
 
   // The id of the parent path fragment.
   uint32 parent_id = 3;
+}
+
+// A ctx.actions.match_file / match_directory / match_files declaration: an
+// execution-time-resolved match of one file, one directory, or a set of files
+// inside directory artifacts. The concrete result is not known at analysis time,
+// so aquery represents the match itself (its sources, patterns, and filter)
+// rather than the resolved files. Referenced by id from Action.file_match_ids.
+message FileMatch {
+  // Identifier for this file match; valid only for this particular dump.
+  uint32 id = 1;
+
+  // Cardinality contract: "SINGLE_FILE" (match_file), "SINGLE_DIRECTORY"
+  // (match_directory), or "SET" (match_files).
+  string cardinality = 2;
+
+  // Artifact ids of the source directory (tree) artifacts this match draws from.
+  repeated uint32 source_artifact_ids = 3;
+
+  // The include glob patterns (tree-relative).
+  repeated string include = 4;
+
+  // The exclude glob patterns (tree-relative).
+  repeated string exclude = 5;
+
+  // Display form of the filter callback ("<bzl label>%<function name>"), or empty
+  // if the match has no filter.
+  string filter_function = 6;
+
+  // Whether directories are excluded from matches (match_files default True).
+  bool exclude_directories = 7;
+
+  // Whether an empty result is permitted (match_files allow_empty).
+  bool allow_empty = 8;
 }

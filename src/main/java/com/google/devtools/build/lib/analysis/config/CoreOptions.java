@@ -810,6 +810,23 @@ public abstract class CoreOptions extends FragmentOptions implements Cloneable {
               + " generation APIs.")
   public abstract boolean getAllowMapDirectory();
 
+  @Option(
+      name = "experimental_tree_artifact_selection",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {
+        OptionEffectTag.LOADING_AND_ANALYSIS,
+        OptionEffectTag.EXECUTION,
+      },
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL, OptionMetadataTag.NON_CONFIGURABLE},
+      help =
+          "If enabled, Bazel allows the use of ctx.actions.pick_file(),"
+              + " ctx.actions.pick_directory(), ctx.actions.match_file(),"
+              + " ctx.actions.match_directory() and ctx.actions.match_files(), which reference"
+              + " statically known paths (picks) or dynamically resolved contents (selections) of"
+              + " directory artifacts without staging the whole tree.")
+  public abstract boolean getExperimentalTreeArtifactSelection();
+
   /** Values for --experimental_output_paths. */
   public enum OutputPathsMode {
     /** Use the production output path model. */

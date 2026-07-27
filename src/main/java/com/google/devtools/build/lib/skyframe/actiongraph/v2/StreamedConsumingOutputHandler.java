@@ -21,6 +21,7 @@ import com.google.common.base.Preconditions;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Action;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.ActionGraphContainer;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Artifact;
+import com.google.devtools.build.lib.analysis.AnalysisProtosV2.FileMatch;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.AspectDescriptor;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Configuration;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.DepSetOfFiles;
@@ -107,6 +108,11 @@ public class StreamedConsumingOutputHandler implements AqueryConsumingOutputHand
   @Override
   public void outputPathFragment(PathFragment message) {
     addTaskToQueue(message, ActionGraphContainer.PATH_FRAGMENTS_FIELD_NUMBER, "path_fragments");
+  }
+
+  @Override
+  public void outputFileMatch(FileMatch message) {
+    addTaskToQueue(message, ActionGraphContainer.FILE_MATCHES_FIELD_NUMBER, "file_matches");
   }
 
   @Override

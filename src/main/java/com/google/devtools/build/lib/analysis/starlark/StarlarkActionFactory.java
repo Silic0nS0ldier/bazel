@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionEnvironment;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
+import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.CommandLine;
 import com.google.devtools.build.lib.actions.ExecException;
@@ -44,7 +45,11 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.ShToolchain;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.BuildInfoFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.MatchedFiles;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec.Cardinality;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.MatchedFile;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.PathMappers;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
@@ -78,9 +83,11 @@ import com.google.devtools.build.lib.starlarkbuildapi.TemplateDictApi;
 import com.google.devtools.build.lib.supplier.InterruptibleSupplier;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.lib.vfs.UnixGlob;
 import com.google.devtools.build.lib.vfs.SymlinkTargetType;
 import com.google.protobuf.GeneratedMessage;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -189,6 +196,249 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
           "'%s' has already been declared as a regular file, not directory.", filename);
     }
     return result;
+  }
+
+  @Override
+  public Artifact pickFile(FileApi directory, String path) throws EvalException {
+    return pick(directory, path, /* expectDirectory= */ false, "actions.pick_file");
+  }
+
+  @Override
+  public Artifact pickDirectory(FileApi directory, String path) throws EvalException {
+    return pick(directory, path, /* expectDirectory= */ true, "actions.pick_directory");
+  }
+
+  private Artifact pick(FileApi directory, String path, boolean expectDirectory, String what)
+      throws EvalException {
+    if (!getRuleContext().getConfiguration().allowTreeArtifactSelection()) {
+      throw Starlark.errorf(
+          "%s() is an experimental API and is subject to change. Please set the flag "
+              + "--experimental_tree_artifact_selection to enable it.",
+          what);
+    }
+    context.checkMutable(what);
+
+    // Reject source directories and regular files at the call site; only directory *artifacts*
+    // (tree artifacts and pick_directory subtree results) carry the captured, digested contents
+    // these APIs rely on.
+    if (!(directory instanceof Artifact artifact) || !artifact.isTreeArtifact()) {
+      throw Starlark.errorf(
+          "%s: 'directory' must be a directory artifact (a tree artifact declared with "
+              + "declare_directory, or a pick_directory result), got %s",
+          what, Starlark.type(directory));
+    }
+    SpecialArtifact treeLike = (SpecialArtifact) artifact;
+    PathFragment relPath = validatePickPath(path, what);
+
+    // Collapse nesting onto the root tree artifact: a pick below a subtree is the same child of the
+    // root tree with a combined relative path. This keeps the exec path and owner identical while
+    // avoiding a subtree-of-subtree, which createSubTreeArtifact forbids.
+    SpecialArtifact root;
+    PathFragment treeRelPath;
+    if (treeLike.isSubTreeArtifact()) {
+      root = treeLike.getParent();
+      treeRelPath = treeLike.getParentRelativePath().getRelative(relPath);
+    } else {
+      root = treeLike;
+      treeRelPath = relPath;
+    }
+
+    // v1 requires the tree's generating action to be known. This holds for trees obtained from
+    // dependencies, but not for a tree the current target itself just declared (owners are assigned
+    // after rule implementation returns). Referencing a path inside a same-target tree is expressed
+    // with match_file, whose resolution is deferred to execution by design.
+    if (!root.hasGeneratingActionKey()) {
+      throw Starlark.errorf(
+          "%s: 'directory' is declared by the current target, whose generating actions are not yet "
+              + "known, so it cannot be picked from. To reference a path inside a directory the "
+              + "same target declares, use match_file(sources = [directory], include = [\"%s\"]).",
+          what, treeRelPath.getPathString());
+    }
+
+    return expectDirectory
+        ? SpecialArtifact.createSubTreeArtifact(root, treeRelPath, root.getGeneratingActionKey())
+        : TreeFileArtifact.createTreeOutput(root, treeRelPath);
+  }
+
+  /**
+   * Validates a pick path: non-empty, relative, normalized, with no {@code .}/{@code ..} segments
+   * and no trailing slash. Returns the parsed {@link PathFragment}.
+   */
+  private static PathFragment validatePickPath(String path, String what) throws EvalException {
+    if (path.isEmpty()) {
+      throw Starlark.errorf("%s: 'path' must be a non-empty relative path", what);
+    }
+    if (path.startsWith("/")) {
+      throw Starlark.errorf("%s: 'path' must be relative, got absolute path '%s'", what, path);
+    }
+    if (path.endsWith("/")) {
+      throw Starlark.errorf("%s: 'path' must not end with '/', got '%s'", what, path);
+    }
+    PathFragment fragment = PathFragment.create(path);
+    if (fragment.containsUplevelReferences()
+        || !fragment.getPathString().equals(path)
+        || path.contains("/./")
+        || path.equals(".")
+        || path.startsWith("./")) {
+      throw Starlark.errorf(
+          "%s: 'path' must be a normalized relative path with no '.' or '..' segments, got '%s'",
+          what, path);
+    }
+    return fragment;
+  }
+
+  @Override
+  public MatchedFile matchFile(
+      Sequence<?> sources, Sequence<?> include, Sequence<?> exclude, Object filter)
+      throws EvalException {
+    return new MatchedFile(
+        buildMatchSpec(
+            "actions.match_file",
+            sources,
+            include,
+            exclude,
+            filter,
+            Cardinality.SINGLE_FILE,
+            /* excludeDirectories= */ true,
+            /* allowEmpty= */ false));
+  }
+
+  @Override
+  public MatchedFile matchDirectory(
+      Sequence<?> sources, Sequence<?> include, Sequence<?> exclude, Object filter)
+      throws EvalException {
+    return new MatchedFile(
+        buildMatchSpec(
+            "actions.match_directory",
+            sources,
+            include,
+            exclude,
+            filter,
+            Cardinality.SINGLE_DIRECTORY,
+            /* excludeDirectories= */ false,
+            /* allowEmpty= */ false));
+  }
+
+  @Override
+  public MatchedFiles matchFiles(
+      Sequence<?> sources,
+      Sequence<?> include,
+      Sequence<?> exclude,
+      Object filter,
+      boolean excludeDirectories,
+      boolean allowEmpty)
+      throws EvalException {
+    return new MatchedFiles(
+        buildMatchSpec(
+            "actions.match_files",
+            sources,
+            include,
+            exclude,
+            filter,
+            Cardinality.SET,
+            excludeDirectories,
+            allowEmpty));
+  }
+
+  private FileMatchSpec buildMatchSpec(
+      String what,
+      Sequence<?> sources,
+      Sequence<?> include,
+      Sequence<?> exclude,
+      Object filter,
+      Cardinality cardinality,
+      boolean excludeDirectories,
+      boolean allowEmpty)
+      throws EvalException {
+    if (!getRuleContext().getConfiguration().allowTreeArtifactSelection()) {
+      throw Starlark.errorf(
+          "%s() is an experimental API and is subject to change. Please set the flag "
+              + "--experimental_tree_artifact_selection to enable it.",
+          what);
+    }
+    context.checkMutable(what);
+
+    if (sources.isEmpty()) {
+      throw Starlark.errorf("%s: 'sources' must be non-empty", what);
+    }
+    ImmutableList.Builder<Object> normalizedSources = ImmutableList.builder();
+    HashSet<Object> seen = new HashSet<>();
+    for (Object source : sources) {
+      Object normalized = validateMatchSource(source, what);
+      if (!seen.add(normalized)) {
+        throw Starlark.errorf(
+            "%s: duplicate source %s in 'sources'", what, Starlark.repr(source, getSemantics()));
+      }
+      normalizedSources.add(normalized);
+    }
+
+    ImmutableList<String> includePatterns = validateGlobPatterns(include, "include", what);
+    ImmutableList<String> excludePatterns = validateGlobPatterns(exclude, "exclude", what);
+
+    StarlarkFunction filterFn = null;
+    if (filter != Starlark.NONE) {
+      if (!(filter instanceof StarlarkFunction fn)) {
+        throw Starlark.errorf(
+            "%s: 'filter' must be a function or None, got %s", what, Starlark.type(filter));
+      }
+      validateIsTopLevelStarlarkFunction(fn);
+      filterFn = fn;
+    }
+
+    return new FileMatchSpec(
+        normalizedSources.build(),
+        includePatterns,
+        excludePatterns,
+        filterFn,
+        getSemantics(),
+        cardinality,
+        excludeDirectories,
+        allowEmpty);
+  }
+
+  /** Validates a single {@code sources} element and returns the value to store in the spec. */
+  private static Object validateMatchSource(Object source, String what) throws EvalException {
+    switch (source) {
+      case MatchedFile matchedFile -> {
+        if (!matchedFile.isDirectory()) {
+          throw Starlark.errorf(
+              "%s: a match_file result may not be a source; only match_directory results, "
+                  + "MatchedFiless, and directory artifacts are accepted",
+              what);
+        }
+        return matchedFile;
+      }
+      case MatchedFiles fileMatch -> {
+        return fileMatch;
+      }
+      case Artifact artifact -> {
+        if (!artifact.isTreeArtifact()) {
+          throw Starlark.errorf(
+              "%s: source %s is not a directory artifact (source directories and regular files "
+                  + "are not accepted)",
+              what, artifact.getExecPathString());
+        }
+        return artifact;
+      }
+      default ->
+          throw Starlark.errorf(
+              "%s: 'sources' element must be a directory artifact, MatchedFile, or MatchedFiles, "
+                  + "got %s",
+              what, Starlark.type(source));
+    }
+  }
+
+  private static ImmutableList<String> validateGlobPatterns(
+      Sequence<?> patterns, String field, String what) throws EvalException {
+    ImmutableList.Builder<String> result = ImmutableList.builder();
+    for (String pattern : Sequence.cast(patterns, String.class, field)) {
+      String error = UnixGlob.checkPatternForError(pattern);
+      if (error != null) {
+        throw Starlark.errorf("%s: invalid '%s' pattern '%s': %s", what, field, pattern, error);
+      }
+      result.add(pattern);
+    }
+    return result.build();
   }
 
   @Override
@@ -451,6 +701,23 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
         checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
       }
       builder.setExecutable((FilesToRunProvider) executableUnchecked);
+    } else if (executableUnchecked instanceof MatchedFile matchedFile) {
+      if (!getRuleContext().getConfiguration().allowTreeArtifactSelection()) {
+        throw Starlark.errorf(
+            "file matches require --experimental_tree_artifact_selection");
+      }
+      if (matchedFile.isDirectory()) {
+        throw Starlark.errorf(
+            "'executable' must be a match from match_file, not match_directory");
+      }
+      if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+        checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+      }
+      builder.setExecutable(matchedFile);
+      // The resolved executable must be staged and its resolution result must reach spawn
+      // construction; registering the spec as an input match provides both. The executable
+      // runs without runfiles — tree children cannot carry them.
+      builder.addInputMatchSpecs(ImmutableList.of(matchedFile.getSpec()));
     } else {
       // Should have been verified by Starlark before this function is called
       throw new IllegalStateException();
@@ -736,8 +1003,34 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       Object toolchainUnchecked,
       StarlarkAction.Builder builder)
       throws EvalException {
-    if (inputs instanceof Sequence) {
-      builder.addInputs(Sequence.cast(inputs, Artifact.class, "inputs"));
+    if (inputs instanceof Sequence<?> inputSequence) {
+      // A heterogeneous list of Files and (behind --experimental_tree_artifact_selection) file
+      // matches, which are resolved to concrete children during the action's input discovery.
+      ImmutableList.Builder<Artifact> artifactInputs = ImmutableList.builder();
+      List<FileMatchSpec> matchSpecInputs = new ArrayList<>();
+      for (Object input : inputSequence) {
+        switch (input) {
+          case Artifact artifact -> artifactInputs.add(artifact);
+          case MatchedFile matchedFile -> {
+            if (matchedFile.isDirectory()) {
+              throw Starlark.errorf(
+                  "a match_directory result may not be used as an action input directly; match "
+                      + "its files with match_files, or use it as a source to another match_*");
+            }
+            matchSpecInputs.add(matchedFile.getSpec());
+          }
+          case MatchedFiles fileMatch -> matchSpecInputs.add(fileMatch.getSpec());
+          default ->
+              throw Starlark.errorf(
+                  "expected value of type 'File', 'MatchedFile' or 'MatchedFiles' for a member of"
+                      + " parameter 'inputs' but got %s instead",
+                  Starlark.type(input));
+        }
+      }
+      builder.addInputs(artifactInputs.build());
+      // addInputMatchSpecs also declares each match's source trees as inputs; discoverInputs
+      // later prunes the trees, replacing them with only the resolved children.
+      builder.addInputMatchSpecs(matchSpecInputs);
     } else {
       builder.addTransitiveInputs(Depset.cast(inputs, Artifact.class, "inputs"));
     }
@@ -798,10 +1091,27 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
                     + "of parameter 'tools' but %s",
                 e.getMessage());
           }
+        } else if (toolUnchecked instanceof MatchedFile matchedTool) {
+          // Matches as tools stage their resolved files without runfiles (tree children cannot
+          // carry them), matching bare-File tools from a staging perspective.
+          if (matchedTool.isDirectory()) {
+            throw Starlark.errorf(
+                "directory matches are not yet supported in 'tools'; match files with match_files, or"
+                    + " materialise the directory with a copy action");
+          }
+          if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+            checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+          }
+          builder.addInputMatchSpecs(ImmutableList.of(matchedTool.getSpec()));
+        } else if (toolUnchecked instanceof MatchedFiles toolMatch) {
+          if (useAutoExecGroups && execGroupUnchecked == Starlark.NONE) {
+            checkToolchainParameterIsSet(ruleContext, toolchainUnchecked);
+          }
+          builder.addInputMatchSpecs(ImmutableList.of(toolMatch.getSpec()));
         } else {
           throw Starlark.errorf(
-              "expected value of type 'File, FilesToRunProvider or Depset of Files' for a member of"
-                  + " parameter 'tools' but got %s instead",
+              "expected value of type 'File, FilesToRunProvider, Depset of Files, MatchedFile or"
+                  + " MatchedFiles' for a member of parameter 'tools' but got %s instead",
               Starlark.type(toolUnchecked));
         }
       }

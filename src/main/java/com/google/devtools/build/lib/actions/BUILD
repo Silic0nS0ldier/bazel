@@ -87,6 +87,7 @@ java_library(
         "DynamicStrategyRegistry.java",
         "EnvironmentalExecException.java",
         "EventReportingArtifacts.java",
+        "ExecutionResolvedArgument.java",
         "FailAction.java",
         "InjectedActionExecutionEvent.java",
         "InputFileErrorException.java",

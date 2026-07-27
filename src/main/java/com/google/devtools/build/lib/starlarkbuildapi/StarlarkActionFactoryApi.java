@@ -39,6 +39,27 @@ import net.starlark.java.eval.StarlarkValue;
             + " href=\"../builtins/ctx.html#actions\"><code>ctx.actions</code></a>.")
 public interface StarlarkActionFactoryApi extends StarlarkValue {
 
+  static final String MATCH_SOURCES_DOC =
+      "A sequence of directory artifacts (tree artifacts or <code>pick_directory</code> results), "
+          + "<code>MatchedFile</code>s returned by <code>match_directory</code>, and/or "
+          + "<code>MatchedFiles</code>s. Order is significant (it defines result and "
+          + "disambiguation order) and duplicates are rejected. Accepting prior results as sources "
+          + "makes refinement free: a broad match can be narrowed, and a dynamically located "
+          + "root can be matched within.";
+  static final String MATCH_INCLUDE_DOC =
+      "A list of glob patterns, with the semantics of package <code>glob()</code> "
+          + "(<code>*</code> within a segment, <code>**</code> across segments), matched against "
+          + "paths relative to each source's root. The default <code>['**']</code> matches "
+          + "everything.";
+  static final String MATCH_EXCLUDE_DOC =
+      "A list of glob patterns to subtract from the <code>include</code> matches.";
+  static final String MATCH_FILTER_DOC =
+      "An optional Starlark function receiving the list of pattern-matched candidates as "
+          + "<code>File</code> objects (sorted; <code>tree_relative_path</code> available on each) "
+          + "and returning the subset to keep, as a list. It runs after pattern matching, must be "
+          + "a top-level <code>def</code> (no lambdas or closures), must be pure, and may only "
+          + "return candidates it was given. For the single forms, it is the disambiguator when "
+          + "patterns alone cannot guarantee exactly one match.";
   static final String TRANSFORM_VERSION_FUNC_DOC =
       "A Starlark callback method which takes <code>dict</code> as an input and  returns"
           + " <code>dict</code> as an output. The input <code>dict</code> is generated"
@@ -183,6 +204,199 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             defaultValue = "None")
       })
   FileApi declareDirectory(String filename, Object sibling) throws EvalException;
+
+  @StarlarkMethod(
+      name = "pick_file",
+      doc =
+          "Returns a <a href=\"../builtins/File.html\"><code>File</code></a> for a statically known "
+              + "path inside a directory artifact. This is an experimental API guarded by "
+              + "<code>--experimental_tree_artifact_selection</code>.\n\n"
+              + "The returned file has an analysis-time exec path (the directory's exec path joined "
+              + "with <code>path</code>), so it may be used anywhere an ordinary derived file can: "
+              + "as an action input (including as <code>executable</code> or in <code>tools</code>)"
+              + ", in <a href=\"../builtins/Args.html\"><code>Args</code></a>, in providers and "
+              + "<code>DefaultInfo</code>. No new action is created; the file's generating action "
+              + "is the directory's. The path's existence (and that it is a regular file) is "
+              + "verified when the file is first consumed; a missing or wrong-kind path fails the "
+              + "consuming action.",
+      parameters = {
+        @Param(
+            name = "directory",
+            doc =
+                "A directory artifact: a tree artifact declared with "
+                    + "<a href=\"#declare_directory\"><code>declare_directory</code></a>, or "
+                    + "another <a href=\"#pick_directory\"><code>pick_directory</code></a> result. "
+                    + "Its generating action must already be known, so the directory must come "
+                    + "from a dependency rather than be declared by the same target; for the "
+                    + "same-target case use <a href=\"#match_file\"><code>match_file</code></a>.",
+            allowedTypes = {@ParamType(type = FileApi.class)}),
+        @Param(
+            name = "path",
+            doc =
+                "A non-empty relative path below <code>directory</code>. Must not start with "
+                    + "<code>/</code>, must not contain <code>.</code> or <code>..</code> "
+                    + "segments, and must not end with <code>/</code>.")
+      })
+  FileApi pickFile(FileApi directory, String path) throws EvalException;
+
+  @StarlarkMethod(
+      name = "pick_directory",
+      doc =
+          "Like <a href=\"#pick_file\"><code>pick_file</code></a>, but returns a directory artifact "
+              + "for a statically known subdirectory path inside <code>directory</code>. Consuming "
+              + "the result stages its subtree. This is an experimental API guarded by "
+              + "<code>--experimental_tree_artifact_selection</code>.",
+      parameters = {
+        @Param(
+            name = "directory",
+            doc =
+                "A directory artifact (a tree artifact or another <code>pick_directory</code> "
+                    + "result). Its generating action must already be known (see "
+                    + "<a href=\"#pick_file\"><code>pick_file</code></a>).",
+            allowedTypes = {@ParamType(type = FileApi.class)}),
+        @Param(
+            name = "path",
+            doc = "A non-empty relative path below <code>directory</code> (see pick_file).")
+      })
+  FileApi pickDirectory(FileApi directory, String path) throws EvalException;
+
+  @StarlarkMethod(
+      name = "match_file",
+      doc =
+          "Returns a <a href=\"../builtins/MatchedFile.html\"><code>MatchedFile</code></a>: an "
+              + "opaque handle that resolves, at execution time, to <b>exactly one regular file</b>"
+              + " matched inside the given directory artifacts. This is an experimental API guarded"
+              + " by <code>--experimental_tree_artifact_selection</code>.\n\n"
+              + "Because the resolved exec path is unknown until the source trees are built, the "
+              + "result is not a <a href=\"../builtins/File.html\"><code>File</code></a>; it may be "
+              + "used as an action input, in <a href=\"../builtins/Args.html\"><code>Args</code></a>"
+              + ", and as an action's <code>executable</code> or in <code>tools</code>. Resolving "
+              + "to zero or more than one file fails the consuming action.",
+      parameters = {
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
+        @Param(
+            name = "include",
+            doc = MATCH_INCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "['**']"),
+        @Param(
+            name = "exclude",
+            doc = MATCH_EXCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "[]"),
+        @Param(
+            name = "filter",
+            doc = MATCH_FILTER_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {
+              @ParamType(type = StarlarkFunction.class),
+              @ParamType(type = NoneType.class)
+            },
+            defaultValue = "None")
+      })
+  MatchedFileApi matchFile(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+      Object filter) throws EvalException;
+
+  @StarlarkMethod(
+      name = "match_directory",
+      doc =
+          "Like <a href=\"#match_file\"><code>match_file</code></a>, but resolves to <b>exactly "
+              + "one directory</b>. The result may also be passed as a <code>sources</code> element"
+              + " to the <code>match_*</code> functions, enabling match below a dynamically "
+              + "located root. This is an experimental API guarded by "
+              + "<code>--experimental_tree_artifact_selection</code>.",
+      parameters = {
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
+        @Param(
+            name = "include",
+            doc = MATCH_INCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "['**']"),
+        @Param(
+            name = "exclude",
+            doc = MATCH_EXCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "[]"),
+        @Param(
+            name = "filter",
+            doc = MATCH_FILTER_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {
+              @ParamType(type = StarlarkFunction.class),
+              @ParamType(type = NoneType.class)
+            },
+            defaultValue = "None")
+      })
+  MatchedFileApi matchDirectory(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+      Object filter) throws EvalException;
+
+  @StarlarkMethod(
+      name = "match_files",
+      doc =
+          "Returns a <a href=\"../builtins/MatchedFiles.html\"><code>MatchedFiles</code></a>: an "
+              + "opaque handle that resolves, at execution time, to the <b>set</b> of files (and, "
+              + "when <code>exclude_directories = False</code>, directories) matched inside the "
+              + "given directory artifacts. This is an experimental API guarded by "
+              + "<code>--experimental_tree_artifact_selection</code>.\n\n"
+              + "The result may be used as an action input and expanded in "
+              + "<a href=\"../builtins/Args.html\"><code>Args</code></a> via "
+              + "<code>add_all</code>/<code>add_joined</code>.",
+      parameters = {
+        @Param(name = "sources", doc = MATCH_SOURCES_DOC, named = true, positional = true),
+        @Param(
+            name = "include",
+            doc = MATCH_INCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "['**']"),
+        @Param(
+            name = "exclude",
+            doc = MATCH_EXCLUDE_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "[]"),
+        @Param(
+            name = "filter",
+            doc = MATCH_FILTER_DOC,
+            named = true,
+            positional = false,
+            allowedTypes = {
+              @ParamType(type = StarlarkFunction.class),
+              @ParamType(type = NoneType.class)
+            },
+            defaultValue = "None"),
+        @Param(
+            name = "exclude_directories",
+            doc =
+                "When False, patterns may also match directories, which join the result as "
+                    + "directory handles (consuming one stages its subtree). Defaults to True, "
+                    + "matching package glob().",
+            named = true,
+            positional = false,
+            defaultValue = "True"),
+        @Param(
+            name = "allow_empty",
+            doc =
+                "When False (the default), a match resolving to zero members fails the "
+                    + "consuming action.",
+            named = true,
+            positional = false,
+            defaultValue = "False")
+      })
+  MatchedFilesApi matchFiles(Sequence<?> sources, Sequence<?> include, Sequence<?> exclude,
+      Object filter, boolean excludeDirectories, boolean allowEmpty) throws EvalException;
 
   @StarlarkMethod(
       name = "declare_symlink",
@@ -442,10 +656,16 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
               @ParamType(type = FileApi.class),
               @ParamType(type = String.class),
               @ParamType(type = FilesToRunProviderApi.class),
+              @ParamType(type = MatchedFileApi.class),
             },
             named = true,
             positional = false,
-            doc = "The executable file to be called by the action."),
+            doc =
+                "The executable file to be called by the action. May be a <a"
+                    + " href=\"../builtins/MatchedFile.html\">MatchedFile</a> from <a"
+                    + " href=\"#match_file\">match_file</a>, in which case the executable is"
+                    + " resolved from its source directory at execution time and staged without"
+                    + " runfiles."),
         @Param(
             name = "tools",
             allowedTypes = {

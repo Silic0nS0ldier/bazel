@@ -487,16 +487,19 @@ public abstract sealed class CommandLines {
     }
 
     @Override
-    public Iterable<String> arguments() {
+    public Iterable<String> arguments() throws CommandLineExpansionException {
       return arguments(null, PathMapper.NOOP);
     }
 
     @Override
     public Iterable<String> arguments(
-        @Nullable InputMetadataProvider inputMetadataProvider, PathMapper pathMapper) {
+        @Nullable InputMetadataProvider inputMetadataProvider, PathMapper pathMapper)
+        throws CommandLineExpansionException {
       return ImmutableList.of(
           switch (arg) {
             case PathStrippable ps -> ps.expand(pathMapper::map);
+            case ExecutionResolvedArgument era ->
+                era.expandToCommandLine(inputMetadataProvider, pathMapper);
             // StarlarkAction stores the executable path as a string to save memory, but it should
             // still be mapped just like a PathFragment. In this case, the string always represents
             // a normalized path, so if it isn't (e.g. because it is an absolute path, possibly for

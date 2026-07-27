@@ -16,6 +16,8 @@ package com.google.devtools.build.lib.remote;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
+import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
 import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.remote.options.RemoteOutputsMode;
@@ -54,5 +56,28 @@ public class RemoteOutputCheckerTest {
     assertThat(
             remoteOutputChecker.shouldDownloadOutput(PathFragment.create("out/foo/bar-baz"), null))
         .isTrue();
+  }
+
+  @Test
+  public void shouldDownloadOutput_standaloneTreeChild_downloadsOnlyThatChild() {
+    // A ctx.actions.pick_file result (a TreeFileArtifact) registered as a top-level output.
+    // Previously this threw in ConcurrentArtifactPathTrie.add (a tree child's path has its tree's
+    // path as a prefix, violating the trie's no-prefix invariant); it now goes to an exact-match
+    // side set.
+    SpecialArtifact tree =
+        ActionsTestUtil.createTreeArtifactWithGeneratingAction(execRoot, "foo/tree");
+    TreeFileArtifact pick = TreeFileArtifact.createTreeOutput(tree, "bin/data");
+
+    remoteOutputChecker.addOutputToDownload(pick);
+
+    // The picked child is downloaded; a sibling under the same tree is not.
+    assertThat(remoteOutputChecker.shouldDownloadOutput(pick.getExecPath(), tree.getExecPath()))
+        .isTrue();
+    assertThat(
+            remoteOutputChecker.shouldDownloadOutput(
+                tree.getExecPath().getRelative("bin/other"), tree.getExecPath()))
+        .isFalse();
+    // The whole tree is not marked for download by registering one child.
+    assertThat(remoteOutputChecker.shouldDownloadOutput(tree.getExecPath(), null)).isFalse();
   }
 }

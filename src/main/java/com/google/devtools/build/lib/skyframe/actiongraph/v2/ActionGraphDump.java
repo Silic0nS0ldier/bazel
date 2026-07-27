@@ -34,7 +34,9 @@ import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.StarlarkAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionException;
@@ -68,6 +70,7 @@ public class ActionGraphDump {
   private final KnownNestedSets knownNestedSets;
   private final KnownAspectDescriptors knownAspectDescriptors;
   private final KnownTargets knownTargets;
+  private final KnownFileMatches knownFileMatches;
   @Nullable private final AqueryActionFilter actionFilters;
   private final boolean includeActionCmdLine;
   private final boolean includeArtifacts;
@@ -126,6 +129,7 @@ public class ActionGraphDump {
     knownNestedSets = new KnownNestedSets(aqueryOutputHandler, knownArtifacts);
     knownAspectDescriptors = new KnownAspectDescriptors(aqueryOutputHandler);
     knownTargets = new KnownTargets(aqueryOutputHandler, knownRuleClassStrings);
+    knownFileMatches = new KnownFileMatches(aqueryOutputHandler, knownArtifacts);
   }
 
   public ActionKeyContext getActionKeyContext() {
@@ -279,6 +283,14 @@ public class ActionGraphDump {
 
       actionBuilder.setPrimaryOutputId(
           knownArtifacts.dataToIdAndStreamOutputProto(action.getPrimaryOutput()));
+    }
+
+    // Store file matches (ctx.actions.match_*). These are opaque at analysis time; aquery reports
+    // the match declaration (sources, patterns, filter), not the resolved children.
+    if (action instanceof StarlarkAction starlarkAction) {
+      for (FileMatchSpec matchSpec : starlarkAction.getInputMatchSpecs()) {
+        actionBuilder.addFileMatchIds(knownFileMatches.dataToIdAndStreamOutputProto(matchSpec));
+      }
     }
 
     if (action instanceof TemplateExpansionAction templateExpansionAction) {

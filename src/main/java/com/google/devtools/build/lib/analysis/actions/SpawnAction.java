@@ -987,6 +987,23 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     }
 
     /**
+     * Sets the executable as a file match, resolved to a concrete file at execution time.
+     *
+     * <p>The caller is responsible for registering the match as an input match on the
+     * consuming action so that the resolved file is staged and the resolution result is available
+     * to command-line expansion.
+     *
+     * <p>Calling this method overrides any previous values set via calls to {@link #setExecutable}
+     * or {@link #setShellCommand}.
+     */
+    @CanIgnoreReturnValue
+    public Builder setExecutable(MatchedFile executable) {
+      this.executableArg = executable;
+      this.executableArgs = null;
+      return this;
+    }
+
+    /**
      * Sets the executable as a configured target. Automatically adds the files to run to the tools
      * and inputs and uses the executable of the target as the executable.
      *
