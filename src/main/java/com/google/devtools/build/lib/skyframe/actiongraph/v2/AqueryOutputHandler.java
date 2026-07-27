@@ -18,6 +18,7 @@ import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.AspectDescriptor;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Configuration;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.DepSetOfFiles;
+import com.google.devtools.build.lib.analysis.AnalysisProtosV2.FileMatch;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.PathFragment;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.RuleClass;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2.Target;
@@ -73,6 +74,8 @@ public interface AqueryOutputHandler extends AutoCloseable {
   void outputRuleClass(RuleClass message) throws IOException;
 
   void outputPathFragment(PathFragment message) throws IOException;
+
+  void outputFileMatch(FileMatch message) throws IOException;
 
   /** Called at the end of the query process. */
   @Override

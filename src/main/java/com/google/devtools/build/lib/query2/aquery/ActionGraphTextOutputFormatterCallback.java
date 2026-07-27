@@ -32,7 +32,9 @@ import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.AbstractFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.FileMatchSpec;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
+import com.google.devtools.build.lib.analysis.actions.StarlarkAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
 import com.google.devtools.build.lib.analysis.starlark.UnresolvedSymlinkAction;
@@ -251,6 +253,21 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
                   .sorted()
                   .collect(Collectors.joining(", ")))
           .append("]\n");
+    }
+
+    // File matches (ctx.actions.match_*) are resolved at execution time; render each as its stable
+    // placeholder form, mirroring how command lines show them.
+    if (action instanceof StarlarkAction starlarkAction
+        && !starlarkAction.getInputMatchSpecs().isEmpty()) {
+      stringBuilder.append("  FileMatches: [");
+      StringBuilder placeholders = new StringBuilder();
+      for (FileMatchSpec matchSpec : starlarkAction.getInputMatchSpecs()) {
+        if (placeholders.length() > 0) {
+          placeholders.append(", ");
+        }
+        matchSpec.appendPlaceholder(placeholders);
+      }
+      stringBuilder.append(internalToEscapedUnicode(placeholders.toString())).append("]\n");
     }
 
     if (action instanceof AbstractAction abstractAction) {

@@ -125,6 +125,15 @@ public class StarlarkAction extends SpawnAction {
     return Optional.empty();
   }
 
+  /**
+   * The file matches ({@code ctx.actions.match_*}) this action consumes as inputs, executable, or
+   * tools. Empty unless the action carries matches (see {@link EnhancedStarlarkAction}). Exposed
+   * for aquery structured output.
+   */
+  public ImmutableList<FileMatchSpec> getInputMatchSpecs() {
+    return ImmutableList.of();
+  }
+
   @Override
   public NestedSet<Artifact> getInputFilesForExtraAction(
       ActionExecutionContext actionExecutionContext)
@@ -376,6 +385,11 @@ public class StarlarkAction extends SpawnAction {
     @Override
     public Optional<Artifact> getUnusedInputsList() {
       return unusedInputsList;
+    }
+
+    @Override
+    public ImmutableList<FileMatchSpec> getInputMatchSpecs() {
+      return inputMatchSpecs;
     }
 
     @Override

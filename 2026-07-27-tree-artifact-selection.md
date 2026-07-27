@@ -410,7 +410,7 @@ Building it confirmed the declarative-surface claims (first bullet) and surfaced
 - **"Picks behave like ordinary derived files everywhere" held up — with one download-path fix.**
   A pick in `DefaultInfo.files`, in an executable rule's runfiles, and as a top-level output all work with no code change beyond Phase 1: `Artifact.key` routing plus completion-time `addToMap` parent-expansion carry the child through `CompletionFunction`, `SourceManifestAction` places it at its tree-relative runfiles path, and BEP emits it as an ordinary output `File` (not a directory).
   The one exception was **Build without the Bytes top-level download**: registering a tree child for download threw, because `RemoteOutputChecker`'s prefix trie forbids a path that is a prefix of another (a child's exec path sits under its tree's). Fixed with an exact-match side set for standalone tree-child outputs, so `bazel build //x:pick` fetches the picked child and only it.
-  (aquery still renders matches/picks as placeholders rather than structured output — that is Phase 6, not yet done.)
+  (aquery structured output is now implemented too — see the aquery finding below.)
 
 - **Subtree-input routing had to be built; `pick_directory` now works, dynamic directory members remain deferred.**
   A directory pick or a directory-typed match member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.
@@ -442,6 +442,11 @@ Building it confirmed the declarative-surface claims (first bullet) and surfaced
   - action keys digest the match's *spec identity* (sources, patterns, flags, filter name + module digest) in place of the expansion, so keys are computable before metadata exists — invalidation of the resolved set rides on the discovered-inputs cache path instead;
   - the executable-bit check on a `MatchedFile` executable is dropped: `FileArtifactValue` does not track an executable bit, and Bazel stages action outputs (including tree children) executable, so the check has nothing sound to read. A non-executable selected file fails at spawn time with the OS error.
   Matches in *depsets* passed to `add_all` are rejected at analysis time: depset fingerprinting is memoised per nested set, which cannot accommodate per-action resolution.
+
+- **aquery structured output landed as designed.**
+  `analysis_v2.proto` gained a `FileMatch` message (cardinality, source-tree artifact ids, include/exclude patterns, filter display label, flags), an `ActionGraphContainer.file_matches` table, and `Action.file_match_ids`; a consuming action lists the matches it draws on, deduped across actions by spec identity.
+  Command lines keep placeholder *strings* in `Action.arguments` (there is no command-line-fragment table to hang structure off), and there is no separate executable pointer — an executable/tool match is registered as an input match, so it shows up in `file_match_ids` like the rest.
+  Verified for `--output=proto` and `--output=textproto`; the human-readable `--output=text` renders a `FileMatches:` block of placeholders (code in place, not golden-tested).
 
 # Open questions
 

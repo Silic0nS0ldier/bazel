@@ -105,6 +105,33 @@ public final class FileMatchSpec {
     return sources;
   }
 
+  public ImmutableList<String> getInclude() {
+    return include;
+  }
+
+  public ImmutableList<String> getExclude() {
+    return exclude;
+  }
+
+  public boolean excludesDirectories() {
+    return excludeDirectories;
+  }
+
+  public boolean allowsEmpty() {
+    return allowEmpty;
+  }
+
+  /**
+   * A stable display string for the {@code filter} callback ({@code <module label>%<function
+   * name>}), or the empty string when there is no filter. Used by aquery structured output.
+   */
+  public String getFilterDisplay() {
+    if (filter == null) {
+      return "";
+    }
+    return BazelModuleContext.of(filter.getModule()).label() + "%" + filter.getName();
+  }
+
   /**
    * The distinct root tree artifacts backing this match (transitively through match
    * sources), used to declare the consuming action's scheduling dependencies.

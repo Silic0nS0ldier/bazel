@@ -150,14 +150,16 @@ The blocker originally recorded here — `expand(...)` (`:899`) receives only an
 - `tools` accepts `MatchedFile`/`MatchedFiles`; both register as input matches (staged, no runfiles — matching bare-`File` tools).
 - Progress message and `describeKey` render the placeholder via the same null-provider path as Phase 4.
 
-# Phase 6 — aquery structured output
+# Phase 6 — aquery structured output *(implemented)*
 
-Mechanical per the exploration; the pattern is regular but touches many files.
+Mechanical per the exploration; the pattern was regular and touched many files, exactly as predicted.
 
-- `src/main/protobuf/analysis_v2.proto`: `MatchedFiles` message (id, cardinality, source artifact ids, include, exclude, filter function label, flags); `repeated MatchedFiles file_selections` in `ActionGraphContainer`; `repeated uint32 file_selection_ids` (and `selected_executable_id`) on `Action`.
-  Command lines keep placeholder *strings* in `Action.arguments` — there is no command-line-fragment table today and this plan does not introduce one.
-- New `KnownMatchedFiless extends BaseCache` (`skyframe/actiongraph/v2/`), `outputMatchedFiles` on `AqueryOutputHandler` and its three implementations (`StreamedConsumingOutputHandler`, `MonolithicOutputHandler`, `AqueryConsumingOutputHandler`), wiring in `ActionGraphDump.dumpSingleAction` (`:272-281` vicinity).
-- Text format: placeholder branch in `ActionGraphTextOutputFormatterCallback.writeText` (`:229-254`), following the `(TreeArtifact)` suffix precedent.
+- `src/main/protobuf/analysis_v2.proto`: a `FileMatch` message (id, `cardinality` string `SINGLE_FILE`/`SINGLE_DIRECTORY`/`SET`, `source_artifact_ids`, `include`, `exclude`, `filter_function` display label, `exclude_directories`, `allow_empty`); `repeated FileMatch file_matches = 9` on `ActionGraphContainer`; `repeated uint32 file_match_ids = 22` on `Action`.
+  Command lines keep placeholder *strings* in `Action.arguments` — there is no command-line-fragment table and this plan did not introduce one. No separate `executable` pointer: an executable/tool match is auto-registered as an input match spec (Phase 5), so it appears in `file_match_ids` like any other.
+- New `KnownFileMatches extends BaseCache<FileMatchSpec, FileMatch>` (`skyframe/actiongraph/v2/`), keyed on the (equals/hashCode-comparable) spec so identical matches dedupe; resolves source-tree ids through `KnownArtifacts`. `outputFileMatch` added to `AqueryOutputHandler` and both concrete impls (`MonolithicOutputHandler`, `StreamedConsumingOutputHandler`; `AqueryConsumingOutputHandler` is just an interface). Wired in `ActionGraphDump.dumpSingleAction` via a new `StarlarkAction.getInputMatchSpecs()` accessor (empty on the non-enhanced base, overridden on `EnhancedStarlarkAction`). Needed BUILD deps: `analysis:actions/file_match` on the `actiongraph_v2` and `query2` libs.
+- Text format: a `FileMatches: [...]` branch in `ActionGraphTextOutputFormatterCallback.writeText`, rendering each match's stable placeholder (`match_files(sources=[...], include=[...])`), mirroring the `Inputs:`/`Outputs:` block.
+- **Tests** (`AqueryBuildToolTest`): `aquery_fileMatch_proto_referencesSourceTreeAndPatterns` (`--output=proto`: the `FileMatch` carries cardinality/include/exclude_directories/source ids, and the consuming action's `file_match_ids` reference it) and `aquery_fileMatch_textprotoOutput_serializesFields` (`--output=textproto`: the streamed v2 handler serializes `file_matches {...}` + `file_match_ids`).
+  The human-readable `--output=text` formatter branch is in place and low-risk (mirrors `Inputs:`/`Outputs:`) but is **not** golden-tested — that path runs through the normal query flow rather than the `--skyframe_state` dump these tests use, and no lightweight harness for it exists here.
 
 # Phase 7 — Hardening and graduation
 
