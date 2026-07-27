@@ -405,7 +405,7 @@ The experimental phase should exercise both under local, sandboxed, and remote s
 # Implementation findings (v1 prototype)
 
 A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and *file* selections (`select_file`, and `select_files`/`select_file` over regular files) as action inputs, resolved during input discovery.
-Building it surfaced three constraints that revise claims above and scope the first release.
+Building it surfaced four constraints that revise claims above and scope the first release.
 
 - **Subtree-input routing had to be built; `pick_directory` now works, dynamic directory members remain deferred.**
   A directory pick or a directory-typed selection member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.
@@ -413,6 +413,14 @@ Building it surfaced three constraints that revise claims above and scope the fi
   **`pick_directory` therefore works as specified** (consuming one stages exactly its subtree), including picks below picks and template-generated roots; a pick of a path with no files under it fails the consumer with the missing-path error (tree artifacts do not record empty directories, so "missing" and "empty" are indistinguishable — the error says so).
   Still deferred: **directory members of a *selection* as action inputs** — those surface as discovered inputs at execution time, a different admission path than a declared input (`select_directory` results remain usable as *sources* and everywhere else).
   The materialisation escape hatch (copy action) covers that remaining case.
+
+- **A pick can co-exist with its origin, but that required lifting a tree-artifact nesting ban in `ActionInputMap`.**
+  A pick's exec path lies underneath its origin's, so a consumer may legitimately take both the origin (the whole tree, or an enclosing `pick_directory`) and the pick as inputs — a natural pattern, and one this proposal implicitly promises by treating picks as ordinary files.
+  For `pick_file` this is free: the pick collapses to the very child the origin tree expands to (same exec path, root, and owner — hence `equals` — so they dedupe).
+  For `pick_directory` it was not: the subtree and its enclosing tree are two *nested tree artifacts*, and `ActionInputMap`'s trie was built on the standing invariant that tree artifacts never nest (it stored a bare `TreeArtifactValue` at a terminal trie node, with no room for descendants) — adding both threw `ClassCastException`.
+  Fixed by letting a trie node carry both a terminal tree value and nested children; the common non-nested case is untouched, and prefix lookups return the shallowest (superset) enclosing tree.
+  Overlapping stagings then resolve harmlessly (colliding exec paths carry byte-identical content, last-writer-wins).
+  This is the one place picks were *not* already "ordinary files everywhere"; it is now covered by unit tests on the data structure and integration tests on the co-existence and multi-layer-nesting patterns.
 
 - **Source trees must be *declared inputs*, not merely scheduling dependencies, to be resolvable during discovery.**
   The proposal envisioned exposing source trees only as scheduling dependencies (built, metadata-available, unstaged).

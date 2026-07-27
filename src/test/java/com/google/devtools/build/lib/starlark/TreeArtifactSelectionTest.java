@@ -43,8 +43,9 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   @Before
   public void writeExtractRule() throws Exception {
     // A dependency rule that extracts an "archive" into a tree artifact with a known layout:
-    //   bin/data          -> "hello"
-    //   lib/deep/other    -> "deepworld"
+    //   bin/data              -> "hello"
+    //   lib/deep/other        -> "deepworld"
+    //   pkg/sub/deep/leaf.txt -> "buried"   (for multi-layer pick_directory nesting)
     write(
         "test/extract.bzl",
         """
@@ -53,9 +54,10 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
             ctx.actions.run_shell(
                 outputs = [out],
                 command = (
-                    "mkdir -p {d}/bin {d}/lib/deep; " +
+                    "mkdir -p {d}/bin {d}/lib/deep {d}/pkg/sub/deep; " +
                     "printf hello > {d}/bin/data; " +
-                    "printf deepworld > {d}/lib/deep/other"
+                    "printf deepworld > {d}/lib/deep/other; " +
+                    "printf buried > {d}/pkg/sub/deep/leaf.txt"
                 ).format(d = out.path),
             )
             return [DefaultInfo(files = depset([out]))]
@@ -205,6 +207,188 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
 
     assertThat(e.getDetailedExitCode().getFailureDetail().getMessage())
         .contains("does not exist in tree artifact");
+  }
+
+  // --- Picks co-existing with their origins, and overlapping inputs ------------------------------
+  //
+  // A pick's exec path lies underneath its origin tree's exec path, so a consumer may end up with
+  // both the origin (whole tree or an enclosing picked directory) and the pick as inputs, which
+  // stage to overlapping exec paths. These tests assert that such overlap is benign: the build
+  // succeeds (no double-staging/conflict error) and every path resolves to the correct content.
+
+  @Test
+  public void pickFile_coexistsWithOriginTreeInSameAction() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The whole tree and a picked child of it are both inputs. The picked child's exec path is the
+    // same child the tree expands to (pick_file collapses to a root child), so they must dedupe
+    // rather than collide.
+    writeConsumeRule(
+        """
+            pick = ctx.actions.pick_file(tree, "bin/data")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [tree, pick],
+                outputs = [out],
+                command = "cat %s %s/lib/deep/other %s > %s" % (
+                    pick.path, tree.path, pick.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    // pick (hello) + tree's lib/deep/other (deepworld) + pick again (hello).
+    assertThat(readOutput("test/consume.out")).isEqualTo("hellodeepworldhello");
+  }
+
+  @Test
+  public void pickDirectory_coexistsWithOriginTreeInSameAction() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The whole tree and a picked subdirectory of it are both inputs. The subtree's children are
+    // re-parented onto the subtree yet stage to the same exec paths as the tree's own children,
+    // so the two overlap; the build must still succeed.
+    writeConsumeRule(
+        """
+            sub = ctx.actions.pick_directory(tree, "lib")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [tree, sub],
+                outputs = [out],
+                command = "cat %s/bin/data %s/deep/other > %s" % (
+                    tree.path, sub.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("hellodeepworld");
+  }
+
+  @Test
+  public void pickFile_coexistsWithEnclosingPickedDirectory() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // A picked directory and a picked file from *within* it are both inputs — overlapping again,
+    // and reached via two different origin artifacts (the subtree and the root tree).
+    writeConsumeRule(
+        """
+            sub = ctx.actions.pick_directory(tree, "lib")
+            pick = ctx.actions.pick_file(tree, "lib/deep/other")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sub, pick],
+                outputs = [out],
+                command = "cat %s/deep/other %s > %s" % (sub.path, pick.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("deepworlddeepworld");
+  }
+
+  @Test
+  public void nestedPickDirectory_twoLayers_thenPickFile() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // pick_directory of a pick_directory: the second layer collapses onto the root tree, and the
+    // final pick_file collapses too, so the consumed child is a plain root child.
+    writeConsumeRule(
+        """
+            a = ctx.actions.pick_directory(tree, "lib")
+            b = ctx.actions.pick_directory(a, "deep")
+            pick = ctx.actions.pick_file(b, "other")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [pick],
+                outputs = [out],
+                command = "cp %s %s" % (pick.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("deepworld");
+  }
+
+  @Test
+  public void nestedPickDirectory_threeLayers_stagesDeepSubtree() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // Three pick_directory layers (pkg -> sub -> deep), consumed as a subtree input. All layers
+    // collapse onto the root tree; the deepest subtree stages exactly its one buried file.
+    writeConsumeRule(
+        """
+            a = ctx.actions.pick_directory(tree, "pkg")
+            b = ctx.actions.pick_directory(a, "sub")
+            c = ctx.actions.pick_directory(b, "deep")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [c],
+                outputs = [out],
+                command = "cp %s/leaf.txt %s" % (c.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("buried");
+  }
+
+  @Test
+  public void nestedPickDirectory_deepSubtreeCoexistsWithRootTree() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // A deeply-nested picked subtree and the whole origin tree, both inputs — distant overlap
+    // (the subtree's exec path is several directories below the tree root).
+    writeConsumeRule(
+        """
+            deep = ctx.actions.pick_directory(
+                ctx.actions.pick_directory(tree, "pkg"), "sub")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [tree, deep],
+                outputs = [out],
+                command = "cat %s/bin/data %s/deep/leaf.txt > %s" % (
+                    tree.path, deep.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("helloburied");
+  }
+
+  @Test
+  public void pickFile_directPathAndViaNestedDirectories_shareExecPathAndCoexist() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The same file reached two ways: directly from the root tree, and via nested pick_directory
+    // layers. Both must collapse to the identical exec path (so they are interchangeable and
+    // dedupe as inputs). The rule writes both paths for a direct equality assertion.
+    writeConsumeRule(
+        """
+            direct = ctx.actions.pick_file(tree, "pkg/sub/deep/leaf.txt")
+            via = ctx.actions.pick_file(
+                ctx.actions.pick_directory(
+                    ctx.actions.pick_directory(tree, "pkg"), "sub/deep"),
+                "leaf.txt")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [direct, via],
+                outputs = [out],
+                command = "printf '%s|%s' > %s" % (direct.path, via.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    String output = readOutput("test/consume.out");
+    String[] paths = output.split("\\|");
+    assertThat(paths).hasLength(2);
+    assertThat(paths[0]).endsWith("/test/archive_tree/pkg/sub/deep/leaf.txt");
+    assertThat(paths[1]).isEqualTo(paths[0]);
   }
 
   @Test
@@ -549,10 +733,11 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
   @Test
   public void argsAddAll_expandsSelectionToResolvedPaths() throws Exception {
     addOptions("--experimental_tree_artifact_selection");
-    // The command receives the resolved children's exec paths as arguments and cats them.
+    // The command receives the resolved children's exec paths as arguments and cats them, in
+    // resolution order (sorted by tree-relative path: bin/data, then lib/deep/other).
     writeConsumeRule(
         """
-            sel = ctx.actions.select_files(sources = [tree], include = ["**"])
+            sel = ctx.actions.select_files(sources = [tree], include = ["bin/**", "lib/**"])
             out = ctx.actions.declare_file(ctx.attr.name + ".out")
             args = ctx.actions.args()
             args.add_all([sel])
