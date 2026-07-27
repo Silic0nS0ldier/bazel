@@ -87,6 +87,7 @@ import com.google.devtools.build.lib.vfs.UnixGlob;
 import com.google.devtools.build.lib.vfs.SymlinkTargetType;
 import com.google.protobuf.GeneratedMessage;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -228,6 +229,20 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
     }
     SpecialArtifact treeLike = (SpecialArtifact) artifact;
     PathFragment relPath = validatePickPath(path, what);
+
+    // v1 limitation: a directory pick would be a subtree SpecialArtifact, and consuming one as a
+    // standalone action input is not yet routed through Skyframe (ArtifactFunction resolves a
+    // subtree's metadata to null — the generating action only records the root tree's value). This
+    // is the plan's open question #4 (subtree-pick representation). Until that lands, reject
+    // directory picks with an actionable message rather than crash at execution.
+    if (expectDirectory) {
+      throw Starlark.errorf(
+          "%s() is not yet supported: consuming a picked subdirectory as an action input is not "
+              + "implemented in this experimental release. Pick the specific files you need with "
+              + "pick_file, or select the subtree's files with "
+              + "select_files(sources = [directory], include = [\"%s/**\"]).",
+          what, relPath.getPathString());
+    }
 
     // Collapse nesting onto the root tree artifact: a pick below a subtree is the same child of the
     // root tree with a combined relative path. This keeps the exec path and owner identical while
@@ -985,8 +1000,38 @@ public class StarlarkActionFactory implements StarlarkActionFactoryApi {
       Object toolchainUnchecked,
       StarlarkAction.Builder builder)
       throws EvalException {
-    if (inputs instanceof Sequence) {
-      builder.addInputs(Sequence.cast(inputs, Artifact.class, "inputs"));
+    if (inputs instanceof Sequence<?> inputSequence) {
+      // A heterogeneous list of Files and (behind --experimental_tree_artifact_selection) file
+      // selections, which are resolved to concrete children during the action's input discovery.
+      ImmutableList.Builder<Artifact> artifactInputs = ImmutableList.builder();
+      List<FileSelectionSpec> selectionInputs = new ArrayList<>();
+      for (Object input : inputSequence) {
+        switch (input) {
+          case Artifact artifact -> artifactInputs.add(artifact);
+          case SelectedFile selectedFile -> {
+            if (selectedFile.isDirectory()) {
+              throw Starlark.errorf(
+                  "a select_directory result may not be used as an action input directly; select "
+                      + "its files with select_files, or use it as a source to another select_*");
+            }
+            selectionInputs.add(selectedFile.getSpec());
+          }
+          case FileSelection fileSelection -> selectionInputs.add(fileSelection.getSpec());
+          default ->
+              throw Starlark.errorf(
+                  "expected value of type 'File', 'SelectedFile' or 'FileSelection' for a member of"
+                      + " parameter 'inputs' but got %s instead",
+                  Starlark.type(input));
+        }
+      }
+      builder.addInputs(artifactInputs.build());
+      builder.addInputSelections(selectionInputs);
+      // Declare each selection's source trees as inputs so their metadata is available when the
+      // action resolves selections during input discovery. discoverInputs then prunes the trees,
+      // replacing them with only the resolved children.
+      for (FileSelectionSpec spec : selectionInputs) {
+        builder.addInputs(ImmutableList.<Artifact>copyOf(spec.getSourceTreeArtifacts()));
+      }
     } else {
       builder.addTransitiveInputs(Depset.cast(inputs, Artifact.class, "inputs"));
     }

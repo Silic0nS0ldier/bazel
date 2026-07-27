@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.cmdline.BazelModuleContext;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.UnixGlob;
@@ -54,6 +55,7 @@ import net.starlark.java.eval.StarlarkThread;
  * <p>Two specs are structurally equal, so identical declarations dedupe and shared actions compare
  * equal.
  */
+@AutoCodec
 public final class FileSelectionSpec {
 
   /** What a selection resolves to, and how it is enforced. */
@@ -75,6 +77,7 @@ public final class FileSelectionSpec {
   private final boolean excludeDirectories;
   private final boolean allowEmpty;
 
+  @AutoCodec.Instantiator
   public FileSelectionSpec(
       ImmutableList<Object> sources,
       ImmutableList<String> include,
@@ -405,10 +408,12 @@ public final class FileSelectionSpec {
     }
     sb.append("]");
     if (!include.equals(ImmutableList.of("**"))) {
-      sb.append(", include = ").append(include);
+      sb.append(", include = ");
+      appendStringList(sb, include);
     }
     if (!exclude.isEmpty()) {
-      sb.append(", exclude = ").append(exclude);
+      sb.append(", exclude = ");
+      appendStringList(sb, exclude);
     }
     if (filter != null) {
       sb.append(", filter = ")
@@ -417,6 +422,17 @@ public final class FileSelectionSpec {
           .append(filter.getName());
     }
     sb.append(")");
+  }
+
+  private static void appendStringList(StringBuilder sb, ImmutableList<String> values) {
+    sb.append("[");
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) {
+        sb.append(", ");
+      }
+      sb.append("\"").append(values.get(i)).append("\"");
+    }
+    sb.append("]");
   }
 
   private String functionName() {

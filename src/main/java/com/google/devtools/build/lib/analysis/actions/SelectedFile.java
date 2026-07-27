@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.actions;
 
+import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.starlarkbuildapi.SelectedFileApi;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.StarlarkSemantics;
@@ -23,10 +24,12 @@ import net.starlark.java.eval.StarlarkSemantics;
  *
  * @see FileSelectionSpec
  */
+@AutoCodec
 public final class SelectedFile implements SelectedFileApi {
 
   private final FileSelectionSpec spec;
 
+  @AutoCodec.Instantiator
   public SelectedFile(FileSelectionSpec spec) {
     this.spec = spec;
   }

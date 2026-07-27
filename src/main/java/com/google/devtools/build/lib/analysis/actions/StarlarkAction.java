@@ -28,7 +28,9 @@ import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.CommandLines;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
 import com.google.devtools.build.lib.actions.ExecException;
@@ -46,6 +48,8 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.StarlarkAction.Code;
+import com.google.devtools.build.lib.util.DetailedExitCode;
+import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.skyframe.serialization.VisibleForSerialization;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
@@ -149,10 +153,24 @@ public class StarlarkAction extends SpawnAction {
 
     private Optional<Artifact> unusedInputsList = Optional.empty();
     private Optional<Action> shadowedAction = Optional.empty();
+    private ImmutableList<FileSelectionSpec> inputSelections = ImmutableList.of();
 
     @CanIgnoreReturnValue
     public Builder setUnusedInputsList(Optional<Artifact> unusedInputsList) {
       this.unusedInputsList = unusedInputsList;
+      return this;
+    }
+
+    /** Adds file selections to be resolved to concrete children and staged as action inputs. */
+    @CanIgnoreReturnValue
+    public Builder addInputSelections(List<FileSelectionSpec> selections) {
+      if (!selections.isEmpty()) {
+        this.inputSelections =
+            ImmutableList.<FileSelectionSpec>builder()
+                .addAll(this.inputSelections)
+                .addAll(selections)
+                .build();
+      }
       return this;
     }
 
@@ -187,7 +205,7 @@ public class StarlarkAction extends SpawnAction {
                 .buildOrThrow();
       }
       OutputPathsMode outputPathsMode = PathMappers.getOutputPathsMode(configuration);
-      return unusedInputsList.isPresent() || shadowedAction.isPresent()
+      return unusedInputsList.isPresent() || shadowedAction.isPresent() || !inputSelections.isEmpty()
           ? new EnhancedStarlarkAction(
               owner,
               tools,
@@ -201,7 +219,8 @@ public class StarlarkAction extends SpawnAction {
               mnemonic,
               outputPathsMode,
               unusedInputsList,
-              shadowedAction)
+              shadowedAction,
+              inputSelections)
           : new StarlarkAction(
               owner,
               tools,
@@ -232,6 +251,10 @@ public class StarlarkAction extends SpawnAction {
 
     private final Optional<Artifact> unusedInputsList;
     private final Optional<Action> shadowedAction;
+    // File selections consumed as action inputs; resolved to concrete children in discoverInputs.
+    private final ImmutableList<FileSelectionSpec> inputSelections;
+    // The distinct source tree artifacts backing inputSelections (scheduling deps, not staged).
+    private final NestedSet<Artifact> selectionSourceTrees;
     private boolean inputsDiscovered = false;
     private boolean prunedInputs = false;
 
@@ -248,7 +271,8 @@ public class StarlarkAction extends SpawnAction {
         String mnemonic,
         OutputPathsMode outputPathsMode,
         Optional<Artifact> unusedInputsList,
-        Optional<Action> shadowedAction) {
+        Optional<Action> shadowedAction,
+        ImmutableList<FileSelectionSpec> inputSelections) {
       super(
           owner,
           tools,
@@ -271,6 +295,8 @@ public class StarlarkAction extends SpawnAction {
               : null;
       this.unusedInputsList = unusedInputsList;
       this.shadowedAction = shadowedAction;
+      this.inputSelections = inputSelections;
+      this.selectionSourceTrees = collectSelectionSourceTrees(inputSelections);
     }
 
     @AutoCodec.Instantiator
@@ -288,7 +314,8 @@ public class StarlarkAction extends SpawnAction {
         String mnemonic,
         OutputPathsMode outputPathsMode,
         Optional<Artifact> unusedInputsList,
-        Optional<Action> shadowedAction) {
+        Optional<Action> shadowedAction,
+        ImmutableList<FileSelectionSpec> inputSelections) {
       super(
           owner,
           tools,
@@ -311,6 +338,17 @@ public class StarlarkAction extends SpawnAction {
               : null;
       this.unusedInputsList = unusedInputsList;
       this.shadowedAction = shadowedAction;
+      this.inputSelections = inputSelections;
+      this.selectionSourceTrees = collectSelectionSourceTrees(inputSelections);
+    }
+
+    private static NestedSet<Artifact> collectSelectionSourceTrees(
+        ImmutableList<FileSelectionSpec> inputSelections) {
+      NestedSetBuilder<Artifact> builder = NestedSetBuilder.stableOrder();
+      for (FileSelectionSpec spec : inputSelections) {
+        builder.addAll(spec.getSourceTreeArtifacts());
+      }
+      return builder.build();
     }
 
     @Override
@@ -333,6 +371,7 @@ public class StarlarkAction extends SpawnAction {
     @Override
     public boolean discoversInputs() {
       return unusedInputsList.isPresent()
+          || !inputSelections.isEmpty()
           || (shadowedAction.isPresent() && shadowedAction.get().discoversInputs());
     }
 
@@ -363,16 +402,26 @@ public class StarlarkAction extends SpawnAction {
 
     @Override
     public NestedSet<Artifact> getAllowedDerivedInputs() {
-      if (shadowedAction.isPresent()) {
-        return createInputs(shadowedAction.get().getAllowedDerivedInputs(), getInputs());
+      // Source trees must be allowed so the discovered-inputs action cache can re-resolve stored
+      // child paths against them.
+      NestedSet<Artifact> base =
+          shadowedAction.isPresent()
+              ? createInputs(shadowedAction.get().getAllowedDerivedInputs(), getInputs())
+              : getInputs();
+      if (selectionSourceTrees.isEmpty()) {
+        return base;
       }
-      return getInputs();
+      return createInputs(base, selectionSourceTrees);
     }
 
     @Nullable
     @Override
     public NestedSet<Artifact> discoverInputs(ActionExecutionContext actionExecutionContext)
         throws ActionExecutionException, InterruptedException {
+      // Resolve any file selections against the now-available source-tree metadata into concrete
+      // children. Only the resolved children join the inputs; the source trees are not staged.
+      NestedSet<Artifact> resolvedSelectionChildren = resolveInputSelections(actionExecutionContext);
+
       // If the Starlark action shadows another action and the shadowed action discovers its inputs,
       // we get the shadowed action's discovered inputs and append it to the Starlark action inputs.
       if (shadowedAction.isPresent() && shadowedAction.get().discoversInputs()) {
@@ -386,14 +435,81 @@ public class StarlarkAction extends SpawnAction {
         }
         updateInputs(
             createInputs(
-                shadowedActionObj.getInputs(), inputFilesForExtraAction, allStarlarkActionInputs));
+                shadowedActionObj.getInputs(),
+                inputFilesForExtraAction,
+                inputsWithoutSelectionSourceTrees(),
+                resolvedSelectionChildren));
         return NestedSetBuilder.wrap(
             Order.STABLE_ORDER, Sets.difference(getInputs().toSet(), oldInputs.toSet()));
       }
       // Otherwise, we need to "re-discover" all the original inputs: the unused ones that were
-      // removed might now be needed.
-      updateInputs(allStarlarkActionInputs);
-      return allStarlarkActionInputs;
+      // removed might now be needed. The selection source trees are pruned, leaving only the
+      // resolved children — so the consumer's footprint is the resolved subset, not the whole tree.
+      NestedSet<Artifact> discovered =
+          resolvedSelectionChildren.isEmpty()
+              ? allStarlarkActionInputs
+              : createInputs(inputsWithoutSelectionSourceTrees(), resolvedSelectionChildren);
+      updateInputs(discovered);
+      return discovered;
+    }
+
+    /**
+     * {@link #allStarlarkActionInputs} with the selection source trees removed. The trees are
+     * declared inputs only so their metadata is available during discovery; once selections resolve
+     * to concrete children, the trees themselves are neither staged nor part of the cache key.
+     */
+    private NestedSet<Artifact> inputsWithoutSelectionSourceTrees() {
+      if (selectionSourceTrees.isEmpty()) {
+        return allStarlarkActionInputs;
+      }
+      ImmutableSet<Artifact> trees = ImmutableSet.copyOf(selectionSourceTrees.toList());
+      NestedSetBuilder<Artifact> builder = NestedSetBuilder.stableOrder();
+      for (Artifact input : allStarlarkActionInputs.toList()) {
+        if (!trees.contains(input)) {
+          builder.add(input);
+        }
+      }
+      return builder.build();
+    }
+
+    /**
+     * Resolves each input selection against the source trees' now-available metadata, returning the
+     * union of resolved children. A resolution failure (empty/ambiguous/kind/filter error) fails
+     * this action with the selection's diagnostic.
+     */
+    private NestedSet<Artifact> resolveInputSelections(
+        ActionExecutionContext actionExecutionContext)
+        throws ActionExecutionException, InterruptedException {
+      if (inputSelections.isEmpty()) {
+        return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
+      }
+      NestedSetBuilder<Artifact> children = NestedSetBuilder.stableOrder();
+      for (FileSelectionSpec spec : inputSelections) {
+        try {
+          for (Artifact member :
+              spec.resolve(
+                  actionExecutionContext.getInputMetadataProvider(),
+                  actionExecutionContext.getEventHandler())) {
+            // Directory members (subtree artifacts) cannot yet be staged as standalone action
+            // inputs — the same v1 limitation as pick_directory. Fail clearly rather than crash.
+            if (member.isTreeArtifact()) {
+              throw new FileSelectionSpec.SelectionResolutionException(
+                  "directory members of a selection are not yet supported as action inputs (from "
+                      + member.getExecPathString()
+                      + "); select regular files, or materialise the directory with a copy action");
+            }
+            children.add(member);
+          }
+        } catch (FileSelectionSpec.SelectionResolutionException e) {
+          throw new ActionExecutionException(
+              e.getMessage(),
+              this,
+              /* catastrophe= */ false,
+              DetailedExitCode.of(
+                  createFailureDetail(e.getMessage(), Code.FILE_SELECTION_RESOLUTION_FAILURE)));
+        }
+      }
+      return children.build();
     }
 
     private InputStream getUnusedInputListInputStream(
@@ -517,6 +633,22 @@ public class StarlarkAction extends SpawnAction {
       // action environment with a new value.
       env.resolve(environment, clientEnv);
       return ImmutableMap.copyOf(environment);
+    }
+
+    @Override
+    protected void computeKey(
+        ActionKeyContext actionKeyContext,
+        @Nullable InputMetadataProvider inputMetadataProvider,
+        Fingerprint fp)
+        throws CommandLineExpansionException, InterruptedException {
+      super.computeKey(actionKeyContext, inputMetadataProvider, fp);
+      // Digest the selection specs' identity (sources, patterns, cardinality/flags, filter name +
+      // module digest) rather than their resolved expansion, which is unsound before metadata
+      // exists. The discovered-inputs cache path keys the resolved set on the input side.
+      fp.addInt(inputSelections.size());
+      for (FileSelectionSpec spec : inputSelections) {
+        spec.addToFingerprint(actionKeyContext, fp);
+      }
     }
   }
 }
