@@ -301,6 +301,45 @@ public abstract class BuildWithoutTheBytesIntegrationTestBase extends BuildInteg
   }
 
   @Test
+  public void toplevelPick_downloadsOnlyPickedChild() throws Exception {
+    // A ctx.actions.pick_file result as a top-level output under --remote_download_toplevel must
+    // fetch exactly the picked child from the (remote) tree, leaving its siblings remote. This is
+    // the same child-granular download the regex tests exercise, but driven by top-level pick
+    // registration in RemoteOutputChecker rather than a regex.
+    writeOutputDirRule();
+    write(
+        "pick.bzl",
+        """
+        def _pick_impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            return DefaultInfo(files = depset([ctx.actions.pick_file(tree, ctx.attr.path)]))
+
+        pick = rule(
+            implementation = _pick_impl,
+            attrs = {"src": attr.label(), "path": attr.string()},
+        )
+        """);
+    write(
+        "BUILD",
+        "load(':output_dir.bzl', 'output_dir')",
+        "load(':pick.bzl', 'pick')",
+        "output_dir(",
+        "  name = 'tree',",
+        "  content_map = {'file-1': '1', 'file-2': '2', 'file-3': '3'},",
+        ")",
+        "pick(name = 'picked', src = ':tree', path = 'file-2')");
+    addOptions("--experimental_tree_artifact_selection");
+    setDownloadToplevel();
+
+    buildTarget("//:picked");
+    waitDownloads();
+
+    assertValidOutputFile("tree/file-2", "2");
+    assertOutputDoesNotExist("tree/file-1");
+    assertOutputDoesNotExist("tree/file-3");
+  }
+
+  @Test
   public void downloadOutputsWithRegex_regexMatchParentPath_filesNotDownloaded() throws Exception {
     write(
         "BUILD",
