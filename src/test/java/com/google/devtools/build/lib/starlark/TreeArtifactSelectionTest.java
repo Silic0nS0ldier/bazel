@@ -123,6 +123,69 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
     assertThat(readOutput("test/consume.out")).isEqualTo("hello");
   }
 
+  // --- Phase 2: picks on declarative surfaces (top-level build, runfiles, BEP) ------------------
+
+  @Test
+  public void pickFile_asDefaultInfoFilesOutput_buildsTopLevel() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    // The pick itself is the target's output (no consuming action). Building the target top-level
+    // must materialise the child.
+    writeConsumeRule(
+        """
+            pick = ctx.actions.pick_file(tree, "bin/data")
+            return [DefaultInfo(files = depset([pick]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/archive_tree/bin/data")).isEqualTo("hello");
+  }
+
+  @Test
+  public void pickFile_inRunfiles_landsAtChildRunfilesPath() throws Exception {
+    addOptions("--experimental_tree_artifact_selection");
+    writeConsumeRule("    return [DefaultInfo()]"); // make package 'test' loadable
+    // An executable rule with a pick in its runfiles. The runfiles input manifest (produced by
+    // SourceManifestAction) must list the child at its tree-relative runfiles path.
+    write(
+        "run/rules.bzl",
+        """
+        def _runner_impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            pick = ctx.actions.pick_file(tree, "bin/data")
+            script = ctx.actions.declare_file(ctx.attr.name + ".sh")
+            ctx.actions.write(script, "#!/bin/sh\\ntrue\\n", is_executable = True)
+            return [DefaultInfo(
+                executable = script,
+                runfiles = ctx.runfiles(files = [pick]),
+            )]
+
+        runner = rule(
+            implementation = _runner_impl,
+            executable = True,
+            attrs = {"src": attr.label()},
+        )
+        """);
+    write(
+        "run/BUILD",
+        """
+        load(":rules.bzl", "runner")
+        runner(name = "runner", src = "//test:archive")
+        """);
+
+    buildTarget("//run:runner");
+
+    com.google.devtools.build.lib.analysis.RunfilesSupport runfilesSupport =
+        getConfiguredTarget("//run:runner")
+            .getProvider(com.google.devtools.build.lib.analysis.FilesToRunProvider.class)
+            .getRunfilesSupport();
+    Artifact manifest = runfilesSupport.getRunfilesInputManifest();
+    Path execRoot = directories.getExecRoot(TestConstants.WORKSPACE_NAME);
+    String manifestText =
+        new String(FileSystemUtils.readContentAsLatin1(execRoot.getRelative(manifest.getExecPath())));
+    assertThat(manifestText).contains(TestConstants.WORKSPACE_NAME + "/test/archive_tree/bin/data");
+  }
+
   @Test
   public void pickFile_execPathIsTreePathJoinedWithPickPath() throws Exception {
     addOptions("--experimental_tree_artifact_selection");

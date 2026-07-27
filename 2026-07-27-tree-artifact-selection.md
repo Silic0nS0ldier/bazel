@@ -404,8 +404,13 @@ The experimental phase should exercise both under local, sandboxed, and remote s
 
 # Implementation findings (v1 prototype)
 
-A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and *file* matches (`match_file`, and `match_files`/`match_file` over regular files) as action inputs, resolved during input discovery.
-Building it surfaced four constraints that revise claims above and scope the first release.
+A prototype (behind `--experimental_tree_artifact_selection`) implements picks as action inputs and on the declarative surfaces (runfiles, top-level build, BEP), and *file* matches (`match_file`, and `match_files`/`match_file` over regular files) as action inputs, resolved during input discovery.
+Building it confirmed the declarative-surface claims (first bullet) and surfaced four constraints that revise claims above and scope the first release.
+
+- **"Picks behave like ordinary derived files everywhere" held up — with one download-path fix.**
+  A pick in `DefaultInfo.files`, in an executable rule's runfiles, and as a top-level output all work with no code change beyond Phase 1: `Artifact.key` routing plus completion-time `addToMap` parent-expansion carry the child through `CompletionFunction`, `SourceManifestAction` places it at its tree-relative runfiles path, and BEP emits it as an ordinary output `File` (not a directory).
+  The one exception was **Build without the Bytes top-level download**: registering a tree child for download threw, because `RemoteOutputChecker`'s prefix trie forbids a path that is a prefix of another (a child's exec path sits under its tree's). Fixed with an exact-match side set for standalone tree-child outputs, so `bazel build //x:pick` fetches the picked child and only it.
+  (aquery still renders matches/picks as placeholders rather than structured output — that is Phase 6, not yet done.)
 
 - **Subtree-input routing had to be built; `pick_directory` now works, dynamic directory members remain deferred.**
   A directory pick or a directory-typed match member is represented as a subtree `SpecialArtifact`, and routing one as an action input initially failed: `ArtifactFunction` resolved a subtree's metadata to `null`, because the tree's generating action records a `TreeArtifactValue` only for the *root* tree.

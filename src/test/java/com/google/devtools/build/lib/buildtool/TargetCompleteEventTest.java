@@ -193,6 +193,55 @@ public final class TargetCompleteEventTest extends BuildIntegrationTestCase {
   }
 
   @Test
+  public void pickedTreeChild_appearsAsNormalOutputFile() throws Exception {
+    // A ctx.actions.pick_file result used as a top-level output must appear in the BEP as an
+    // ordinary output File (with a file:// URI, length, and digest), not as a directory.
+    write(
+        "foo/defs.bzl",
+        """
+        def _extract_impl(ctx):
+            dir = ctx.actions.declare_directory(ctx.label.name + "_tree")
+            ctx.actions.run_shell(
+                outputs = [dir],
+                command = "mkdir -p %s/bin && echo -n Hello > %s/bin/data" % (dir.path, dir.path),
+            )
+            return DefaultInfo(files = depset([dir]))
+
+        extract = rule(implementation = _extract_impl)
+
+        def _pick_impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            return DefaultInfo(files = depset([ctx.actions.pick_file(tree, "bin/data")]))
+
+        pick = rule(implementation = _pick_impl, attrs = {"src": attr.label()})
+        """);
+    write(
+        "foo/BUILD",
+        """
+        load(":defs.bzl", "extract", "pick")
+
+        extract(name = "archive")
+        pick(name = "pick", src = ":archive")
+        """);
+
+    addOptions(
+        "--experimental_tree_artifact_selection",
+        "--experimental_build_event_output_group_mode=default=named_set_of_files_only");
+    File bep = buildTargetAndCaptureBEP("//foo:pick");
+
+    // Not reported as a directory output.
+    BuildEventStreamProtos.TargetComplete targetComplete = findTargetCompleteEventInBEPStream(bep);
+    assertThat(targetComplete.getDirectoryOutputList()).isEmpty();
+
+    BuildEventStreamProtos.File outFile = findOutputFileInBEPStream(bep, "data");
+    assertThat(outFile).isNotNull();
+    assertThat(outFile.getUri()).startsWith("file://");
+    assertThat(outFile.getUri()).endsWith("/bin/foo/archive_tree/bin/data");
+    assertThat(outFile.getLength()).isEqualTo("Hello".length());
+    assertDigest("Hello", BaseEncoding.base16().lowerCase().decode(outFile.getDigest()));
+  }
+
+  @Test
   public void outputDirectory() throws Exception {
     write(
         "foo/defs.bzl",

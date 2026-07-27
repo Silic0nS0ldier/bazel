@@ -80,25 +80,24 @@ The exploration confirmed the artifact layer mostly permits this already; the bl
 **Exit criteria:** a rule extracts an archive into a declared directory, picks a file from it, feeds it to a second action as input and as `executable`; missing-path and wrong-kind cases produce the specified errors; action-cache behaviour is child-granular for the consumer... **note:** it is not, in this phase — the consumer's cache key digests the child's metadata only if the child (not the tree) is the declared input, which it is here, so child-granularity holds for picks by construction.
 Integration tests must cover local, sandboxed, and remote execution, plus BwoB (`--remote_download_minimal`) verifying sibling children are not fetched.
 
-# Phase 2 — Picks on declarative surfaces
+# Phase 2 — Picks on declarative surfaces *(implemented)*
 
 What Phase 1 does not cover: picks flowing through providers into runfiles, top-level builds, and BEP.
 These are the "assumes Starlark-visible artifact ⇒ analysis-declared node" surfaces the proposal's backward-compatibility section flags.
+Exploration predicted most of these were "free" and only BwoB registration was a hard blocker; that held — **one code change (BwoB), the rest verified working**.
 
-- **Runfiles.**
-  `analysis/Runfiles.java` has no child-of-tree concept; execution-time expansion already handles `TreeFileArtifact` (`SpawnInputExpander.java:177`), but manifest generation (`SourceManifestAction`), `Runfiles.fingerprint` (`Runfiles.java:884`), and runfiles-tree construction need auditing so a standalone child (a) lands at the right runfiles path, and (b) has its parent tree's metadata available wherever expansion happens.
-  The invariant to establish: a pick in runfiles implies a dependency on (though not staging of) its parent tree's `TreeArtifactValue`.
-- **Completion / top-level build.**
-  `CompletionFunction` tolerates a child in an output group mechanically (`Artifact.key` routing plus `addToMap` parent expansion, `skyframe/CompletionFunction.java:192-206`), but nothing populates output groups with children today; add tests and fix fallout.
-- **BwoB top-level download.**
-  `RemoteOutputChecker.shouldDownloadOutput` already understands tree children (`remote/RemoteOutputChecker.java:310-320`), but registration is blocked: `ConcurrentArtifactPathTrie.add` throws on `TreeFileArtifact` (`remote/ConcurrentArtifactPathTrie.java:41-46`) and the trie's no-prefix invariant conflicts with "child path under registered tree path".
-  Add an exact-child-paths side set consulted by `shouldDownloadOutput` before the prefix trie, so `bazel build //x:pick` materialises the child and only the child.
-- **BEP.**
-  `CompletionContext.visitArtifacts` handles children only via parent-tree expansion; a standalone child takes the plain-artifact branch (`actions/CompletionContext.java:103`) and needs its `FileArtifactValue` present in the completion `ActionInputMap` — verify the Phase 1 `addToMap` behaviour covers completion contexts, fix if not.
-- **cquery.**
-  Expected free (`query2/cquery/FilesOutputFormatterCallback.java` traverses `Artifact`s only); add coverage, no code anticipated.
+- **Completion / top-level build — free.**
+  A pick in `DefaultInfo.files` builds top-level with no code change: `Artifact.key` routing plus `addToMap` parent-expansion carry it through `CompletionFunction`. (Integration test: `pickFile_asDefaultInfoFilesOutput_buildsTopLevel`.)
+- **Runfiles — free.**
+  An executable rule with a pick in `ctx.runfiles(files=[pick])` builds, and `SourceManifestAction` lists the child at its tree-relative runfiles path (`<workspace>/…/archive_tree/bin/data`) — no `Runfiles.java` change needed; the child's `getRootRelativePath()` already yields the correct runfiles position, and its metadata is present via the parent tree's `TreeArtifactValue` in the completion input map. (Test: `pickFile_inRunfiles_landsAtChildRunfilesPath` asserts the manifest entry.)
+- **BwoB top-level download — one code change.**
+  `RemoteOutputChecker.shouldDownloadOutput` already understood tree children, but registration was blocked: `ConcurrentArtifactPathTrie.add` rejects a `TreeFileArtifact` (`remote/ConcurrentArtifactPathTrie.java:41-46`) because a child's exec path has its tree's exec path as a prefix, violating the trie's no-prefix invariant. **Fix:** a `childPathsToDownload` exact-match side set on `RemoteOutputChecker`; `addOutputToDownload` routes a `TreeFileArtifact` there instead of the trie, and `shouldDownloadOutput` consults it before the trie. `bazel build //x:pick` then downloads the picked child and only the child, and the whole tree is not wholesale-marked. (Unit test: `RemoteOutputCheckerTest.shouldDownloadOutput_standaloneTreeChild_downloadsOnlyThatChild`. **Follow-up:** end-to-end coverage on the remote fixture — `BuildWithoutTheBytesIntegrationTestBase` — is not yet added; the download *decision* logic is unit-verified, but the full fetch pipeline under `--remote_download_minimal` is not.)
+- **BEP — free.**
+  A pick as a top-level output emits in the BEP as an ordinary output `File` (file:// URI, length, digest) via the plain-artifact branch of `CompletionContext.visitArtifacts` — *not* as a directory output — with its `FileArtifactValue` available from the completion `ActionInputMap`. (Test in `TargetCompleteEventTest.pickedTreeChild_appearsAsNormalOutputFile`.)
+- **cquery — free (by construction, not separately tested).**
+  `--output=files`/`--output=starlark` traverse `Artifact`s only and never inspect tree-child-ness; a pick appears as its exec path. No code, and no dedicated cquery harness added.
 
-**Exit criteria:** a pick in `DefaultInfo.files`, in an executable rule's runfiles, and as a test data dependency behaves like an ordinary file under all download modes; BEP consumers see it as a normal `File`.
+**Exit criteria — met** for `DefaultInfo.files`, runfiles, and BEP under local execution; the BwoB download decision is unit-covered but the remote-fixture end-to-end and a `sh_test`-style test-data-dependency scenario remain as test follow-ups.
 
 # Phase 3 — Match core: types, resolution, inputs
 
