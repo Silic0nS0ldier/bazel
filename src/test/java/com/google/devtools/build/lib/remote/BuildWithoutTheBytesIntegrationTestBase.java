@@ -340,6 +340,129 @@ public abstract class BuildWithoutTheBytesIntegrationTestBase extends BuildInteg
   }
 
   @Test
+  public void matchConsumer_unmatchedSiblingChurn_currentlyReexecutesConsumer() throws Exception {
+    // KNOWN LIMITATION (regression guard for current behavior). The proposal's ideal is that a
+    // consumer of a match over one tree child is *not* re-executed when an unmatched sibling
+    // changes. That is not delivered today: because scheduling-dependency trees have no metadata
+    // during input discovery, the source tree is declared as a real input (then pruned from
+    // staging), so a change to the tree still invalidates the consumer's action even though its
+    // resolved input (matched) is byte-identical. Footprint granularity (only the matched child is
+    // staged/fetched) IS delivered — see toplevelPick_downloadsOnlyPickedChild. Improving this to
+    // true cache-invalidation granularity is tracked follow-up work.
+    writeOutputDirRule();
+    write(
+        "match.bzl",
+        """
+        def _impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            sel = ctx.actions.match_files(sources = [tree], include = ["matched"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                mnemonic = "MatchConsume",
+                command = "cat %s/matched > %s" % (tree.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        match_consumer = rule(implementation = _impl, attrs = {"src": attr.label()})
+        """);
+    addOptions("--experimental_tree_artifact_selection");
+    setDownloadToplevel();
+
+    // Clean build.
+    writeMatchConsumerBuild(/* siblingContent= */ "a");
+    buildTarget("//:consume");
+    assertValidOutputFile("consume.out", "M");
+
+    // Change only the unmatched sibling and rebuild across a restart.
+    writeMatchConsumerBuild(/* siblingContent= */ "b");
+    restartServer();
+    addOptions("--experimental_tree_artifact_selection");
+    setDownloadToplevel();
+    ActionEventCollector collector = new ActionEventCollector();
+    getRuntimeWrapper().registerSubscriber(collector);
+    buildTarget("//:consume");
+
+    // Current behavior: the consumer re-executes even though its resolved input (matched) is
+    // byte-identical, because the changed source tree is a declared input. (Ideally this would be
+    // false — see the KNOWN LIMITATION note above.) The output is nonetheless correct.
+    assertThat(
+            collector.getActionExecutedEvents().stream()
+                .anyMatch(e -> e.getAction().getMnemonic().equals("MatchConsume")))
+        .isTrue();
+    assertValidOutputFile("consume.out", "M");
+  }
+
+  private void writeMatchConsumerBuild(String siblingContent) throws IOException {
+    write(
+        "BUILD",
+        "load(':output_dir.bzl', 'output_dir')",
+        "load(':match.bzl', 'match_consumer')",
+        "output_dir(",
+        "  name = 'tree',",
+        "  content_map = {'matched': 'M', 'sibling': '" + siblingContent + "'},",
+        ")",
+        "match_consumer(name = 'consume', src = ':tree')");
+  }
+
+  @Test
+  public void pickConsumer_unmatchedSiblingChurn_doesNotReexecuteConsumer() throws Exception {
+    // Unlike a match (previous test), a pick's only declared input is the child itself — there is
+    // no whole-tree discovery dependency — so its action-cache key digests just that child.
+    // Changing an unmatched sibling must therefore NOT re-execute the consumer: picks deliver full
+    // invalidation granularity where matches (v1) deliver only footprint granularity.
+    writeOutputDirRule();
+    write(
+        "pick_consume.bzl",
+        """
+        def _impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            pick = ctx.actions.pick_file(tree, "matched")
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [pick],
+                outputs = [out],
+                mnemonic = "PickConsume",
+                command = "cat %s > %s" % (pick.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        pick_consumer = rule(implementation = _impl, attrs = {"src": attr.label()})
+        """);
+    addOptions("--experimental_tree_artifact_selection");
+    setDownloadToplevel();
+
+    write(
+        "BUILD",
+        "load(':output_dir.bzl', 'output_dir')",
+        "load(':pick_consume.bzl', 'pick_consumer')",
+        "output_dir(name = 'tree', content_map = {'matched': 'M', 'sibling': 'a'})",
+        "pick_consumer(name = 'consume', src = ':tree')");
+    buildTarget("//:consume");
+    assertValidOutputFile("consume.out", "M");
+
+    write(
+        "BUILD",
+        "load(':output_dir.bzl', 'output_dir')",
+        "load(':pick_consume.bzl', 'pick_consumer')",
+        "output_dir(name = 'tree', content_map = {'matched': 'M', 'sibling': 'b'})",
+        "pick_consumer(name = 'consume', src = ':tree')");
+    restartServer();
+    addOptions("--experimental_tree_artifact_selection");
+    setDownloadToplevel();
+    ActionEventCollector collector = new ActionEventCollector();
+    getRuntimeWrapper().registerSubscriber(collector);
+    buildTarget("//:consume");
+
+    assertThat(
+            collector.getActionExecutedEvents().stream()
+                .anyMatch(e -> e.getAction().getMnemonic().equals("PickConsume")))
+        .isFalse();
+    assertValidOutputFile("consume.out", "M");
+  }
+
+  @Test
   public void downloadOutputsWithRegex_regexMatchParentPath_filesNotDownloaded() throws Exception {
     write(
         "BUILD",
@@ -1696,6 +1819,71 @@ public abstract class BuildWithoutTheBytesIntegrationTestBase extends BuildInteg
 
     // Assert: target was successfully built
     assertValidOutputFile("a/bar.out", "file-inside\nupdated bar\n");
+  }
+
+  @Test
+  public void remoteCacheEvictBlobs_whenPrefetchingMatchedChild_incrementalBuildCanContinue()
+      throws Exception {
+    // Lost-input recovery for a resolved match child: when the child's CAS blob is evicted, the
+    // consumer's prefetch fails and rewinding must re-run the child's generating action (the tree's
+    // action, since the child is owned by it). Mirrors
+    // remoteCacheEvictBlobs_whenPrefetchingInputTree but consumes a single matched child.
+    write("BUILD");
+    writeOutputDirRule();
+    write(
+        "a/match.bzl",
+        """
+        def _impl(ctx):
+            tree = ctx.attr.src[DefaultInfo].files.to_list()[0]
+            sel = ctx.actions.match_file(sources = [tree], include = ["file-inside"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sel, ctx.file.extra],
+                outputs = [out],
+                command = "cat %s/file-inside %s > %s" % (tree.path, ctx.file.extra.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+
+        match_consumer = rule(
+            implementation = _impl,
+            attrs = {"src": attr.label(), "extra": attr.label(allow_single_file = True)},
+        )
+        """);
+    write(
+        "a/BUILD",
+        """
+        load("//:output_dir.bzl", "output_dir")
+        load(":match.bzl", "match_consumer")
+
+        output_dir(name = "foo.out", content_map = {"file-inside": "hello world"})
+        match_consumer(name = "bar", src = ":foo.out", extra = "bar.in")
+        """);
+    write("a/bar.in", "bar");
+    addOptions("--experimental_tree_artifact_selection");
+
+    // Populate remote cache.
+    buildTarget("//a:bar");
+    getOutputPath("a/foo.out").deleteTreesBelow();
+    getOutputPath("a/bar.out").delete();
+    getOutputBase().getRelative("action_cache").deleteTreesBelow();
+    restartServer();
+    addOptions("--experimental_tree_artifact_selection");
+
+    // Clean build; the matched child stays remote (not downloaded).
+    buildTarget("//a:bar");
+
+    // Evict blobs, then force the consumer to re-run so it needs the (now-evicted) matched child.
+    evictAllBlobs();
+    write("a/bar.in", "updated bar");
+    addOptions("--strategy_regexp=.*bar=local");
+    assertThrows(BuildFailedException.class, () -> buildTarget("//a:bar"));
+
+    // Incremental build without clean/shutdown: rewinding re-runs the tree action to regenerate
+    // the evicted child, and the build completes. ("hello world" (no newline) + the "updated bar\n"
+    // of bar.in, concatenated by cat.)
+    buildTarget("//a:bar");
+
+    assertValidOutputFile("a/bar.out", "hello worldupdated bar\n");
   }
 
   @Test

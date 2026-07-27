@@ -442,5 +442,6 @@ java_test(
         "//src/test/java/com/google/devtools/build/lib/testutil:TestConstants",
         "//third_party:junit4",
         "//third_party:truth",
+        "@maven//:com_google_guava_guava",
     ],
 )

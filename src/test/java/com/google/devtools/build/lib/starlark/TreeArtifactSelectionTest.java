@@ -1031,4 +1031,61 @@ public final class TreeArtifactSelectionTest extends BuildIntegrationTestCase {
 
     assertThat(readOutput("test/consume.out")).isEqualTo("toolran");
   }
+
+  // --- Phase 7: hardening (Skymeld, path mapping) -----------------------------------------------
+  // Invalidation-granularity (a sibling change not re-executing the consumer) is a cross-build,
+  // action-cache property, so it is tested in BuildWithoutTheBytesIntegrationTestBase via
+  // restartServer(), not here where in-memory Skyframe re-runs the discovering action on any
+  // source-tree change.
+
+  @Test
+  public void matchInput_underSkymeld_resolvesCorrectly() throws Exception {
+    addOptions(
+        "--experimental_tree_artifact_selection",
+        "--experimental_merged_skyframe_analysis_execution");
+    // Interleaved analysis/execution exercises the input-discovery scheduling of the match under
+    // concurrency.
+    writeConsumeRule(
+        """
+            sel = ctx.actions.match_files(sources = [tree], include = ["**"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                command = "cat %s/bin/data %s/lib/deep/other > %s" % (tree.path, tree.path, out.path),
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("hellodeepworld");
+  }
+
+  @Test
+  public void matchInput_underPathStripping_resolvesAndRenders() throws Exception {
+    addOptions(
+        "--experimental_tree_artifact_selection", "--experimental_output_paths=strip");
+    // The resolved child's path flows through both staging and command-line expansion under path
+    // mapping; the scalar match_file on the command line must render the (mapped) path and the
+    // action must still find its input.
+    writeConsumeRule(
+        """
+            sel = ctx.actions.match_file(sources = [tree], include = ["bin/data"])
+            out = ctx.actions.declare_file(ctx.attr.name + ".out")
+            args = ctx.actions.args()
+            args.add(sel)
+            ctx.actions.run_shell(
+                inputs = [sel],
+                outputs = [out],
+                arguments = [args],
+                command = 'cp "$1" %s' % out.path,
+            )
+            return [DefaultInfo(files = depset([out]))]
+        """);
+
+    buildTarget("//test:consume");
+
+    assertThat(readOutput("test/consume.out")).isEqualTo("hello");
+  }
 }

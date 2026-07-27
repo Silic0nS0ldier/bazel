@@ -202,8 +202,9 @@ Duplicate *rendered* strings on a command line, or collisions under a downstream
 Both types share the base surfaces;
 
 - **Action inputs** (`ctx.actions.run`, `run_shell`): in the `inputs` sequence alongside `File`s and depsets.
-  The action's staged inputs, Merkle tree, prefetch set, and action cache key are computed from the *resolved* files — exactly as if they had been declared directly.
-  A sibling change that does not alter the resolved result (paths and digests) does not invalidate the consumer.
+  The action's staged inputs, Merkle tree, and prefetch set are computed from the *resolved* files — so the staging/fetch footprint is proportional to what is matched, not to the whole tree.
+  Note a v1 limitation on *invalidation* (as opposed to footprint): because the source tree is a declared dependency of the consumer (needed to resolve the match during input discovery), a change to an unmatched sibling currently re-executes the consumer even though its resolved input is unchanged; see [Implementation findings](#implementation-findings-v1-prototype).
+  (Picks do not have this limitation — a pick's only declared input is the child itself, so a sibling change leaves the consumer's cache key untouched.)
 - **`Args`**: a `MatchedFiles` via `add_all` / `add_joined` expands to the resolved files at execution time, in resolution order, with `map_each`, `format_each`, `before_each`, `uniquify`, and friends applying to the expansion; a `MatchedFile` may additionally be passed to `add` (and to `map_each`-style formatting) as a single value, rendering its resolved exec path.
   Passing a match to `Args` does not by itself add files as inputs (matching the existing behaviour of `Args` versus `inputs`); a match is typically passed to both.
 - **Custom provider fields**, as a plain value or inside lists/dicts, so rules can forward a match to consumers (e.g. an extraction rule exposing "my headers", or a toolchain rule exposing "the compiler") without materialising anything.
@@ -427,11 +428,13 @@ Building it confirmed the declarative-surface claims (first bullet) and surfaced
   Overlapping stagings then resolve harmlessly (colliding exec paths carry byte-identical content, last-writer-wins).
   This is the one place picks were *not* already "ordinary files everywhere"; it is now covered by unit tests on the data structure and integration tests on the co-existence and multi-layer-nesting patterns.
 
-- **Source trees must be *declared inputs*, not merely scheduling dependencies, to be resolvable during discovery.**
+- **Source trees must be *declared inputs*, not merely scheduling dependencies — which splits the granularity promise in two.**
   The proposal envisioned exposing source trees only as scheduling dependencies (built, metadata-available, unstaged).
   In practice the Skyframe-backed metadata provider's `getTreeMetadata` returns `null`, so tree metadata is available during input discovery only for trees in the action's input map.
-  The prototype therefore declares source trees as ordinary inputs so discovery can read their metadata, then **prunes them in `discoverInputs`**, leaving only the resolved children in the staged input set and the action cache key.
-  The observable end state (footprint proportional to use) matches the proposal; the mechanism is prune-after-declare rather than scheduling-dependency.
+  The prototype therefore declares source trees as ordinary inputs so discovery can read their metadata, then **prunes them in `discoverInputs`**, leaving only the resolved children in the staged input set.
+  This delivers the **footprint** half of the promise — a consumer stages and (under Build without the Bytes) fetches only the matched children, verified end-to-end — but **not** the **cache-invalidation** half: because the source tree remains a declared dependency, any change to it (even to an unmatched sibling) re-executes the consumer, whereas the proposal implies only a change to the *resolved* set should.
+  Recovering invalidation granularity needs either metadata for scheduling-dependency trees during discovery, or a discovered-inputs cache key that excludes the source tree's own digest.
+  This is the main open item before graduation; it is a performance limitation, not a correctness one (outputs are always correct, just recomputed more often than ideal).
 
 - **Reusing a resolved match inside `Args` (or as an `executable`) needed a provider-wrapping mechanism, not the sketched re-resolution.**
   Command-line expansion receives an `InputMetadataProvider` but no handle to the consuming action, and once the source trees are pruned their metadata is absent from that provider — so a match appearing in `Args` can neither re-resolve (no tree metadata) nor read the discovery result (no action handle) directly.
