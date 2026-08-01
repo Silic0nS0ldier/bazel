@@ -43,6 +43,7 @@ import build.bazel.remote.execution.v2.Command;
 import build.bazel.remote.execution.v2.Digest;
 import build.bazel.remote.execution.v2.Directory;
 import build.bazel.remote.execution.v2.DirectoryNode;
+import build.bazel.remote.execution.v2.ExecuteResponse;
 import build.bazel.remote.execution.v2.ExecutionCapabilities;
 import build.bazel.remote.execution.v2.FileNode;
 import build.bazel.remote.execution.v2.NodeProperties;
@@ -113,6 +114,7 @@ import com.google.devtools.build.lib.remote.merkletree.MerkleTree;
 import com.google.devtools.build.lib.remote.merkletree.MerkleTreeComputer;
 import com.google.devtools.build.lib.remote.options.RemoteOptions;
 import com.google.devtools.build.lib.remote.options.RemoteOptions.ConcurrentChangesCheckLevel;
+import com.google.devtools.build.lib.remote.options.RemoteOutErrMode;
 import com.google.devtools.build.lib.remote.salt.CacheSalt;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
 import com.google.devtools.build.lib.remote.util.FakeSpawnExecutionContext;
@@ -120,6 +122,7 @@ import com.google.devtools.build.lib.remote.util.InMemoryCacheClient;
 import com.google.devtools.build.lib.remote.util.RxNoGlobalErrorsRule;
 import com.google.devtools.build.lib.remote.util.TracingMetadataUtils;
 import com.google.devtools.build.lib.remote.util.Utils.InMemoryOutput;
+import com.google.devtools.build.lib.remote.util.Utils.UndownloadedOutErrMetadata;
 import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
 import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.util.Fingerprint;
@@ -1733,6 +1736,125 @@ public class RemoteExecutionServiceTest {
       throw new AssertionError("outErr should still be writable after download finished.", err);
     }
     assertThat(context.isLockOutputFilesCalled()).isTrue();
+  }
+
+  private ActionResult outErrActionResult(int exitCode, Digest stdout, Digest stderr) {
+    return ActionResult.newBuilder()
+        .setExitCode(exitCode)
+        .setStdoutDigest(stdout)
+        .setStderrDigest(stderr)
+        .build();
+  }
+
+  private static FileArtifactValue remoteFileMetadata(Digest digest) {
+    return FileArtifactValue.createForRemoteFile(
+        DigestUtil.toBinaryDigest(digest), digest.getSizeBytes(), /* locationIndex= */ 0);
+  }
+
+  private UndownloadedOutErrMetadata downloadOutputsWithOutErrMode(
+      RemoteOutErrMode mode, RemoteActionResult result) throws Exception {
+    remoteOptions.remoteOutErrMode = mode;
+    Spawn spawn = newSpawnFromResult(result);
+    FakeSpawnExecutionContext context = newSpawnExecutionContext(spawn, outErr);
+    RemoteExecutionService service = newRemoteExecutionService();
+    RemoteAction action = service.buildRemoteAction(spawn, context);
+    createOutputDirectories(spawn);
+    when(remoteOutputChecker.shouldDownloadOutput(ArgumentMatchers.<PathFragment>any(), any()))
+        .thenReturn(true);
+
+    service.downloadOutputs(action, result);
+
+    return service.getUndownloadedOutErrMetadata(action, result);
+  }
+
+  @Test
+  public void downloadOutputs_outErrModeFailed_skipsDownloadAndReportsCasMetadata()
+      throws Exception {
+    Digest digestStdout = cache.addContents(remoteActionExecutionContext, "stdout");
+    Digest digestStderr = cache.addContents(remoteActionExecutionContext, "stderr");
+    RemoteActionResult result =
+        RemoteActionResult.createFromCache(
+            CachedActionResult.remote(outErrActionResult(0, digestStdout, digestStderr)));
+
+    UndownloadedOutErrMetadata metadata =
+        downloadOutputsWithOutErrMode(RemoteOutErrMode.FAILED, result);
+
+    assertThat(outErr.getOutputPath().exists()).isFalse();
+    assertThat(outErr.getErrorPath().exists()).isFalse();
+    assertThat(metadata)
+        .isEqualTo(
+            new UndownloadedOutErrMetadata(
+                remoteFileMetadata(digestStdout), remoteFileMetadata(digestStderr)));
+  }
+
+  @Test
+  public void downloadOutputs_outErrModeUncachedWithCacheHit_skipsDownload() throws Exception {
+    Digest digestStdout = cache.addContents(remoteActionExecutionContext, "stdout");
+    Digest digestStderr = cache.addContents(remoteActionExecutionContext, "stderr");
+    RemoteActionResult result =
+        RemoteActionResult.createFromCache(
+            CachedActionResult.remote(outErrActionResult(0, digestStdout, digestStderr)));
+
+    UndownloadedOutErrMetadata metadata =
+        downloadOutputsWithOutErrMode(RemoteOutErrMode.UNCACHED, result);
+
+    assertThat(outErr.getOutputPath().exists()).isFalse();
+    assertThat(outErr.getErrorPath().exists()).isFalse();
+    assertThat(metadata)
+        .isEqualTo(
+            new UndownloadedOutErrMetadata(
+                remoteFileMetadata(digestStdout), remoteFileMetadata(digestStderr)));
+  }
+
+  @Test
+  public void downloadOutputs_outErrModeUncachedWithExecutedAction_downloads() throws Exception {
+    Digest digestStdout = cache.addContents(remoteActionExecutionContext, "stdout");
+    Digest digestStderr = cache.addContents(remoteActionExecutionContext, "stderr");
+    RemoteActionResult result =
+        RemoteActionResult.createFromResponse(
+            ExecuteResponse.newBuilder()
+                .setResult(outErrActionResult(0, digestStdout, digestStderr))
+                .setCachedResult(false)
+                .build());
+
+    UndownloadedOutErrMetadata metadata =
+        downloadOutputsWithOutErrMode(RemoteOutErrMode.UNCACHED, result);
+
+    assertThat(readContent(outErr.getOutputPath(), UTF_8)).isEqualTo("stdout");
+    assertThat(readContent(outErr.getErrorPath(), UTF_8)).isEqualTo("stderr");
+    assertThat(metadata).isEqualTo(UndownloadedOutErrMetadata.EMPTY);
+  }
+
+  @Test
+  public void downloadOutputs_outErrModeFailedWithFailedAction_downloads() throws Exception {
+    Digest digestStdout = cache.addContents(remoteActionExecutionContext, "stdout");
+    Digest digestStderr = cache.addContents(remoteActionExecutionContext, "stderr");
+    RemoteActionResult result =
+        RemoteActionResult.createFromCache(
+            CachedActionResult.remote(outErrActionResult(1, digestStdout, digestStderr)));
+
+    UndownloadedOutErrMetadata metadata =
+        downloadOutputsWithOutErrMode(RemoteOutErrMode.FAILED, result);
+
+    assertThat(readContent(outErr.getOutputPath(), UTF_8)).isEqualTo("stdout");
+    assertThat(readContent(outErr.getErrorPath(), UTF_8)).isEqualTo("stderr");
+    assertThat(metadata).isEqualTo(UndownloadedOutErrMetadata.EMPTY);
+  }
+
+  @Test
+  public void downloadOutputs_outErrModeAll_downloads() throws Exception {
+    Digest digestStdout = cache.addContents(remoteActionExecutionContext, "stdout");
+    Digest digestStderr = cache.addContents(remoteActionExecutionContext, "stderr");
+    RemoteActionResult result =
+        RemoteActionResult.createFromCache(
+            CachedActionResult.remote(outErrActionResult(0, digestStdout, digestStderr)));
+
+    UndownloadedOutErrMetadata metadata =
+        downloadOutputsWithOutErrMode(RemoteOutErrMode.ALL, result);
+
+    assertThat(readContent(outErr.getOutputPath(), UTF_8)).isEqualTo("stdout");
+    assertThat(readContent(outErr.getErrorPath(), UTF_8)).isEqualTo("stderr");
+    assertThat(metadata).isEqualTo(UndownloadedOutErrMetadata.EMPTY);
   }
 
   @Test

@@ -172,6 +172,7 @@ final class RemoteSpawnCache implements SpawnCache {
                     /* cacheHit= */ true,
                     result.cacheName(),
                     inMemoryOutput,
+                    remoteExecutionService.getUndownloadedOutErrMetadata(action, result),
                     result.getExecutionMetadata().getExecutionStartTimestamp(),
                     result.getExecutionMetadata().getExecutionCompletedTimestamp(),
                     spawnMetrics.build(),
