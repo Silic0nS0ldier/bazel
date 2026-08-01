@@ -18,6 +18,7 @@ package com.google.devtools.build.lib.bazel.bzlmod;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.bazel.bzlmod.AttributeValuesAdapter.STRING_ESCAPE_SEQUENCE;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.gson.stream.JsonReader;
@@ -25,11 +26,15 @@ import com.google.gson.stream.JsonWriter;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.math.BigInteger;
 import java.util.Map;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.Mutability;
+import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkList;
+import net.starlark.java.eval.StarlarkSet;
 import net.starlark.java.eval.Tuple;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -97,17 +102,50 @@ public class AttributeValuesAdapterTest extends FoundationTestCase {
     dict.put("Tuple", Tuple.of("bzl", "mod"));
 
     Dict<String, Object> builtDict = dict.buildImmutable();
+    assertThat((Map<?, ?>) roundTrip(builtDict).attributes()).containsExactlyEntriesIn(builtDict);
+  }
+
+  /** Values only expressible via attr.value(): floats, sets, big ints and non-string dict keys. */
+  @Test
+  public void testStarlarkValueTypes() throws IOException {
+    Dict.Builder<String, Object> dict = new Dict.Builder<>();
+    dict.put("Float", StarlarkFloat.of(2.5));
+    dict.put("NegativeZero", StarlarkFloat.of(-0.0));
+    dict.put("Infinity", StarlarkFloat.of(Double.POSITIVE_INFINITY));
+    dict.put("BigInt", StarlarkInt.of(new BigInteger("123456789012345678901234567890")));
+    dict.put(
+        "Set", StarlarkSet.immutableCopyOf(ImmutableList.of("a", StarlarkInt.of(1), Boolean.TRUE)));
+    Dict.Builder<Object, Object> intKeyed = new Dict.Builder<>();
+    intKeyed.put(StarlarkInt.of(1), "one");
+    intKeyed.put(Tuple.of("a", "b"), StarlarkFloat.of(0.5));
+    dict.put("DictWithNonStringKeys", intKeyed.buildImmutable());
+    dict.put("NestedTuple", Tuple.of(Tuple.of(StarlarkFloat.of(1.5)), Starlark.NONE));
+
+    Dict<String, Object> builtDict = dict.buildImmutable();
+    assertThat((Map<?, ?>) roundTrip(builtDict).attributes()).containsExactlyEntriesIn(builtDict);
+  }
+
+  /** A dict key that looks like a tag marker must not be mistaken for one. */
+  @Test
+  public void testTagKeyCollisionIsEscaped() throws IOException {
+    Dict.Builder<String, Object> dict = new Dict.Builder<>();
+    Dict.Builder<String, Object> inner = new Dict.Builder<>();
+    inner.put(AttributeValuesAdapter.TAG_KEY, "not a tag");
+    dict.put("Dict", inner.buildImmutable());
+
+    Dict<String, Object> builtDict = dict.buildImmutable();
+    assertThat((Map<?, ?>) roundTrip(builtDict).attributes()).containsExactlyEntriesIn(builtDict);
+  }
+
+  private static AttributeValues roundTrip(Dict<String, Object> dict) throws IOException {
     AttributeValuesAdapter attrAdapter = new AttributeValuesAdapter();
     String jsonString;
     try (StringWriter stringWriter = new StringWriter()) {
-      attrAdapter.write(new JsonWriter(stringWriter), AttributeValues.create(builtDict));
+      attrAdapter.write(new JsonWriter(stringWriter), AttributeValues.create(dict));
       jsonString = stringWriter.toString();
     }
-    AttributeValues attributeValues;
     try (StringReader stringReader = new StringReader(jsonString)) {
-      attributeValues = attrAdapter.read(new JsonReader(stringReader));
+      return attrAdapter.read(new JsonReader(stringReader));
     }
-    assertThat((Map<?, ?>) attributeValues.attributes())
-        .containsExactly("Tuple", StarlarkList.of(Mutability.IMMUTABLE, "bzl", "mod"));
   }
 }

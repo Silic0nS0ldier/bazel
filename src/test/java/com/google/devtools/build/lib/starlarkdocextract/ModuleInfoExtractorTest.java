@@ -830,6 +830,7 @@ public final class ModuleInfoExtractorTest {
                     "k": attr.output(),
                     "l": attr.output_list(),
                     "m": attr.label_list_dict(),
+                    "n": attr.value(),
                 },
             )
             """);
@@ -905,6 +906,11 @@ public final class ModuleInfoExtractorTest {
                         .setName("m")
                         .setType(AttributeType.LABEL_LIST_DICT)
                         .setDefaultValue("{}")
+                        .build(),
+                    AttributeInfo.newBuilder()
+                        .setName("n")
+                        .setType(AttributeType.STARLARK_VALUE)
+                        .setDefaultValue("None")
                         .build())
                 .build());
   }

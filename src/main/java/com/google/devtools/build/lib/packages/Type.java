@@ -34,12 +34,15 @@ import java.util.logging.Level;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkList;
 import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkSet;
+import net.starlark.java.eval.Tuple;
 
 /**
  * Root of Type symbol hierarchy for values in the build language.
@@ -847,6 +850,97 @@ public abstract class Type<T> {
         builder.addAll(set);
       }
       return builder.build();
+    }
+  }
+
+  /**
+   * The type of an arbitrary structured Starlark value: any composition of {@code None},
+   * {@code bool}, {@code int}, {@code float}, {@code str}, {@code tuple}, {@code list}, {@code set}
+   * and {@code dict}.
+   *
+   * <p>Values carry no inherent build-graph context: labels are not accepted, so an attribute of
+   * this type never contributes dependencies.
+   *
+   * <p>Conversion deeply copies mutable containers so that a value stored on a rule can never be
+   * mutated afterwards.
+   */
+  public static final class StarlarkValueType extends Type<Object> {
+    @Override
+    public Object cast(Object value) {
+      return value;
+    }
+
+    @Override
+    public Object getDefaultValue() {
+      return Starlark.NONE;
+    }
+
+    @Override
+    public void visitLabels(LabelVisitor visitor, Object value, @Nullable Attribute context) {}
+
+    @Override
+    public String toString() {
+      return "value";
+    }
+
+    @Override
+    public Object convert(Object x, Object what, @Nullable LabelConverter labelConverter)
+        throws ConversionException {
+      return convertDeeply(x, what);
+    }
+
+    @Override
+    public Object copyAndLiftStarlarkValue(
+        Object x, Object what, @Nullable LabelConverter labelConverter) throws ConversionException {
+      return convertDeeply(x, what);
+    }
+
+    /** Validates {@code x} recursively and returns a deeply immutable equivalent. */
+    private Object convertDeeply(Object x, Object what) throws ConversionException {
+      if (x instanceof NoneType
+          || x instanceof String
+          || x instanceof Boolean
+          || x instanceof StarlarkInt
+          || x instanceof StarlarkFloat) {
+        return x;
+      }
+
+      if (x instanceof Tuple tuple) {
+        ImmutableList.Builder<Object> elems = ImmutableList.builderWithExpectedSize(tuple.size());
+        for (Object elem : tuple) {
+          elems.add(convertDeeply(elem, what));
+        }
+        return Tuple.copyOf(elems.build());
+      }
+
+      if (x instanceof StarlarkList<?> list) {
+        ImmutableList.Builder<Object> elems = ImmutableList.builderWithExpectedSize(list.size());
+        for (Object elem : list) {
+          elems.add(convertDeeply(elem, what));
+        }
+        return StarlarkList.immutableCopyOf(elems.build());
+      }
+
+      if (x instanceof StarlarkSet<?> set) {
+        ImmutableSet.Builder<Object> elems = ImmutableSet.builderWithExpectedSize(set.size());
+        for (Object elem : set) {
+          elems.add(convertDeeply(elem, what));
+        }
+        return StarlarkSet.immutableCopyOf(elems.build());
+      }
+
+      if (x instanceof Dict<?, ?> dict) {
+        Dict.Builder<Object, Object> entries = Dict.builder();
+        for (Map.Entry<?, ?> entry : dict.entrySet()) {
+          entries.put(convertDeeply(entry.getKey(), what), convertDeeply(entry.getValue(), what));
+        }
+        return entries.buildImmutable();
+      }
+
+      throw new ConversionException(
+          "a structured Starlark value (None, bool, int, float, str, tuple, list, set or dict)",
+          x,
+          what);
     }
   }
 }

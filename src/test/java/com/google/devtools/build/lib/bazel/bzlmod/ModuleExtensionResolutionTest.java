@@ -879,13 +879,44 @@ public class ModuleExtensionResolutionTest extends BuildViewTestCase {
         .isEqualTo("foo:val1,val2 bar:val3,val4");
   }
 
+  /** Tests that an attr.value() attribute round-trips structured data through a tag. */
+  @Test
+  public void starlarkValueAttribute() throws Exception {
+    scratch.overwriteFile(
+        "MODULE.bazel",
+        "bazel_dep(name='data_repo', version='1.0')",
+        "ext = use_extension('//:defs.bzl', 'ext')",
+        "ext.tag(payload={'foo': [1, 2.5, True, None, ('a', 'b')], 'bar': {1: 'one'}})",
+        "use_repo(ext, 'repo')");
+    scratch.file(
+        "defs.bzl",
+        "load('@data_repo//:defs.bzl','data_repo')",
+        "tag = tag_class(attrs = {'payload': attr.value()})",
+        "def _ext_impl(ctx):",
+        "  for mod in ctx.modules:",
+        "    for tag in mod.tags.tag:",
+        "      data_repo(name='repo', data=repr(tag.payload))",
+        "ext = module_extension(implementation=_ext_impl, tag_classes={'tag':tag})");
+    scratch.overwriteFile("BUILD");
+    scratch.file("data.bzl", "load('@repo//:data.bzl', _data='data')", "data = _data");
+    invalidatePackages(false);
+
+    SkyKey skyKey = BzlLoadValue.keyForBuild(Label.parseCanonical("//:data.bzl"));
+    EvaluationResult<BzlLoadValue> result =
+        SkyframeExecutorTestUtils.evaluate(skyframeExecutor, skyKey, false, reporter);
+    if (result.hasError()) {
+      throw result.getError().getException();
+    }
+    assertThat(result.get(skyKey).getModule().getGlobal("data"))
+        .isEqualTo("{\"foo\": [1, 2.5, True, None, (\"a\", \"b\")], \"bar\": {1: \"one\"}}");
+  }
+
   /**
    * Tests that a complex-typed attribute (here, string_list_dict) behaves well when it has a
    * default value and is omitted in a tag.
    */
   @Test
-  public void complexTypedAttribute_default() throws Exception {
-    scratch.overwriteFile(
+  public void complexTypedAttribute_default() throws Exception {    scratch.overwriteFile(
         "MODULE.bazel",
         "bazel_dep(name='data_repo', version='1.0')",
         "ext = use_extension('//:defs.bzl', 'ext')",

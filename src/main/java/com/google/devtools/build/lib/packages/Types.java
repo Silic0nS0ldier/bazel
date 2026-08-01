@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.packages;
 import com.google.devtools.build.lib.packages.Type.DictType;
 import com.google.devtools.build.lib.packages.Type.ListType;
 import com.google.devtools.build.lib.packages.Type.SetType;
+import com.google.devtools.build.lib.packages.Type.StarlarkValueType;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import java.util.List;
 import net.starlark.java.eval.StarlarkInt;
@@ -50,6 +51,10 @@ public final class Types {
   @SerializationConstant
   public static final DictType<String, List<String>> STRING_LIST_DICT =
       DictType.create(Type.STRING, STRING_LIST);
+
+  /** The type of an arbitrary structured Starlark value. */
+  @SerializationConstant
+  public static final StarlarkValueType STARLARK_VALUE = new StarlarkValueType();
 
   private Types() {}
 }
