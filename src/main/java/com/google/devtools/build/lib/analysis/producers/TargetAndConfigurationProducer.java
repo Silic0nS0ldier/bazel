@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.producers;
 
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.auto.value.AutoOneOf;
 import com.google.devtools.build.lib.actions.ActionLookupKey;
@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.analysis.config.StarlarkTransitionCache;
 import com.google.devtools.build.lib.analysis.config.transitions.PatchTransition;
 import com.google.devtools.build.lib.analysis.config.transitions.TransitionFactory;
 import com.google.devtools.build.lib.analysis.producers.RuleTransitionApplier.IdempotencyState;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.ConfigurationId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -322,7 +321,7 @@ public final class TargetAndConfigurationProducer
     Cause cause =
         new AnalysisFailedCause(
             preRuleTransitionKey.getLabel(),
-            configurationIdMessage(preRuleTransitionKey.getConfigurationKey().getOptionsChecksum()),
+            preRuleTransitionKey.getConfigurationKey().getOptionsChecksum(),
             exitCode != null ? exitCode : createDetailedExitCode(message));
     sink.acceptTargetAndConfigurationError(
         TargetAndConfigurationError.of(
@@ -330,17 +329,11 @@ public final class TargetAndConfigurationProducer
                 location,
                 message,
                 target.getLabel(),
-                configurationId(preRuleTransitionKey.getConfigurationKey()),
+                configurationChecksum(preRuleTransitionKey.getConfigurationKey()),
                 NestedSetBuilder.create(Order.STABLE_ORDER, cause),
                 exitCode != null ? exitCode : createDetailedExitCode(message))));
   }
 
-  public static ConfigurationId configurationIdMessage(@Nullable String optionsCheckSum) {
-    if (optionsCheckSum == null) {
-      return ConfigurationId.newBuilder().setId("none").build();
-    }
-    return ConfigurationId.newBuilder().setId(optionsCheckSum).build();
-  }
 
   public static DetailedExitCode createDetailedExitCode(String message) {
     return DetailedExitCode.of(

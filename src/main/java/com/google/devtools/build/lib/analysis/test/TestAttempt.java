@@ -13,8 +13,6 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.test;
 
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -22,9 +20,8 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TestStatus;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -190,34 +187,34 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.testResult(
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.TestResultId(
         testAction.getOwner().getLabel(),
-        testAction.getRunNumber(),
-        testAction.getShardNum(),
-        attempt,
-        configurationId(testAction.getConfiguration()));
+        testAction.getConfiguration().checksum(),
+        testAction.getRunNumber() + 1,
+        testAction.getShardNum() + 1,
+        attempt);
   }
 
   @Override
-  public Collection<BuildEventId> postedAfter() {
+  public Collection<BuildEventIdRepr> postedAfter() {
     return ImmutableList.of(
-        BuildEventIdUtil.targetCompleted(
-            testAction.getOwner().getLabel(), configurationId(testAction.getConfiguration())));
+        new BuildEventIdRepr.TargetCompletedId(
+            testAction.getOwner().getLabel(), testAction.getConfiguration().checksum(), null));
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     if (lastAttempt) {
       return ImmutableList.of();
     } else {
       return ImmutableList.of(
-          BuildEventIdUtil.testResult(
+          new BuildEventIdRepr.TestResultId(
               testAction.getOwner().getLabel(),
-              testAction.getRunNumber(),
-              testAction.getShardNum(),
-              attempt + 1,
-              configurationId(testAction.getConfiguration())));
+              testAction.getConfiguration().checksum(),
+              testAction.getRunNumber() + 1,
+              testAction.getShardNum() + 1,
+              attempt + 1));
     }
   }
 

@@ -44,9 +44,8 @@ import com.google.devtools.build.lib.analysis.test.TestProvider;
 import com.google.devtools.build.lib.analysis.test.TestRunnerAction;
 import com.google.devtools.build.lib.analysis.test.TestStrategy;
 import com.google.devtools.build.lib.analysis.test.TestTargetExecutionSettings;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
 import com.google.devtools.build.lib.buildtool.BuildResult;
@@ -276,12 +275,12 @@ public class RunCommand implements BlazeCommand {
                   e.result.getDetailedExitCode().getExitCode(), e.finishTimeMillis));
       return e.result;
     }
-    ImmutableList.Builder<BuildEventId> runCompleteChildrenEvents =
-        ImmutableList.<BuildEventId>builder()
-            .add(BuildEventIdUtil.buildToolLogs())
-            .add(BuildEventIdUtil.buildMetrics());
+    ImmutableList.Builder<BuildEventIdRepr> runCompleteChildrenEvents =
+        ImmutableList.<BuildEventIdRepr>builder()
+            .add(new BuildEventIdRepr.BuildToolLogsId())
+            .add(new BuildEventIdRepr.BuildMetricsId());
     if (runOptions.getScriptPath() == null) {
-      runCompleteChildrenEvents.add(BuildEventIdUtil.execRequestId());
+      runCompleteChildrenEvents.add(new BuildEventIdRepr.ExecRequestId());
     }
     env.getReporter()
         .post(

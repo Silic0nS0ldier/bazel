@@ -18,7 +18,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildtool.BuildResult;
 import java.util.Collection;
 
@@ -31,7 +31,7 @@ public final class BuildCompleteEvent extends BuildCompletingEvent {
   private final BuildResult result;
 
   /** Construct the BuildCompleteEvent. */
-  public BuildCompleteEvent(BuildResult result, Collection<BuildEventId> children) {
+  public BuildCompleteEvent(BuildResult result, Collection<BuildEventIdRepr> children) {
     super(result.getDetailedExitCode(), result.getStopTime(), children);
     this.result = checkNotNull(result);
   }

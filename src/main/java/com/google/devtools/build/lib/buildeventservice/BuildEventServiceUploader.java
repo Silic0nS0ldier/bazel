@@ -43,6 +43,7 @@ import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventArtifactUploader;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
@@ -231,7 +232,8 @@ public final class BuildEventServiceUploader implements Runnable {
         } else {
           invocationStatus = InvocationStatus.FAILED;
         }
-      } else if (event instanceof AbortedEvent && event.getEventId().hasBuildFinished()) {
+      } else if (event instanceof AbortedEvent
+          && event.getEventId() instanceof BuildEventIdRepr.BuildFinishedId) {
         // An AbortedEvent with a build finished ID means we are crashing.
         invocationStatus = InvocationStatus.FAILED;
       }

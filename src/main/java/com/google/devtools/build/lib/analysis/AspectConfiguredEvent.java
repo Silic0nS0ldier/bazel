@@ -14,15 +14,14 @@
 package com.google.devtools.build.lib.analysis;
 
 import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.buildEvent;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -52,15 +51,15 @@ public class AspectConfiguredEvent implements BuildEventWithConfiguration {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.aspectConfigured(target, aspectClassName);
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.TargetConfiguredId(target, aspectClassName);
   }
 
   @Override
-  public ImmutableList<BuildEventId> getChildrenEvents() {
+  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of(
-        BuildEventIdUtil.aspectCompleted(
-            target, configurationId(configuration), aspectDescription));
+        new BuildEventIdRepr.TargetCompletedId(
+            target, configurationChecksum(configuration), aspectDescription));
   }
 
   public String getAspectClassName() {

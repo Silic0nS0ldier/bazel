@@ -15,9 +15,8 @@ package com.google.devtools.build.lib.metrics;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildMetrics;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -36,12 +35,12 @@ public class BuildMetricsEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.buildMetrics();
+  public BuildEventIdRepr getEventId() {
+    return new BuildEventIdRepr.BuildMetricsId();
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -55,7 +54,7 @@ public class BuildMetricsEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventId> postedAfter() {
-    return ImmutableList.of(BuildEventIdUtil.buildFinished());
+  public Collection<BuildEventIdRepr> postedAfter() {
+    return ImmutableList.of(new BuildEventIdRepr.BuildFinishedId());
   }
 }

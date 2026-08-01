@@ -30,7 +30,7 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration.TestOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.NullConfiguration;
@@ -941,7 +941,7 @@ public class BuildConfigurationValue
     if (buildEventId == null) {
       synchronized (this) {
         if (buildEventId == null) {
-          buildEventId = BuildEventIdUtil.configurationId(checksum());
+          buildEventId = new BuildEventIdRepr.ConfigurationId(checksum()).toProto();
         }
       }
     }
@@ -981,19 +981,20 @@ public class BuildConfigurationValue
     return new BuildConfigurationEvent(eventId, builder.build());
   }
 
-  public static BuildEventId.ConfigurationId configurationIdMessage(
-      @Nullable BuildConfigurationValue configuration) {
-    if (configuration == null) {
-      return BuildEventIdUtil.nullConfigurationIdMessage();
-    }
-    return BuildEventIdUtil.configurationIdMessage(configuration.checksum());
+  /**
+   * The {@code ConfigurationId} checksum used for the null configuration (e.g. source files and
+   * other unconfigurable targets).
+   */
+  public static final String NULL_CONFIGURATION_CHECKSUM = "none";
+
+  /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code config}. */
+  public static String configurationChecksum(@Nullable BuildConfigurationValue config) {
+    return config == null ? NULL_CONFIGURATION_CHECKSUM : config.checksum();
   }
 
-  public static BuildEventId configurationId(@Nullable BuildConfigurationValue configuration) {
-    if (configuration == null) {
-      return BuildEventIdUtil.nullConfigurationId();
-    }
-    return configuration.getEventId();
+  /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code key}. */
+  public static String configurationChecksum(@Nullable BuildConfigurationKey key) {
+    return key == null ? NULL_CONFIGURATION_CHECKSUM : key.getOptions().checksum();
   }
 
   public static BuildEvent buildEvent(@Nullable BuildConfigurationValue configuration) {

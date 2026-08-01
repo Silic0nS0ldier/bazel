@@ -22,9 +22,8 @@ import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.buildeventstream.NullConfiguration;
@@ -124,17 +123,19 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
   }
 
   @Override
-  public BuildEventId getEventId() {
+  public BuildEventIdRepr getEventId() {
     if (action.getOwner() == null) {
-      return BuildEventIdUtil.actionCompleted(actionId);
+      return new BuildEventIdRepr.ActionCompletedId(actionId.toString(), null, null);
     } else {
-      return BuildEventIdUtil.actionCompleted(
-          actionId, action.getOwner().getLabel(), action.getOwner().getConfigurationChecksum());
+      return new BuildEventIdRepr.ActionCompletedId(
+          actionId.toString(),
+          action.getOwner().getLabel(),
+          action.getOwner().getConfigurationChecksum());
     }
   }
 
   @Override
-  public Collection<BuildEventId> getChildrenEvents() {
+  public Collection<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -220,7 +221,7 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
       if (configuration == null) {
         configuration = NullConfiguration.INSTANCE;
       }
-      actionBuilder.setConfiguration(configuration.getEventId().getConfiguration());
+      actionBuilder.setConfiguration(configuration.getEventId().toProto().getConfiguration());
     }
     if (exception == null) {
       String uri = pathConverter.apply(primaryOutput);

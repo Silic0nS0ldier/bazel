@@ -14,7 +14,7 @@
 
 package com.google.devtools.build.lib.buildeventstream;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import java.util.Collection;
 
 /** Interface for {@link BuildEvent}s with order constraints. */
@@ -22,9 +22,9 @@ public interface BuildEventWithOrderConstraint extends BuildEvent {
   /**
    * Specify events that need to come first.
    *
-   * <p>Specify events by their {@link BuildEventId} that need to be posted on the build event
+   * <p>Specify events by their {@link BuildEventIdRepr} that need to be posted on the build event
    * stream before this event. In doing so, the event promises that the events to be waited for are
    * already generated, so that the event does not have to be buffered for an extended time.
    */
-  Collection<BuildEventId> postedAfter();
+  Collection<BuildEventIdRepr> postedAfter();
 }

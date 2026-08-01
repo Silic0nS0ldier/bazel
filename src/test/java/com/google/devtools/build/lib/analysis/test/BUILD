@@ -62,7 +62,9 @@ java_test(
     srcs = ["TestProgressTest.java"],
     deps = [
         "//src/main/java/com/google/devtools/build/lib/analysis:test/test_progress",
+        "//src/main/java/com/google/devtools/build/lib/buildeventstream",
         "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//third_party:junit4",
         "//third_party:truth",
     ],

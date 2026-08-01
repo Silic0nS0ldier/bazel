@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.buildtool.buildevent;
 
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.util.ExitCode;
 import java.util.Collection;
 
@@ -29,7 +29,7 @@ import java.util.Collection;
 public class RunBuildCompleteEvent extends BuildCompletingEvent {
 
   public RunBuildCompleteEvent(
-      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventId> children) {
+      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventIdRepr> children) {
     super(exitCode, finishTimeMillis, children);
   }
 
