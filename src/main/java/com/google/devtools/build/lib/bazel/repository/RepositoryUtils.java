@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.bazel.repository;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.skyframe.PackageLookupFunction;
 import com.google.devtools.build.lib.skyframe.PackageLookupValue;
 import com.google.devtools.build.lib.util.OS;
@@ -37,8 +38,6 @@ import net.starlark.java.eval.Starlark;
 
 /** Utility methods related to repo fetching. */
 public class RepositoryUtils {
-
-  public static final String WORKSPACE_SYMLINK_NAME = "_main";
 
   private RepositoryUtils() {}
 
@@ -119,7 +118,8 @@ public class RepositoryUtils {
     boolean symlinksResolveWithinRepo = true;
     try {
       Collection<Path> symlinks = FileSystemUtils.traverseTree(repoDir, Path::isSymbolicLink);
-      Path workspaceSymlinkUnderExternal = externalRepoRoot.getChild(WORKSPACE_SYMLINK_NAME);
+      Path workspaceSymlinkUnderExternal =
+          externalRepoRoot.getChild(RepositoryName.MAIN_REPOSITORY_DIRECTORY_NAME);
       if (replantSymlinksIntoMainRepo) {
         FileSystemUtils.ensureSymbolicLink(workspaceSymlinkUnderExternal, workspace);
       }

@@ -47,12 +47,12 @@ public class TestConstants {
    * Location in the bazel repo where embedded binaries come from.
    */
   public static final ImmutableList<String> EMBEDDED_SCRIPTS_PATHS = ImmutableList.of(
-      "_main/src/main/tools");
+      RepositoryName.MAIN_REPOSITORY_DIRECTORY_NAME + "/src/main/tools");
 
   /**
    * Default workspace name.
    */
-  public static final String WORKSPACE_NAME = "_main";
+  public static final String WORKSPACE_NAME = RepositoryName.MAIN_REPOSITORY_DIRECTORY_NAME;
 
   public static final BzlLoadValue.Key OBJC_INFO_LOAD_KEY =
       keyForBuild(Label.parseCanonicalUnchecked("@rules_cc+//cc/private:objc_info.bzl"));
@@ -66,25 +66,25 @@ public class TestConstants {
   /**
    * Directory where we can find bazel's Java tests, relative to a test's runfiles directory.
    */
-  public static final String JAVATESTS_ROOT = "_main/src/test/java/";
+  public static final String JAVATESTS_ROOT = WORKSPACE_NAME + "/src/test/java/";
 
   /** Location of the bazel repo relative to the workspace root */
   public static final String BAZEL_REPO_PATH = "";
 
   /** The file path in which to create files so that they end up under Bazel main repository. */
-  public static final String BAZEL_REPO_SCRATCH = "../_main/";
+  public static final String BAZEL_REPO_SCRATCH = "../" + WORKSPACE_NAME + "/";
 
   /** Relative path to the {@code process-wrapper} tool. */
   public static final String PROCESS_WRAPPER_PATH =
-      "_main/src/main/tools/process-wrapper";
+      WORKSPACE_NAME + "/src/main/tools/process-wrapper";
 
   /** Relative path to the {@code linux-sandbox} tool. */
   public static final String LINUX_SANDBOX_PATH =
-      "_main/src/main/tools/linux-sandbox";
+      WORKSPACE_NAME + "/src/main/tools/linux-sandbox";
 
   /** Relative path to the {@code spend_cpu_time} testing tool. */
   public static final String CPU_TIME_SPENDER_PATH =
-      "_main/src/test/shell/integration/spend_cpu_time";
+      WORKSPACE_NAME + "/src/test/shell/integration/spend_cpu_time";
 
   /**
    * Relative path to the protolark-created {@code project_proto.scl} file that {@code PROJECT.scl}
@@ -97,7 +97,7 @@ public class TestConstants {
    * Directory where we can find Bazel's own bootstrapping rules relative to a test's runfiles
    * directory, i.e. when //tools/build_rules:srcs is in a test's data.
    */
-  public static final String BUILD_RULES_DATA_PATH = "_main/tools/build_rules/";
+  public static final String BUILD_RULES_DATA_PATH = WORKSPACE_NAME + "/tools/build_rules/";
 
   public static final String TEST_RULE_CLASS_PROVIDER =
       "com.google.devtools.build.lib.bazel.rules.BazelRuleClassProvider";

@@ -78,6 +78,7 @@ import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriterPars
 import com.google.devtools.build.lib.bazel.repository.starlark.StarlarkRepositoryModule;
 import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
+import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
 import com.google.devtools.build.lib.profiler.Profiler;
@@ -575,7 +576,8 @@ public class BazelRepositoryModule extends BlazeModule {
             || externalRoot.getFileSystem() instanceof RemoteExternalOverlayFileSystem) {
           try {
             FileSystemUtils.ensureSymbolicLink(
-                externalRoot.getChild(RepositoryUtils.WORKSPACE_SYMLINK_NAME), env.getWorkspace());
+                externalRoot.getChild(RepositoryName.MAIN_REPOSITORY_DIRECTORY_NAME),
+                env.getWorkspace());
           } catch (IOException e) {
             env.getReporter().handle(Event.error(e.getMessage()));
             env.getBlazeModuleEnvironment()

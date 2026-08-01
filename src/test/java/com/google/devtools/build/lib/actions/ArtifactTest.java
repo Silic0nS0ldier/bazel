@@ -530,6 +530,47 @@ public final class ArtifactTest {
   }
 
   @Test
+  public void getRlocationPathString_mainRepoSourceArtifact() throws IOException {
+    ArtifactRoot root = ArtifactRoot.asSourceRoot(Root.fromPath(scratch.dir("/some/path")));
+    Artifact artifact =
+        ActionsTestUtil.createArtifact(root, scratch.file("/some/path/pkg/file"));
+
+    assertThat(artifact.getRunfilesPathString()).isEqualTo("pkg/file");
+    assertThat(artifact.getRlocationPathString()).isEqualTo("_main/pkg/file");
+  }
+
+  @Test
+  public void getRlocationPathString_mainRepoDerivedArtifact() {
+    ArtifactRoot root =
+        ArtifactRoot.asDerivedRoot(execDir, RootType.OUTPUT, "bazel-out", "k8-fastbuild", "bin");
+    Artifact artifact =
+        ActionsTestUtil.createArtifactWithRootRelativePath(root, PathFragment.create("pkg/file"));
+
+    assertThat(artifact.getRunfilesPathString()).isEqualTo("pkg/file");
+    assertThat(artifact.getRlocationPathString()).isEqualTo("_main/pkg/file");
+  }
+
+  @Test
+  public void getRlocationPathString_externalSourceArtifact() throws IOException {
+    ArtifactRoot externalRoot =
+        ArtifactRoot.asExternalSourceRoot(
+            Root.fromPath(
+                scratch
+                    .dir("/output_base")
+                    .getRelative(LabelConstants.EXTERNAL_REPOSITORY_LOCATION)
+                    .getRelative("foo+")));
+
+    Artifact artifact =
+        new Artifact.SourceArtifact(
+            externalRoot,
+            LabelConstants.EXTERNAL_PATH_PREFIX.getRelative("foo+/bar/baz.cc"),
+            ArtifactOwner.NULL_OWNER);
+
+    assertThat(artifact.getRunfilesPathString()).isEqualTo("../foo+/bar/baz.cc");
+    assertThat(artifact.getRlocationPathString()).isEqualTo("foo+/bar/baz.cc");
+  }
+
+  @Test
   public void archivedTreeArtifact_create_returnsArtifactInArchivedRoot() {
     ArtifactRoot root =
         ArtifactRoot.asDerivedRoot(execDir, RootType.OUTPUT, "blaze-out", "fastbuild");
