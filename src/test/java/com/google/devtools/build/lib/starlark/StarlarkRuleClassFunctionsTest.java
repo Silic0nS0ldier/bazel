@@ -713,10 +713,36 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   }
 
   @Test
-  public void testDataAttr() throws Exception {
-    Attribute attr = buildAttribute("a1", "attr.data()");
+  public void testValueAttr() throws Exception {
+    Attribute attr = buildAttribute("a1", "attr.value()");
     assertThat(attr.starlarkDefined()).isTrue();
-    assertThat(attr.getType()).isEqualTo(Types.DATA);
+    assertThat(attr.getType()).isEqualTo(Types.STARLARK_VALUE);
+    assertThat(attr.getDefaultValueUnchecked()).isEqualTo(Starlark.NONE);
+  }
+
+  @Test
+  public void testValueAttrDefault() throws Exception {
+    Attribute attr = buildAttribute("a1", "attr.value(default = {'a': [1, 2.5, True]})");
+    assertThat(attr.getType()).isEqualTo(Types.STARLARK_VALUE);
+    assertThat(Starlark.repr(attr.getDefaultValueUnchecked(), StarlarkSemantics.DEFAULT))
+        .isEqualTo("{\"a\": [1, 2.5, True]}");
+  }
+
+  @Test
+  public void testValueAttrRejectsUnsupportedValue() throws Exception {
+    ev.checkEvalErrorContains(
+        "expected a structured Starlark value", "attr.value(default = Label('//a:b'))");
+  }
+
+  @Test
+  public void testValueAttrDefaultIsDeeplyImmutable() throws Exception {
+    Attribute attr = buildAttribute("a1", "attr.value(default = [[1], {'k': [2]}])");
+    StarlarkList<?> outer = (StarlarkList<?>) attr.getDefaultValueUnchecked();
+    assertThat(outer.isImmutable()).isTrue();
+    assertThat(((StarlarkList<?>) outer.get(0)).isImmutable()).isTrue();
+    Dict<?, ?> inner = (Dict<?, ?>) outer.get(1);
+    assertThat(inner.isImmutable()).isTrue();
+    assertThat(((StarlarkList<?>) inner.values().iterator().next()).isImmutable()).isTrue();
   }
 
   @Test
@@ -1224,6 +1250,32 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   }
 
   @Test
+  public void testAspectValueParameterRejected() throws Exception {
+    ev.checkEvalErrorContains(
+        "Aspect parameter attribute 'param' must have type 'bool', 'int' or 'string'.",
+        "def _impl(target, ctx):",
+        "   pass",
+        "my_aspect = aspect(_impl,",
+        "   attrs = { 'param' : attr.value(default = [1, 2]) }",
+        ")");
+  }
+
+  @Test
+  public void testAspectPrivateValueAttribute() throws Exception {
+    evalAndExport(
+        ev,
+        "def _impl(target, ctx):",
+        "   pass",
+        "my_aspect = aspect(_impl,",
+        "   attrs = { '_payload' : attr.value(default = {'a': [1, 2]}) }",
+        ")");
+    StarlarkDefinedAspect aspect = (StarlarkDefinedAspect) ev.lookup("my_aspect");
+    Attribute attribute = Iterables.getOnlyElement(aspect.getAttributes());
+    assertThat(attribute.getName()).isEqualTo("$payload");
+    assertThat(attribute.getType()).isEqualTo(Types.STARLARK_VALUE);
+  }
+
+  @Test
   public void testAspectParameterAndExtraDeps() throws Exception {
     evalAndExport(
         ev,
@@ -1652,7 +1704,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         ev,
         "attr.label(default=f)",
         "attr.label_list(default=f)",
-        "attr.label_keyed_string_dict(default=f)");// TODO
+        "attr.label_keyed_string_dict(default=f)");
     // For all other attribute types, the default value may not be a function.
     //
     // (This is a regression test for github.com/bazelbuild/bazel/issues/9463.
@@ -1671,6 +1723,8 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         "got value of type 'function', want 'dict'", "attr.string_dict(default=f)");
     ev.checkEvalErrorContains(
         "got value of type 'function', want 'dict'", "attr.string_list_dict(default=f)");
+    ev.checkEvalErrorContains(
+        "expected a structured Starlark value", "attr.value(default=f)");
     // Note: attr.license appears to be disabled already.
     // (see --incompatible_no_attr_license)
   }

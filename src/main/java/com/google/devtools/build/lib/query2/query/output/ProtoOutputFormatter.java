@@ -101,7 +101,8 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
           BuildType.OUTPUT,
           Type.BOOLEAN,
           BuildType.TRISTATE,
-          BuildType.LICENSE);
+          BuildType.LICENSE,
+          Types.STARLARK_VALUE);
 
   private AspectResolver aspectResolver;
   private DependencyFilter dependencyFilter;
@@ -516,7 +517,7 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
    */
   @Nullable
   @SuppressWarnings("unchecked")
-  private static Object getFlattenedAttributeValues(Type<?> attrType, Rule rule, Attribute attr) {// TODO
+  private static Object getFlattenedAttributeValues(Type<?> attrType, Rule rule, Attribute attr) {
     boolean treatMultipleAsNone = SCALAR_TYPES.contains(attrType);
     Iterable<Object> possibleValues =
         PossibleAttributeValues.forRuleAndAttribute(rule, attr, treatMultipleAsNone);

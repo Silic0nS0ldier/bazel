@@ -396,7 +396,7 @@ public class StarlarkStringRepresentationsTest extends BuildViewTestCase {
     assertStringRepresentation("attr.string_dict()", "<attr.string_dict>");
     assertStringRepresentation("attr.string_list_dict()", "<attr.string_list_dict>");
     assertStringRepresentation("attr.label_list_dict()", "<attr.label_list_dict>");
-    assertStringRepresentation("attr.data()", "<attr.data>");
+    assertStringRepresentation("attr.value()", "<attr.value>");
   }
 
   @Test

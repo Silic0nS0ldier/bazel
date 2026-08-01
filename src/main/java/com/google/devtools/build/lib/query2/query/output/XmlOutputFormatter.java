@@ -52,6 +52,8 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.TransformerFactoryConfigurationError;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
+import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkSemantics;
 import org.w3c.dom.DOMException;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -353,6 +355,14 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
             createValueElement(doc, Types.STRING_LIST, license.getLicenseTypes(), labelPrinter);
         licenseTypes.setAttribute("name", "license-types");
         elem.appendChild(licenseTypes);
+      }
+    } else if (type == Types.STARLARK_VALUE) {
+      // Rendered as a Starlark repr so that e.g. the string "1" is distinguishable from the int 1.
+      elem = createSingleValueElement(doc, "starlark-value", hasMultipleValues);
+      if (!hasMultipleValues && !Iterables.isEmpty(values)) {
+        elem.setAttribute(
+            "value",
+            Starlark.repr(Iterables.getOnlyElement(values), StarlarkSemantics.DEFAULT));
       }
     } else { // INTEGER STRING LABEL OUTPUT
       elem = createSingleValueElement(doc, type.toString(), hasMultipleValues);

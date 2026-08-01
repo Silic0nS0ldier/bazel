@@ -66,6 +66,29 @@ public class StarlarkRepositoryIntegrationTest extends BuildViewTestCase {
   }
 
   @Test
+  public void testStarlarkValueAttribute() throws Exception {
+    scratch.file(
+        "def.bzl",
+        """
+        def _impl(repository_ctx):
+            repository_ctx.file("BUILD", "filegroup(name='bar', srcs=['data.txt'])")
+            repository_ctx.file("data.txt", repr(repository_ctx.attr.payload))
+
+        repo = repository_rule(
+            implementation = _impl,
+            attrs = {"payload": attr.value()},
+        )
+        """);
+    scratch.file(rootDirectory.getRelative("BUILD").getPathString());
+    scratch.overwriteFile(
+        rootDirectory.getRelative("MODULE.bazel").getPathString(),
+        "repo = use_repo_rule('//:def.bzl', 'repo')",
+        "repo(name='foo', payload={'a': [1, 2.5, True], 'b': None})");
+    invalidatePackages();
+    getConfiguredTargetAndData("@@+repo+foo//:bar");
+  }
+
+  @Test
   public void testStarlarkSymlinkFileFromRepository() throws Exception {
     // This test creates a symbolic link BUILD -> bar.txt.
     scratch.file("/repo2/bar.txt", "filegroup(name='bar', srcs=['foo.txt'])");

@@ -108,7 +108,7 @@ public final class AttributeInfoExtractor {
     }
   }
 
-  static AttributeType getAttributeType(// TODO
+  static AttributeType getAttributeType(
       ExtractorContext context, Type<?> type, String attributePublicName) {
     if (type.equals(Type.INTEGER)) {
       return AttributeType.INT;
@@ -149,6 +149,8 @@ public final class AttributeInfoExtractor {
       return AttributeType.OUTPUT;
     } else if (type.equals(BuildType.OUTPUT_LIST)) {
       return AttributeType.OUTPUT_LIST;
+    } else if (type.equals(Types.STARLARK_VALUE)) {
+      return AttributeType.STARLARK_VALUE;
     } else if (type.equals(BuildType.LICENSE)) {
       // TODO(https://github.com/bazelbuild/bazel/issues/6420): deprecated, disabled in Bazel by
       // default, broken and with almost no remaining users, so we don't have an AttributeType for

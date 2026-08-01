@@ -1178,15 +1178,35 @@ public final class StarlarkAttrModule implements StarlarkAttrModuleApi {
   }
 
   @Override
-  public Descriptor dataAttribute(
+  public Descriptor valueAttribute(
+      Object configurable,
+      Object defaultValue,
+      Object doc,
+      Boolean mandatory,
       StarlarkThread thread)
       throws EvalException {
-    checkContext(thread, "attr.data()");
+    checkContext(thread, "attr.value()");
+    if (defaultValue instanceof StarlarkFunction) {
+      // Computed attribute defaults are only exposed to Starlark for label types; for every other
+      // type a function is simply an unsupported value. Reject it here, since createAttribute()
+      // would otherwise silently interpret it as a computed default.
+      try {
+        Types.STARLARK_VALUE.convert(defaultValue, DEFAULT_ARG);
+      } catch (ConversionException e) {
+        throw new EvalException(e);
+      }
+    }
     return createAttrDescriptor(
-        "data",
-        Optional.empty(),
-        optionMap(),
-        Types.DATA,
+        "value",
+        Starlark.toJavaOptional(doc, String.class),
+        optionMap(
+            CONFIGURABLE_ARG,
+            configurable,
+            DEFAULT_ARG,
+            defaultValue,
+            MANDATORY_ARG,
+            mandatory),
+        Types.STARLARK_VALUE,
         thread);
   }
 

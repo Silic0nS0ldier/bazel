@@ -830,7 +830,7 @@ public final class ModuleInfoExtractorTest {
                     "k": attr.output(),
                     "l": attr.output_list(),
                     "m": attr.label_list_dict(),
-                    "n": attr.data(),
+                    "n": attr.value(),
                 },
             )
             """);
@@ -909,7 +909,7 @@ public final class ModuleInfoExtractorTest {
                         .build(),
                     AttributeInfo.newBuilder()
                         .setName("n")
-                        .setType(AttributeType.DATA)
+                        .setType(AttributeType.STARLARK_VALUE)
                         .setDefaultValue("None")
                         .build())
                 .build());
@@ -1142,7 +1142,6 @@ my_macro = macro(
 
   @Test
   public void labelStringification() throws Exception {
-    // TODO
     Module module =
         exec(
             """

@@ -5179,7 +5179,7 @@ public final class StarlarkRuleContextTest extends BuildViewTestCase {
   }
 
   @Test
-  public void testDataAttributePreservesInput() throws Exception {
+  public void testValueAttributePreservesInput() throws Exception {
     scratch.file(
         "my_rule.bzl",
         """
@@ -5188,7 +5188,7 @@ public final class StarlarkRuleContextTest extends BuildViewTestCase {
         my_rule = rule(
             implementation = _impl,
             attrs = {
-                "data": attr.data(),
+                "payload": attr.value(),
             }
         )
         """);
@@ -5199,8 +5199,12 @@ public final class StarlarkRuleContextTest extends BuildViewTestCase {
         load('//:my_rule.bzl', 'my_rule')
         my_rule(
             name = "r",
-            data = [
+            payload = [
                 "foo",
+                None,
+                True,
+                2.5,
+                (1, 2),
                 {
                     "key1": "value",
                     "key2": [1, 2, 3],
@@ -5211,13 +5215,107 @@ public final class StarlarkRuleContextTest extends BuildViewTestCase {
 
     invalidatePackages();
     setRuleContext(createRuleContext("//:r"));
-    Object actual = ev.eval("ruleContext.attr.data");
+    Object actual = ev.eval("ruleContext.attr.payload");
     Object expected =
         ev.eval(
             """
-            ["foo", {"key1": "value", "key2": [1, 2, 3]}]
+            ["foo", None, True, 2.5, (1, 2), {"key1": "value", "key2": [1, 2, 3]}]
             """);
 
     assertThat(actual).isEqualTo(expected);
+  }
+
+  @Test
+  public void testValueAttributeIsFrozen() throws Exception {
+    scratch.file(
+        "my_rule.bzl",
+        """
+        def _impl(ctx):
+            return
+        my_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "payload": attr.value(),
+            }
+        )
+        """);
+
+    scratch.file(
+        "BUILD",
+        """
+        load('//:my_rule.bzl', 'my_rule')
+        my_rule(name = "r", payload = [[1]])
+        """);
+
+    invalidatePackages();
+    setRuleContext(createRuleContext("//:r"));
+    ev.checkEvalErrorContains(
+        "trying to mutate a frozen list value", "ruleContext.attr.payload[0].append(2)");
+  }
+
+  @Test
+  public void testValueAttributeRejectsUnsupportedValue() throws Exception {
+    scratch.file(
+        "my_rule.bzl",
+        """
+        def _impl(ctx):
+            return
+        my_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "payload": attr.value(),
+            }
+        )
+
+        def my_macro(name):
+            # struct() is not a supported attr.value() type.
+            my_rule(name = name, payload = [struct(a = 1)])
+        """);
+
+    scratch.file(
+        "BUILD",
+        """
+        load('//:my_rule.bzl', 'my_macro')
+        my_macro(name = "r")
+        """);
+
+    reporter.removeHandler(failFastHandler);
+    invalidatePackages();
+    getConfiguredTarget("//:r");
+    assertContainsEvent("expected a structured Starlark value");
+  }
+
+  @Test
+  public void testValueAttributeIsConfigurable() throws Exception {
+    scratch.file(
+        "my_rule.bzl",
+        """
+        def _impl(ctx):
+            return
+        my_rule = rule(
+            implementation = _impl,
+            attrs = {
+                "payload": attr.value(),
+            }
+        )
+        """);
+
+    scratch.file(
+        "BUILD",
+        """
+        load('//:my_rule.bzl', 'my_rule')
+        config_setting(name = "cs", values = {"define": "mode=on"})
+        my_rule(
+            name = "r",
+            payload = select({
+                ":cs": {"mode": "on"},
+                "//conditions:default": {"mode": "off"},
+            }),
+        )
+        """);
+
+    invalidatePackages();
+    setRuleContext(createRuleContext("//:r"));
+    assertThat(ev.eval("ruleContext.attr.payload")).isEqualTo(ev.eval("{'mode': 'off'}"));
   }
 }
