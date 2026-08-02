@@ -445,6 +445,22 @@ message OptionsParsed {
 // where a cached copy of the entity to be fetched was used.
 message Fetch {
   bool success = 1;
+
+  // Human-readable description of why the fetch failed, including the failures
+  // of any individual attempts. Only set if success is false. Intended for
+  // debugging only; the format is not stable.
+  string error = 2;
+
+  // Number of attempts made against the URL, including the successful one.
+  // Values greater than one indicate that the fetch was retried.
+  int32 attempts = 3;
+
+  // Number of bytes read from the URL across all attempts.
+  int64 bytes_read = 4;
+
+  // Wall time spent fetching from the URL, including retries and any time
+  // spent waiting for a download slot.
+  google.protobuf.Duration duration = 5;
 }
 
 // Payload of an event reporting the workspace status. Key-value pairs can be

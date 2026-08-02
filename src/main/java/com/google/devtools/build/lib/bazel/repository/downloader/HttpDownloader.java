@@ -102,9 +102,8 @@ public class HttpDownloader implements Downloader {
             /* reportProgressEvents= */ true,
             payload -> {
               try (OutputStream out = destination.getOutputStream()) {
-                payload.transferTo(out);
+                return new Processed<Void>(null, payload.transferTo(out));
               }
-              return null;
             },
             ioExceptions -> aggregatedDownloadException(urls, destination, ioExceptions));
   }
@@ -140,16 +139,19 @@ public class HttpDownloader implements Downloader {
         /* reportProgressEvents= */ false, // TODO(wyv): Do we need to report any event here?
         payload -> {
           ByteArrayOutputStream out = new ByteArrayOutputStream();
-          payload.transferTo(out);
-          return out.toByteArray();
+          long bytesRead = payload.transferTo(out);
+          return new Processed<>(out.toByteArray(), bytesRead);
         },
         HttpDownloader::lastDownloadException);
   }
 
+  /** The result of consuming a payload, along with how many bytes it took. */
+  private record Processed<T>(T result, long bytesRead) {}
+
   /** Consumes a successfully connected {@link HttpStream}, producing the download's result. */
   @FunctionalInterface
   private interface StreamProcessor<T> {
-    T process(HttpStream payload) throws IOException;
+    Processed<T> process(HttpStream payload) throws IOException;
   }
 
   /**
@@ -175,35 +177,61 @@ public class HttpDownloader implements Downloader {
       StreamProcessor<T> processor,
       Function<List<IOException>, IOException> onAllUrlsFailed)
       throws IOException, InterruptedException {
-    HttpConnectorMultiplexer multiplexer = setUpConnectorMultiplexer(eventHandler, clientEnv);
+    ProxyHelper proxyHelper = new ProxyHelper(clientEnv);
+    HttpConnector connector =
+        new HttpConnector(
+            LOCALE,
+            eventHandler,
+            proxyHelper,
+            SLEEPER,
+            timeoutScaling,
+            maxAttempts,
+            maxRetryTimeout);
+    HttpConnectorMultiplexer multiplexer = setUpConnectorMultiplexer(eventHandler, connector);
 
     // Iterate over the URLs, attempting each in turn and falling back to the next one if the
     // previous one failed, until one succeeds.
     List<IOException> ioExceptions = ImmutableList.of();
 
     for (URI url : urls) {
+      // Started before acquiring the semaphore so that time spent queueing for one of the
+      // --http_max_parallel_downloads slots is visible too.
+      long startTimeMillis = CLOCK.currentTimeMillis();
+      int attemptsBefore = connector.attemptCount();
       semaphore.acquire();
       boolean success = false;
+      long bytesRead = 0;
+      IOException failure = null;
 
       try (HttpStream payload = multiplexer.connect(url, checksum, headers, credentials, type)) {
-        T result = processor.process(payload);
+        Processed<T> processed = processor.process(payload);
+        bytesRead = processed.bytesRead();
         success = true;
-        return result;
+        return processed.result();
       } catch (SocketTimeoutException e) {
         // SocketTimeoutExceptions are InterruptedIOExceptions; however they do not signify an
         // external interruption, but simply a failed download due to some server timing out. So
         // treat them as ordinary IOExceptions and fall back to the next URL.
+        failure = new IOException(e);
         ioExceptions =
-            recordFailure(
-                ioExceptions, new IOException(e), url, eventHandler, reportProgressEvents);
+            recordFailure(ioExceptions, failure, url, eventHandler, reportProgressEvents);
       } catch (InterruptedIOException e) {
         throw new InterruptedException(e.getMessage());
       } catch (IOException e) {
+        failure = e;
         ioExceptions = recordFailure(ioExceptions, e, url, eventHandler, reportProgressEvents);
       } finally {
         semaphore.release();
         if (reportProgressEvents) {
-          eventHandler.post(new FetchEvent(url.toString(), FetchId.Downloader.HTTP, success));
+          eventHandler.post(
+              new FetchEvent(
+                  url.toString(),
+                  FetchId.Downloader.HTTP,
+                  success,
+                  failure == null ? null : DownloadErrors.describe(failure),
+                  connector.attemptCount() - attemptsBefore,
+                  bytesRead,
+                  Duration.ofMillis(CLOCK.currentTimeMillis() - startTimeMillis)));
         }
       }
     }
@@ -229,12 +257,7 @@ public class HttpDownloader implements Downloader {
     if (reportProgressEvents) {
       eventHandler.handle(
           Event.warn(
-              "Download from "
-                  + url
-                  + " failed: "
-                  + failure.getClass()
-                  + " "
-                  + failure.getMessage()));
+              "Download from " + url + " failed:\n" + DownloadErrors.describe(failure, "  ")));
     }
     return ioExceptions;
   }
@@ -242,19 +265,23 @@ public class HttpDownloader implements Downloader {
   /**
    * Builds the exception thrown by {@link #download} when every URL failed: a new {@link
    * IOException} naming the URLs and destination, with each per-URL failure attached as a
-   * suppressed exception.
+   * suppressed exception and also spelled out in the message so that it survives into Bazel's
+   * error output.
    */
   private static IOException aggregatedDownloadException(
       List<URI> urls, Path destination, List<IOException> ioExceptions) {
-    IOException exception =
-        new IOException(
-            "Error downloading "
-                + urls
-                + " to "
-                + destination
-                + (ioExceptions.isEmpty()
-                    ? ""
-                    : ": " + Iterables.getLast(ioExceptions).getMessage()));
+    StringBuilder message =
+        new StringBuilder("Error downloading ").append(urls).append(" to ").append(destination);
+    // downloadFromUrls records exactly one failure per attempted URL, in order, so the two lists
+    // line up.
+    for (int i = 0; i < ioExceptions.size(); i++) {
+      message
+          .append("\n  ")
+          .append(urls.get(i))
+          .append(":\n")
+          .append(DownloadErrors.describe(ioExceptions.get(i), "    "));
+    }
+    IOException exception = new IOException(message.toString());
     for (IOException cause : ioExceptions) {
       exception.addSuppressed(cause);
     }
@@ -277,17 +304,7 @@ public class HttpDownloader implements Downloader {
   }
 
   private HttpConnectorMultiplexer setUpConnectorMultiplexer(
-      ExtendedEventHandler eventHandler, Map<String, String> clientEnv) {
-    ProxyHelper proxyHelper = new ProxyHelper(clientEnv);
-    HttpConnector connector =
-        new HttpConnector(
-            LOCALE,
-            eventHandler,
-            proxyHelper,
-            SLEEPER,
-            timeoutScaling,
-            maxAttempts,
-            maxRetryTimeout);
+      ExtendedEventHandler eventHandler, HttpConnector connector) {
     ProgressInputStream.Factory progressInputStreamFactory =
         new ProgressInputStream.Factory(LOCALE, CLOCK, eventHandler);
     HttpStream.Factory httpStreamFactory = new HttpStream.Factory(progressInputStreamFactory);

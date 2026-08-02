@@ -36,6 +36,7 @@ import com.google.devtools.build.lib.bazel.repository.downloader.UrlRewriter.Rew
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.profiler.Profiler;
+import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
@@ -141,7 +142,11 @@ public class DownloadManager {
             // Not in download phase, must already have been cancelled.
             throw new InterruptedException();
           }
-          try (SilentCloseable c = Profiler.instance().profile("fetching: " + context)) {
+          try (SilentCloseable c =
+              Profiler.instance()
+                  .profile(
+                      ProfilerTask.REPOSITORY_DOWNLOAD,
+                      () -> describeDownload(context, originalUrls))) {
             return downloadInExecutor(
                 originalUrls,
                 headers,
@@ -247,7 +252,11 @@ public class DownloadManager {
     if (checksum.isPresent()) {
       String cacheKey = checksum.get().toString();
       KeyType cacheKeyType = checksum.get().getKeyType();
-      try {
+      try (SilentCloseable c =
+          Profiler.instance()
+              .profile(
+                  ProfilerTask.REPOSITORY_DOWNLOAD_CACHE_PROBE,
+                  () -> "checksumming existing file: " + destination)) {
         eventHandler.post(
             new CacheProgress(mainUrl.toString(), "Checking in " + cacheKeyType + " cache"));
         String currentChecksum = DownloadCache.getChecksum(cacheKeyType, destination);
@@ -264,7 +273,11 @@ public class DownloadManager {
       if (downloadCache.isEnabled()) {
         isCachingByProvidedChecksum = true;
 
-        try {
+        try (SilentCloseable c =
+            Profiler.instance()
+                .profile(
+                    ProfilerTask.REPOSITORY_DOWNLOAD_CACHE_PROBE,
+                    () -> "repository cache lookup: " + cacheKey)) {
           Path cachedDestination =
               downloadCache.get(cacheKey, destination, cacheKeyType, canonicalId, mayHardlink);
           if (cachedDestination != null) {
@@ -298,7 +311,11 @@ public class DownloadManager {
           for (String name : candidateFileNames) {
             boolean match = false;
             Path candidate = dir.getRelative(name);
-            try {
+            try (SilentCloseable c =
+                Profiler.instance()
+                    .profile(
+                        ProfilerTask.REPOSITORY_DOWNLOAD_CACHE_PROBE,
+                        () -> "distdir lookup: " + candidate)) {
               eventHandler.post(
                   new CacheProgress(
                       mainUrl.toString(), "Checking " + cacheKeyType + " of " + candidate));
@@ -336,10 +353,16 @@ public class DownloadManager {
       throw new IOException(getRewriterBlockedAllUrlsMessage(originalUrls));
     }
 
+    ImmutableList<URI> urls = rewrittenUrls;
     for (int attempt = 0; ; ++attempt) {
-      try {
+      int attemptNumber = attempt + 1;
+      try (SilentCloseable c =
+          Profiler.instance()
+              .profile(
+                  ProfilerTask.REPOSITORY_DOWNLOAD_ATTEMPT,
+                  () -> "attempt " + attemptNumber + ": " + describeDownload(context, urls))) {
         downloader.download(
-            rewrittenUrls,
+            urls,
             headers,
             credentialFactory.create(rewrittenAuthHeaders),
             checksum,
@@ -356,6 +379,17 @@ public class DownloadManager {
         if (!shouldRetryDownload(e, attempt)) {
           throw e;
         }
+        // A retry that eventually succeeds leaves no other trace of why it was needed, which makes
+        // intermittent download problems impossible to diagnose after the fact.
+        eventHandler.handle(
+            Event.warn(
+                String.format(
+                    "Download of %s for %s failed on attempt %d of %d, retrying:\n%s",
+                    urls,
+                    context,
+                    attemptNumber,
+                    retries + 1,
+                    DownloadErrors.describe(e, "  "))));
       }
     }
 
@@ -367,6 +401,15 @@ public class DownloadManager {
     }
 
     return destination;
+  }
+
+  /** Renders a download as a profiler span description. */
+  private static String describeDownload(String context, List<URI> urls) {
+    if (urls.isEmpty()) {
+      return "fetching: " + context;
+    }
+    String extraMirrors = urls.size() > 1 ? " (+" + (urls.size() - 1) + " mirrors)" : "";
+    return "fetching: " + context + " from " + urls.get(0) + extraMirrors;
   }
 
   private boolean shouldRetryDownload(IOException e, int attempt) {
