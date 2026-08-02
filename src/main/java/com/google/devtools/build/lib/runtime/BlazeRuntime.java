@@ -486,6 +486,8 @@ public final class BlazeRuntime implements BugReport.BlazeRuntimeInterface {
         long waitTimeNanos = waitTimeInMs * 1000000L;
         long clientStartTimeNanos = execStartTimeNanos - startupTimeNanos - waitTimeNanos;
 
+        Profiler.instance().setMetricsBatchSize(commandOptions.getMetricsBatchSize());
+
         // TODO(b/457644247): Encapsulate the start params into a config object.
         Profiler.instance()
             .start(

@@ -30,6 +30,8 @@ source "${RUNFILES_DIR:-/dev/null}/$f" 2>/dev/null || \
 source "$(rlocation "io_bazel/src/test/shell/integration_test_setup.sh")" \
   || { echo "integration_test_setup.sh not found!" >&2; exit 1; }
 
+JQ="$(rlocation $JQ_RLOCATIONPATH)"
+
 function test_profile_management_build() {
   local uuid=7c859c8f-87fd-46d0-9e5c-669410812722
   local output_base="$(bazel info output_base)"
@@ -42,6 +44,53 @@ function test_profile_management_info() {
   local output_base="$(bazel info output_base --invocation_id=${uuid} --generate_json_trace_profile)"
   ls -lh $output_base
   cmp "${output_base}/command-${uuid}.profile.gz" "${output_base}/command.profile.gz" || fail "profile not linked"
+}
+
+function test_metrics_collected_end() {
+  local profile_path="$(mktemp /tmp/profile.XXXXXX.json)"
+  bazel mod deps \
+    --experimental_metrics_batch_size=0 \
+    --profile="${profile_path}" > "$TEST_log" 2>&1 || fail "Command failed"
+  cat "${profile_path}" > "$TEST_log"
+  read -r result < <(
+    $JQ '
+      .traceEvents
+      | [.[] | select(.name == "CPU usage (Bazel)")]
+      | length > 0' \
+      "${profile_path}"
+  )
+  wait $!
+  if [[ "$result" != "true" ]]; then
+    echo "Expected at least one 'CPU usage (Bazel)' trace event"
+    
+    return 1
+  fi
+}
+
+function test_metrics_collected_immediate() {
+  local profile_path="$(mktemp /tmp/profile.XXXXXX.json)"
+  bazel mod deps \
+    --experimental_metrics_batch_size=1 \
+    --profile="${profile_path}" > "$TEST_log" 2>&1 || fail "Command failed"
+  cat "${profile_path}" > "$TEST_log"
+  read -r result < <(
+    $JQ '
+      .traceEvents
+      | [range(length) as $i
+        | .[$i]
+        | {v: ., i: $i}
+        | select(.v.name == "CPU usage (Bazel)")
+        | .i]
+      | last - first - length + 1
+      | . == 0
+      ' \
+      "${profile_path}"
+  )
+  wait $!
+  if [[ "$result" != "true" ]]; then
+    echo "Expected 'CPU usage (Bazel)' trace events to have non-contiguous indices"
+    return 1
+  fi
 }
 
 run_suite "integration tests for the builtin profiler"

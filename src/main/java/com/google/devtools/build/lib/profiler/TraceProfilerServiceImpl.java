@@ -245,6 +245,11 @@ public final class TraceProfilerServiceImpl implements TraceProfilerService {
   }
 
   @Override
+  public void setMetricsBatchSize(int metricsBatchSize) {
+    this.resourceCollector.setMetricsBatchSize(metricsBatchSize);
+  }
+
+  @Override
   public synchronized void start(
       Set<ProfilerTask> profiledTasks,
       OutputStream stream,
@@ -381,6 +386,7 @@ public final class TraceProfilerServiceImpl implements TraceProfilerService {
     if (!active) {
       return;
     }
+    // could this also be logged as polled?
     collectActionCounts();
     resourceCollector.stop();
     // Log a final event to update the duration of ProfilePhase.FINISH.

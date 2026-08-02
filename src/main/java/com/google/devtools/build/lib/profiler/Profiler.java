@@ -179,6 +179,13 @@ public final class Profiler implements TraceProfilerService {
   }
 
   @Override
+  public void setMetricsBatchSize(int metricsBatchSize) {
+    if (traceProfilerService != null) {
+      traceProfilerService.setMetricsBatchSize(metricsBatchSize);
+    }
+  }
+
+  @Override
   public void start(
       Set<ProfilerTask> profiledTasks,
       OutputStream stream,
@@ -359,6 +366,9 @@ public final class Profiler implements TraceProfilerService {
     public double[] toDoubleArray(int len) {
       return new double[len];
     }
+
+    @Override
+    public void clear() {}
   }
 
   private static class NoOpAsyncProfiler implements AsyncProfiler {
