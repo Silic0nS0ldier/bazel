@@ -37,6 +37,7 @@ import com.google.devtools.build.lib.bazel.repository.cache.DownloadCache.KeyTyp
 import com.google.devtools.build.lib.bazel.repository.decompressor.DecompressorDescriptor;
 import com.google.devtools.build.lib.bazel.repository.decompressor.DecompressorValue;
 import com.google.devtools.build.lib.bazel.repository.downloader.Checksum;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadErrors;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
 import com.google.devtools.build.lib.bazel.repository.downloader.HttpUtils;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -657,14 +658,21 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
       }
     } catch (IOException e) {
       if (pendingDownload.allowFail) {
-        // include failure reason
         ImmutableMap<String, Object> struct =
-            ImmutableMap.of("success", false, "error", e.toString());
+            ImmutableMap.of("success", false, "error", DownloadErrors.describe(e));
         return StarlarkInfo.create(StructProvider.STRUCT, struct);
       } else {
-        // transient download errors are discarded due to retries
-        // these need to be logged
-        // perhaps a "maybe transient" option is needed?
+        // Skyframe may restart and re-run this repository rule, in which case the transient error
+        // is never reported. Log it here so that the reason for the retry (or for an eventual
+        // failure reported elsewhere) is preserved.
+        env.getListener()
+            .handle(
+                Event.warn(
+                    String.format(
+                        "%s: download to '%s' failed:\n%s",
+                        identifyingStringForLogging,
+                        pendingDownload.outputPath,
+                        DownloadErrors.describe(e, "  "))));
         throw new RepositoryFunctionException(e, Transience.TRANSIENT);
       }
     } catch (InvalidPathException e) {

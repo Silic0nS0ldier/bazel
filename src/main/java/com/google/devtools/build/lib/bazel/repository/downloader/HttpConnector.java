@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 import javax.annotation.WillClose;
 import javax.net.ssl.SSLException;
@@ -71,6 +72,7 @@ class HttpConnector {
   private final float timeoutScaling;
   private final int maxAttempts;
   private final Duration maxRetryTimeout;
+  private final AtomicInteger attemptCount = new AtomicInteger();
 
   HttpConnector(
       Locale locale,
@@ -107,6 +109,14 @@ class HttpConnector {
     return Math.round(unscaled * timeoutScaling);
   }
 
+  /**
+   * Returns how many connections this instance has opened so far, counting retries, reconnects and
+   * redirect hops.
+   */
+  int attemptCount() {
+    return attemptCount.get();
+  }
+
   URLConnection connect(
       URI originalUrl, Function<URI, ImmutableMap<String, List<String>>> requestHeaders)
       throws IOException {
@@ -116,6 +126,7 @@ class HttpConnector {
     }
     URI url = originalUrl;
     if (HttpUtils.isProtocol(url, "file")) {
+      attemptCount.incrementAndGet();
       return url.toURL().openConnection();
     }
     List<Throwable> suppressions = new ArrayList<>();
@@ -124,6 +135,7 @@ class HttpConnector {
     int connectTimeout = scale(MIN_CONNECT_TIMEOUT_MS);
     while (true) {
       HttpURLConnection connection = null;
+      attemptCount.incrementAndGet();
       try {
         ProxyInfo proxyInfo = proxyHelper.createProxyIfNeeded(url);
         connection = (HttpURLConnection) url.toURL().openConnection(proxyInfo.proxy());
