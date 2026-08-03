@@ -33,17 +33,36 @@ For workloads dominated by cache hits, these round trips are the main remaining 
 A [code comment](https://github.com/bazelbuild/bazel/blob/8fafe31c6b/src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java#L240-L246) anticipates solving this with a lease service that tracks blob liveness;
 this proposal offers a solution that requires no additional infrastructure.
 
-## Precedent: Trust in the Remote Cache
+## Existing Lifetime Mechanisms
 
-Bazel does not existence-check blobs referenced by a *remote* action result.
-Instead, `--experimental_remote_cache_ttl` (default 3h) declares a guaranteed minimum TTL for blobs after their digests are recently referenced, and Bazel optimises against it
-(e.g. not repeating `GetActionResult` calls during an incremental build).
-In practice Bazel goes further;
-remote-backed output metadata that has outlived its TTL is still trusted optimistically, with the expectation that
-"build or action rewinding will take care of rerunning the actions needed to produce the file"
-([source](https://github.com/bazelbuild/bazel/blob/8fafe31c6b/src/main/java/com/google/devtools/build/lib/remote/RemoteOutputChecker.java#L370-L374)).
+Several mechanisms already reason about how long cached content remains available, and not all of them work as documented;
 
-The disk cache is currently held to a stricter standard than the remote cache, despite serving results that originated from the same remote.
+- **Server-side retention.**
+  The remote cache's actual eviction policy, and the REAPI expectation that a served action result references live blobs.
+  This is the ground truth that every client-side mechanism approximates.
+- **`--experimental_remote_cache_ttl` (default 3h).**
+  Declares the minimal TTL of blobs after their digests are recently referenced.
+  Its documented role ("Bazel does several optimizations based on the blobs' TTL") no longer matches the implementation;
+  expired metadata once forced re-downloads and invalidated action cache entries, but both behaviours were removed in favour of optimistic reuse backed by recovery, with the expectation that
+  "build or action rewinding will take care of rerunning the actions needed to produce the file"
+  ([source](https://github.com/bazelbuild/bazel/blob/8fafe31c6b/src/main/java/com/google/devtools/build/lib/remote/RemoteOutputChecker.java#L370-L374); commits `23d03e1a06` and `50ca1b6147`, the latter fixing [#26140](https://github.com/bazelbuild/bazel/issues/26140); the residual check survives only as a test hook with no production callers, commit `64d8f68237`).
+  Today the value stamps an advisory expiration on remote output metadata and sets the lease extension cadence;
+  the avoidance of repeated `GetActionResult` calls in incremental builds is unconditional optimism, not TTL arithmetic.
+- **Per-output expiration metadata.**
+  Recorded when outputs are accepted without downloading, persisted in the local action cache, and advanced by lease extension;
+  nothing else reads it.
+- **`--experimental_remote_cache_lease_extension`.**
+  The only active keep-alive;
+  periodically re-references remote-backed outputs via `FindMissingBlobs` (refreshing their server-side TTL) and advances their recorded expiration.
+  It runs only while a build is in progress, is unavailable when `--rewind_lost_inputs` is enabled, and when it discovers an already-missing blob it merely declines to extend it — invalidation is left to recovery.
+- **Reactive correction.**
+  The recovery machinery described below — the only lifetime mechanism that is actually enforced.
+  A blob's client-side lifetime ends when its absence is proven, not when a clock expires.
+
+The direction of travel is clear;
+time-based enforcement has been progressively dismantled in favour of optimistic reuse with reactive correction, and declared TTLs have been downgraded to advisory bookkeeping.
+The disk cache integrity check is the last place where the client still enforces liveness pessimistically, despite serving results that originated from the same remote.
+This proposal moves the disk cache onto the model the rest of the stack already uses — trust optimistically, bound the damage with a time window, correct reactively — reusing the declared TTL contract and the existing recovery machinery rather than introducing a parallel lifetime system.
 
 ## Recovery Machinery
 
@@ -111,7 +130,7 @@ An action result with locally missing blobs is trusted when all of the following
 - the remote cache is readable for the spawn under evaluation
   (its effective read policy, accounting for `--noremote_accept_cached` and per-spawn tags such as `no-remote-cache`);
   without a remote CAS to fall back to, the premise of the trust does not hold;
-- the entry was validated after the current trust epoch (see below);
+- the entry was validated after the trust epoch of the invocation's remote identity (see below);
 - the time since the entry was last validated is within the configured trust duration.
 
 An entry counts as validated when;
@@ -131,28 +150,31 @@ so staleness does not compound across incremental builds.
 
 ## Trust Epoch and Remote Identity
 
-The disk cache carries a small piece of trust state;
-- the identity of the remote cache entries were last validated against;
-- a trust epoch — a point in time before which no validation is trusted.
+The disk cache carries trust state comprising one record per remote cache identity;
+- the identity — at least the canonical cache endpoint and `--remote_instance_name`, excluding credentials and transport configuration;
+- a trust epoch — a point in time before which no validation is trusted for that identity.
 
 The state is persistent, shared by every process using the cache, and must not be subject to garbage collection
 (a practical constraint on placement, as collectors in existing Bazel versions spare only their own bookkeeping locations).
-Remote cache identity comprises at least the canonical cache endpoint and `--remote_instance_name`;
-credentials and transport configuration are excluded.
-Absent state carries no epoch and no identity;
-trust is then evaluated on validation recency alone, and the state is established by the first invocation to use it.
+An invocation consults and updates only the record matching its configured remote;
+concurrent builds against different remotes (e.g. separate workspaces sharing one disk cache) therefore do not contend, and neither degrades the other's trust.
+Invocations with trust disabled, or without a readable remote cache, leave the state untouched.
 
-This state enables two behaviours;
+A record is created the first time an identity is used;
+- with no epoch when the trust state is empty (a fresh cache, or one restored without its trust state) — trust is evaluated on validation recency alone;
+- with an epoch of the creation time when other identities are already recorded — the cache demonstrably served another remote, so existing validation recency is not attributed to the new identity.
 
-**Remote identity changes revoke trust.**
-At invocation start, if the configured remote cache does not match the recorded identity, the trust epoch is advanced and the new identity recorded.
-Entries validated against the previous remote are no longer trusted and re-validate organically against the new remote as they are looked up.
-This makes switching remote cache backends (or moving between remote and local execution setups sharing a disk cache) safe without manual intervention.
+This makes switching remote cache backends safe without manual intervention;
+the new identity starts with no unearned trust and entries re-validate against it organically, while the previous identity's record is retained so switching back preserves its accumulated trust.
+
+Entries do not record which remote validated them;
+an entry validated against one remote may therefore be trusted by an invocation against another whose epoch predates that validation.
+Such misplaced trust is bounded by recovery, which advances the affected identity's epoch.
 
 **Proven violations revoke trust.**
-When recovery is triggered by a blob that was accepted on trust, the trust epoch is advanced.
-All outstanding trust is revoked at once — persistently, surviving server restarts — so a systemic problem
-(e.g. a remote cache wipe) costs at most one round of recovery before lookups degrade gracefully to re-validation.
+When recovery is triggered by a blob that was accepted on trust, the epoch of the invocation's identity is advanced.
+All outstanding trust for that remote is revoked at once — persistently, surviving server restarts — so a systemic problem
+(e.g. a remote cache wipe) costs at most one round of recovery before lookups degrade gracefully to re-validation, without disturbing trust held against other remotes.
 
 Revocation scope is controlled by;
 
@@ -168,10 +190,6 @@ Revocation scope is controlled by;
 
 Distinguishing trusted-origin blobs requires provenance tracking, which is maintained for the lifetime of the server process.
 A violation whose provenance is unknown — such as one surfacing via metadata persisted by an earlier server — is treated as trusted-origin, keeping revocation conservative.
-
-Concurrent Bazel processes sharing a disk cache but configured against different remotes will repeatedly advance the epoch, degrading to more re-validation.
-An invocation that outlives another's epoch advance can also write back entries validated against its own remote, which the other process then sees as trusted;
-recovery bounds the resulting misplaced trust.
 
 ## Interactions
 
@@ -199,8 +217,11 @@ a warning is emitted when it does not.
 `--experimental_remote_cache_lease_extension` periodically re-references remote-backed outputs, extending their server-side TTL during long sessions.
 Outputs accepted via trusted serves are remote-backed metadata like any other and benefit equally.
 The two features are complementary;
-trust removes lookup round trips, lease extension keeps the trusted claim true for longer.
+trust removes lookup round trips, lease extension keeps the trusted claim true for longer
+(often for the very blobs disk entries reference, since both describe the same outputs).
 Note that lease extension is currently unavailable in combination with `--rewind_lost_inputs`.
+Lease extension also discovers already-missing blobs, which it currently only declines to extend;
+feeding these discoveries into trust revocation is a possible future refinement.
 
 ### Externally Managed Disk Caches
 
@@ -212,7 +233,7 @@ recovery bounds the damage, but such environments should run their first build w
 A restored cache older than the trust duration is safe;
 everything re-validates, costing round trips only.
 Restore tooling should also carry the trust state alongside the entries;
-a cache restored without it forfeits recorded revocations and remote identity, not trust itself.
+a cache restored without it forfeits recorded revocations and remote identities, not trust itself.
 
 ### Caches That Do Not Guarantee Blob Liveness
 
@@ -270,7 +291,7 @@ with the epoch freshly advanced, that re-validation runs against the remote, res
 All changes are opt-in and additive;
 the default (`off`) preserves current behaviour exactly.
 The trust state is new bookkeeping inside the disk cache that older Bazel versions ignore;
-its absence forfeits recorded revocations and remote identity, not trust itself.
+its absence forfeits recorded revocations and remote identities, not trust itself.
 No disk cache entry format changes are made;
 caches remain fully shareable across Bazel versions and trust configurations, with the mixed-mode caveat noted in [Risks](#risks).
 
