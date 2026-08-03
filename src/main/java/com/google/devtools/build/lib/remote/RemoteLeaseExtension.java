@@ -196,7 +196,10 @@ public class RemoteLeaseExtension implements LeaseExtension {
     for (var remoteFile : remoteFiles) {
       var artifact = remoteFile.getKey();
       var metadata = remoteFile.getValue();
-      // Only extend the lease for the remote output if it is still alive remotely.
+      // Only extend the lease for the remote output if it is still alive remotely. A digest found
+      // missing here is deliberately not propagated further (e.g. to invalidate its metadata or to
+      // seed recovery): the stale metadata stays in place and the loss is only acted upon when a
+      // consumer fails to fetch the blob, at which point lost-input recovery takes over.
       if (!missingDigests.contains(buildDigest(metadata))) {
         metadata.setExpirationTime(expirationTime);
         if (token != null) {

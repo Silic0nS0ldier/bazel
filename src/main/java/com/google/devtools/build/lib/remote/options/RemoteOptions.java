@@ -878,7 +878,9 @@ public abstract class RemoteOptions extends CommonRemoteOptions {
       help =
           "If set to true, Bazel will extend the lease for outputs of remote actions during the"
               + " build by sending `FindMissingBlobs` calls periodically to remote cache. The"
-              + " frequency is based on the value of `--experimental_remote_cache_ttl`.")
+              + " frequency is based on the value of `--experimental_remote_cache_ttl`. Has no"
+              + " effect when --rewind_lost_inputs is enabled, which recovers from lost remote"
+              + " outputs instead of keeping them alive.")
   public abstract boolean getRemoteCacheLeaseExtension();
 
   @Option(
