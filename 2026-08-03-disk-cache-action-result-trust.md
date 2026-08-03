@@ -131,6 +131,7 @@ An action result with locally missing blobs is trusted when all of the following
   (its effective read policy, accounting for `--noremote_accept_cached` and per-spawn tags such as `no-remote-cache`);
   without a remote CAS to fall back to, the premise of the trust does not hold;
 - the entry was validated after the trust epoch of the invocation's remote identity (see below);
+- trust for that identity is not suspended by an unresolved violation (see below);
 - the time since the entry was last validated is within the configured trust duration.
 
 An entry counts as validated when;
@@ -171,10 +172,16 @@ Entries do not record which remote validated them;
 an entry validated against one remote may therefore be trusted by an invocation against another whose epoch predates that validation.
 Such misplaced trust is bounded by recovery, which advances the affected identity's epoch.
 
-**Proven violations revoke trust.**
-When recovery is triggered by a blob that was accepted on trust, the epoch of the invocation's identity is advanced.
-All outstanding trust for that remote is revoked at once — persistently, surviving server restarts — so a systemic problem
+**Proven violations suspend, then revoke, trust.**
+Revocation is evidence-gated so that an isolated violation does not erode legitimately established trust.
+When recovery is triggered by a blob that was accepted on trust;
+1. trust for the identity is suspended in memory for the remainder of the server's builds — lookups fall back to remote re-validation, which is strictly more conservative than trusting;
+2. the persistent epoch is advanced only if violations continue (e.g. a further trusted-origin loss surfaces), indicating the remote has genuinely lost content rather than a one-off eviction or misplaced cross-identity trust.
+
+A written epoch advance revokes all outstanding trust for that remote at once — persistently, surviving server restarts — so a systemic problem
 (e.g. a remote cache wipe) costs at most one round of recovery before lookups degrade gracefully to re-validation, without disturbing trust held against other remotes.
+An isolated incident instead costs one recovery round plus re-validated lookups for the remainder of the session, leaving persistent trust intact;
+the entries proven stale are corrected by recovery itself, as their re-execution or re-validation overwrites them.
 
 Revocation scope is controlled by;
 
@@ -182,9 +189,9 @@ Revocation scope is controlled by;
 --experimental_disk_cache_action_result_trust_revocation=precise|all|off
 ```
 
-- `precise` (default) advances the epoch only when the lost blob is one that entered the build via a trusted serve.
-  A genuine remote eviction of a conventionally validated result does not void the disk cache's trust wholesale.
-- `all` advances the epoch on any lost input.
+- `precise` (default) applies the evidence-gated behaviour above to losses that entered the build via a trusted serve.
+  A genuine remote eviction of a conventionally validated result does not void the disk cache's trust, and neither does an isolated trusted-origin violation.
+- `all` advances the epoch immediately on any lost input.
   Suits operators who consider any eviction a signal of remote cache distress.
 - `off` relies on per-digest tracking and natural trust expiry alone.
 
@@ -323,10 +330,13 @@ It may have value later as a cheaper re-validation step once trust lapses.
 ## Per-Entry Validation Records
 
 Recording validation time and remote identity inside each entry (or a sidecar) would decouple trust from mtime and close the provenance gap.
-Rejected for now;
-- it changes the on-disk format or doubles entry counts, breaking the property that any Bazel version (and third-party tooling) can share the cache;
-- concurrent writers would need coordination the current content-addressed layout avoids;
-- mtime anchoring plus the trust epoch covers the same needs with acceptable precision.
+A format-compatible embedding even exists;
+`ActionResult.execution_metadata.auxiliary_metadata` is a `repeated google.protobuf.Any`, so a validation record could be attached at write-back while the entry remains a well-formed `ActionResult` that any Bazel version parses unchanged.
+Rejected nonetheless;
+- every entry grows and every write-back pays serialisation on top of today's byte-for-byte store — overhead running counter to the proposal's goal;
+- the field is specified for worker-provided execution details, and client bookkeeping written into it would surprise tooling that inspects cache content;
+- sidecar variants double entry counts, and concurrent writers would need coordination the current layout avoids;
+- mtime anchoring plus the trust epoch covers the same needs with acceptable precision, with evidence-gated revocation containing the cost of the residual imprecision.
 
 Worth revisiting if field data shows provenance-related violations are common.
 
