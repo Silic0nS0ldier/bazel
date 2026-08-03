@@ -21,6 +21,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
 import com.google.devtools.build.lib.remote.disk.DiskCacheClient;
+import com.google.devtools.build.lib.remote.disk.DiskCacheTrust;
 import com.google.devtools.build.lib.remote.http.HttpCacheClient;
 import com.google.devtools.build.lib.remote.options.RemoteOptions;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
@@ -53,6 +54,27 @@ public final class CombinedCacheClientFactory {
       DigestUtil digestUtil,
       RemoteRetrier retrier)
       throws IOException {
+    return create(
+        options,
+        diskCachePath,
+        creds,
+        authAndTlsOptions,
+        workingDirectory,
+        digestUtil,
+        retrier,
+        /* diskCacheTrust= */ null);
+  }
+
+  public static CombinedCacheClient create(
+      RemoteOptions options,
+      @Nullable PathFragment diskCachePath,
+      @Nullable Credentials creds,
+      AuthAndTLSOptions authAndTlsOptions,
+      Path workingDirectory,
+      DigestUtil digestUtil,
+      RemoteRetrier retrier,
+      @Nullable DiskCacheTrust diskCacheTrust)
+      throws IOException {
     Preconditions.checkNotNull(workingDirectory, "workingDirectory");
     RemoteCacheClient httpCacheClient = null;
     DiskCacheClient diskCacheClient = null;
@@ -60,7 +82,7 @@ public final class CombinedCacheClientFactory {
       httpCacheClient = createHttp(options, creds, authAndTlsOptions, digestUtil, retrier);
     }
     if (diskCachePath != null) {
-      diskCacheClient = createDiskCache(workingDirectory, diskCachePath, digestUtil);
+      diskCacheClient = createDiskCache(workingDirectory, diskCachePath, digestUtil, diskCacheTrust);
     }
     if (httpCacheClient == null && diskCacheClient == null) {
       throw new IllegalArgumentException(
@@ -123,8 +145,17 @@ public final class CombinedCacheClientFactory {
 
   public static DiskCacheClient createDiskCache(
       Path workingDirectory, PathFragment diskCachePath, DigestUtil digestUtil) throws IOException {
+    return createDiskCache(workingDirectory, diskCachePath, digestUtil, /* trust= */ null);
+  }
+
+  public static DiskCacheClient createDiskCache(
+      Path workingDirectory,
+      PathFragment diskCachePath,
+      DigestUtil digestUtil,
+      @Nullable DiskCacheTrust trust)
+      throws IOException {
     Path cacheDir = workingDirectory.getRelative(Preconditions.checkNotNull(diskCachePath));
-    return new DiskCacheClient(cacheDir, digestUtil);
+    return new DiskCacheClient(cacheDir, digestUtil, trust);
   }
 
   public static boolean isHttpCache(RemoteOptions options) {
