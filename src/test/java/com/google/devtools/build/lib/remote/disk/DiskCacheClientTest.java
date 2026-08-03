@@ -45,7 +45,10 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Message;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import javax.annotation.Nullable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -231,9 +234,10 @@ public class DiskCacheClientTest {
 
     Path path = populateAc(actionKey, actionResult);
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
-    assertThat(result).isEqualTo(actionResult);
+    assertThat(result.actionResult()).isEqualTo(actionResult);
+    assertThat(result.trusted()).isFalse();
     assertThat(path.getLastModifiedTime()).isNotEqualTo(0);
   }
 
@@ -241,7 +245,7 @@ public class DiskCacheClientTest {
   public void downloadActionResult_whenMissing_returnsNull() throws Exception {
     ActionKey actionKey = new ActionKey(getDigest("key"));
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
     assertThat(result).isNull();
   }
@@ -271,9 +275,10 @@ public class DiskCacheClientTest {
     Path treeCasPath = populateCas(treeDigest, tree);
     Path treeFileCasPath = populateCas(treeFileDigest, "tree file contents");
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
-    assertThat(result).isEqualTo(actionResult);
+    assertThat(result.actionResult()).isEqualTo(actionResult);
+    assertThat(result.trusted()).isFalse();
     assertThat(acPath.getLastModifiedTime()).isNotEqualTo(0);
     assertThat(stdoutCasPath.getLastModifiedTime()).isNotEqualTo(0);
     assertThat(stderrCasPath.getLastModifiedTime()).isNotEqualTo(0);
@@ -293,7 +298,7 @@ public class DiskCacheClientTest {
 
     populateAc(actionKey, actionResult);
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
     assertThat(result).isNull();
   }
@@ -312,7 +317,7 @@ public class DiskCacheClientTest {
     populateAc(actionKey, actionResult);
     populateCas(fileDigest, "contents");
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
     assertThat(result).isNull();
   }
@@ -331,9 +336,140 @@ public class DiskCacheClientTest {
     populateAc(actionKey, actionResult);
     populateCas(treeDigest, tree);
 
-    var result = getFromFuture(client.downloadActionResult(actionKey));
+    var result = getFromFuture(client.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
 
     assertThat(result).isNull();
+  }
+
+  @Test
+  public void downloadActionResult_withTrust_withinLease_servesOnTrust() throws Exception {
+    DiskCacheClient trustingClient = createTrustingClient(Duration.ofHours(1));
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    Path acPath = populateAc(actionKey, actionResult);
+    long mtime = System.currentTimeMillis() - Duration.ofMinutes(5).toMillis();
+    acPath.setLastModifiedTime(mtime);
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
+
+    assertThat(result.actionResult()).isEqualTo(actionResult);
+    assertThat(result.trusted()).isTrue();
+    assertThat(result.validatedAt()).isEqualTo(Instant.ofEpochMilli(mtime));
+    // Serving on trust must not extend the trust anchor.
+    assertThat(acPath.getLastModifiedTime()).isEqualTo(mtime);
+  }
+
+  @Test
+  public void downloadActionResult_withTrust_leaseExpired_returnsNull() throws Exception {
+    DiskCacheClient trustingClient = createTrustingClient(Duration.ofHours(1));
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    Path acPath = populateAc(actionKey, actionResult);
+    acPath.setLastModifiedTime(System.currentTimeMillis() - Duration.ofHours(2).toMillis());
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
+
+    assertThat(result).isNull();
+  }
+
+  @Test
+  public void downloadActionResult_withTrust_remoteNotReadable_returnsNull() throws Exception {
+    DiskCacheClient trustingClient = createTrustingClient(Duration.ofHours(1));
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    Path acPath = populateAc(actionKey, actionResult);
+    acPath.setLastModifiedTime(System.currentTimeMillis());
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ false));
+
+    assertThat(result).isNull();
+  }
+
+  @Test
+  public void downloadActionResult_withTrust_suspended_returnsNull() throws Exception {
+    DiskCacheTrust trust =
+        DiskCacheTrust.create(
+            root, "remote|instance", Duration.ofHours(1), new DiskCacheTrust.ServerState());
+    DiskCacheClient trustingClient = new DiskCacheClient(root, DIGEST_UTIL, trust);
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    Path acPath = populateAc(actionKey, actionResult);
+    acPath.setLastModifiedTime(System.currentTimeMillis());
+
+    trust.reportTrustedOriginViolation();
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
+
+    assertThat(result).isNull();
+  }
+
+  @Test
+  public void downloadActionResult_withUnboundedTrust_servesRegardlessOfAge() throws Exception {
+    DiskCacheClient trustingClient = createTrustingClient(/* lease= */ null);
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    // populateAc leaves the mtime at 0 (1970).
+    populateAc(actionKey, actionResult);
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
+
+    assertThat(result.trusted()).isTrue();
+  }
+
+  @Test
+  public void downloadActionResult_withTrust_blobsPresent_servesNormally() throws Exception {
+    DiskCacheClient trustingClient = createTrustingClient(Duration.ofHours(1));
+    Digest fileDigest = getDigest("contents");
+    ActionKey actionKey = new ActionKey(getDigest("key"));
+    ActionResult actionResult =
+        ActionResult.newBuilder()
+            .addOutputFiles(OutputFile.newBuilder().setDigest(fileDigest).build())
+            .build();
+    populateAc(actionKey, actionResult);
+    populateCas(fileDigest, "contents");
+
+    var result =
+        getFromFuture(
+            trustingClient.downloadActionResult(actionKey, /* remoteReadableForSpawn= */ true));
+
+    assertThat(result.actionResult()).isEqualTo(actionResult);
+    assertThat(result.trusted()).isFalse();
+  }
+
+  private DiskCacheClient createTrustingClient(@Nullable Duration lease) throws IOException {
+    DiskCacheTrust trust =
+        DiskCacheTrust.create(root, "remote|instance", lease, new DiskCacheTrust.ServerState());
+    return new DiskCacheClient(root, DIGEST_UTIL, trust);
   }
 
   @Test
