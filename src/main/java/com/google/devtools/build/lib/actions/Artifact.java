@@ -45,10 +45,12 @@ import com.google.devtools.build.lib.starlarkbuildapi.FileRootApi;
 import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.HashCodes;
+import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.PathStrippable;
 import com.google.devtools.build.lib.vfs.RootedPath;
+import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.skyframe.ExecutionPhaseSkyKey;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
@@ -636,7 +638,14 @@ public abstract sealed class Artifact
     return false;
   }
 
-  /** The disjunction of {@link #isTreeArtifact} and {@link #isFileset}. */
+  /**
+   * Whether this artifact represents a directory rather than a single file.
+   *
+   * <p>For derived artifacts this is the disjunction of {@link #isTreeArtifact} and {@link
+   * #isFileset} -- a declared property fixed at construction. Source artifacts have no such
+   * declaration, so {@link SourceArtifact} overrides this to reflect the on-disk type of the source
+   * path.
+   */
   @Override
   public boolean isDirectory() {
     return isTreeArtifact() || isFileset();
@@ -776,12 +785,70 @@ public abstract sealed class Artifact
    * TODO(shahan): move {@link Artifact#getPath} to this subclass.
    */
   public static final class SourceArtifact extends Artifact {
+    // Tri-state cache for isDirectory(), resolved lazily from the filesystem. See isDirectory().
+    private static final byte DIR_UNKNOWN = 0;
+    private static final byte DIR_NO = 1;
+    private static final byte DIR_YES = 2;
+
     private final ArtifactOwner owner;
+
+    /**
+     * Whether the underlying source path is a directory.
+     *
+     * <p>Unlike a {@linkplain SpecialArtifact#isTreeArtifact tree artifact}, whose directory nature
+     * is declared and known at construction, a source path's type is a filesystem fact. Source
+     * artifacts are constructed purely from a path during loading/analysis (and interned per exec
+     * path), and Bazel deliberately avoids stat-ing source files during analysis, so we cannot pick
+     * a subclass up front the way {@link TreeFileArtifact} does. Instead the value is resolved
+     * lazily on first query and memoized, keeping {@link #isDirectory} a cheap, stable, type-like
+     * property thereafter -- consistent with derived directory artifacts. Only ever populated when
+     * {@link SourceDirectoryIsDirectoryFlag} is enabled.
+     */
+    private volatile byte directoryState = DIR_UNKNOWN;
 
     @VisibleForTesting
     public SourceArtifact(ArtifactRoot root, PathFragment execPath, ArtifactOwner owner) {
       super(root, execPath, execPath.hashCode());
       this.owner = owner;
+    }
+
+    /**
+     * Returns whether the source path is a directory on the filesystem.
+     *
+     * <p>Gated on the opt-in, server-global {@link SourceDirectoryIsDirectoryFlag}. When disabled
+     * (the default) this returns {@code false} unconditionally, preserving the historical behavior
+     * in which source artifacts are always treated as regular files -- and doing no filesystem
+     * access. The flag is server-global rather than a per-invocation semantics flag because {@code
+     * isDirectory()} is consumed throughout analysis, execution, remote, and BEP code that holds no
+     * {@code StarlarkSemantics}, and its value must be consistent across all of them.
+     *
+     * <p>When enabled, the result is resolved lazily and memoized. Direct filesystem access on
+     * source artifacts is safe (see class javadoc); like {@link
+     * com.google.devtools.build.lib.skyframe.ArtifactFunction}'s source-directory handling, this
+     * read is intentionally not tracked by Skyframe (see {@link Artifact#ARTIFACT}). Symlinks are
+     * followed to match {@code FileValue} semantics, and any error -- most importantly a missing
+     * path -- resolves to {@code false}, so a source that was deleted (or never existed) degrades
+     * exactly as a regular-file deletion does rather than throwing.
+     *
+     * <p>The memoized value can go stale only if the path flips between file and directory across
+     * builds while this interned artifact is reused. That is handled as gracefully as a deletion:
+     * the authoritative per-build metadata still comes from {@code ArtifactFunction}'s current
+     * {@code FileValue}, so actions never see corrupt inputs; at worst a stale expansion decision
+     * surfaces as a build error, not silent misbehavior.
+     */
+    @Override
+    public boolean isDirectory() {
+      if (!SourceDirectoryIsDirectoryFlag.sourceDirectoryIsDirectory()) {
+        return false;
+      }
+      byte cached = directoryState;
+      if (cached == DIR_UNKNOWN) {
+        FileStatus status = getPath().statNullable(Symlinks.FOLLOW);
+        // Benign race: concurrent callers compute the same value from the same path.
+        cached = (status != null && status.isDirectory()) ? DIR_YES : DIR_NO;
+        directoryState = cached;
+      }
+      return cached == DIR_YES;
     }
 
     /**

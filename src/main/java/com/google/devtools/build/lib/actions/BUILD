@@ -325,6 +325,7 @@ java_library(
         "Artifacts.java",
         "PathMapper.java",
         "PathMapperConstants.java",
+        "SourceDirectoryIsDirectoryFlag.java",
     ],
     exports = [":action_key_context"],
     deps = [
