@@ -31,6 +31,14 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
 import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue;
+import com.google.devtools.build.lib.bazel.repository.DigestWriter;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManifest;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.vfs.Path;
+import java.io.IOException;
+import java.util.ArrayList;
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeCommandResult;
 import com.google.devtools.build.lib.runtime.Command;
@@ -75,6 +83,12 @@ public final class FetchCommand implements BlazeCommand {
 
   public static final String NAME = "fetch";
 
+  @Nullable private DownloadManager downloadManager;
+
+  public void setDownloadManager(DownloadManager downloadManager) {
+    this.downloadManager = downloadManager;
+  }
+
   @Override
   public void editOptions(OptionsParser optionsParser) {
     TargetFetcher.injectNoBuildOption(optionsParser);
@@ -111,6 +125,7 @@ public final class FetchCommand implements BlazeCommand {
     }
 
     BlazeCommandResult result;
+    List<RepositoryName> fetchedRepos = new ArrayList<>();
     LoadingPhaseThreadsOption threadsOption = options.getOptions(LoadingPhaseThreadsOption.class);
     List<String> targets;
     try {
@@ -127,9 +142,12 @@ public final class FetchCommand implements BlazeCommand {
         }
         result = fetchTarget(env, options, targets);
       } else if (!fetchOptions.getRepos().isEmpty()) {
-        result = fetchRepos(env, threadsOption, fetchOptions.getRepos());
+        result = fetchRepos(env, threadsOption, fetchOptions.getRepos(), fetchedRepos);
       } else { // --all or just 'fetch' (equivalent) or --configure
-        result = fetchAll(env, threadsOption, fetchOptions.getConfigure());
+        result = fetchAll(env, threadsOption, fetchOptions.getConfigure(), fetchedRepos);
+      }
+      if (fetchOptions.getValidate() && result.isSuccess()) {
+        result = validateRepoDownloads(env, fetchedRepos);
       }
     } catch (InterruptedException e) {
       return createFailedBlazeCommandResult(
@@ -163,11 +181,90 @@ public final class FetchCommand implements BlazeCommand {
           Code.OPTIONS_INVALID,
           "Only one fetch option can be provided for fetch command");
     }
+    if (fetchOptions.getValidate()) {
+      if (!options.getResidue().isEmpty()) {
+        return createFailedBlazeCommandResult(
+            env.getReporter(),
+            Code.OPTIONS_INVALID,
+            "--validate does not support target patterns yet; use --all or --repo");
+      }
+      if (downloadManager == null || !downloadManager.hasDownloadValidator()) {
+        return createFailedBlazeCommandResult(
+            env.getReporter(),
+            Code.OPTIONS_INVALID,
+            "--validate requires --experimental_repository_download_validation");
+      }
+    }
     return null;
   }
 
+  /**
+   * Validates the downloads of the given (already fetched, hence up-to-date) repositories from
+   * their recorded download manifests, without re-running any implementation function.
+   */
+  private BlazeCommandResult validateRepoDownloads(
+      CommandEnvironment env, List<RepositoryName> repos) {
+    Path tmpDir = env.getDirectories().getOutputBase().getRelative("download-validation.tmp");
+    List<String> failures = new ArrayList<>();
+    for (RepositoryName repo : repos) {
+      Path manifestPath = DigestWriter.getDownloadManifestPath(env.getDirectories(), repo);
+      if (!manifestPath.exists()) {
+        // A repo served from the contents cache is a symlink to its entry; the manifest is
+        // carried beside the entry.
+        Path repoDir = manifestPath.getParentDirectory().getChild(repo.getName());
+        try {
+          if (repoDir.isSymbolicLink()) {
+            Path resolved = repoDir.resolveSymbolicLinks();
+            Path carried = resolved.replaceName(resolved.getBaseName() + ".downloads");
+            if (carried.exists()) {
+              manifestPath = carried;
+            }
+          }
+        } catch (IOException e) {
+          // Fall through to the missing-manifest report below.
+        }
+      }
+      if (!manifestPath.exists()) {
+        env.getReporter()
+            .handle(
+                Event.warn(
+                    repo.getName()
+                        + ": no download manifest (fetched by an older Bazel?); not validated."));
+        continue;
+      }
+      try {
+        var entries =
+            DownloadManifest.parse(
+                new String(FileSystemUtils.readContent(manifestPath), ISO_8859_1));
+        if (entries.isEmpty()) {
+          env.getReporter()
+              .handle(Event.warn(repo.getName() + ": unparseable download manifest; not validated."));
+          continue;
+        }
+        downloadManager.validateManifestEntries(
+            entries.get(), tmpDir, env.getClientEnv(), "repository " + repo.getName());
+      } catch (InterruptedException e) {
+        return createFailedBlazeCommandResult(
+            env.getReporter(), "Download validation interrupted: " + e.getMessage());
+      } catch (IOException e) {
+        env.getReporter().handle(Event.error(e.getMessage()));
+        failures.add(repo.getName());
+      }
+    }
+    if (!failures.isEmpty()) {
+      return createFailedBlazeCommandResult(
+          env.getReporter(),
+          "Download validation failed for: " + String.join(", ", failures));
+    }
+    env.getReporter().handle(Event.info("All repository downloads validated successfully."));
+    return BlazeCommandResult.success();
+  }
+
   private BlazeCommandResult fetchAll(
-      CommandEnvironment env, LoadingPhaseThreadsOption threadsOption, boolean configureEnabled)
+      CommandEnvironment env,
+      LoadingPhaseThreadsOption threadsOption,
+      boolean configureEnabled,
+      List<RepositoryName> fetchedRepos)
       throws InterruptedException {
     EvaluationContext evaluationContext =
         EvaluationContext.newBuilder()
@@ -186,12 +283,18 @@ public final class FetchCommand implements BlazeCommand {
           e != null ? e.getMessage() : "Unexpected error during fetching all external deps.");
     }
 
+    fetchedRepos.addAll(
+        ((BazelFetchAllValue) evaluationResult.get(BazelFetchAllValue.key(configureEnabled)))
+            .reposToVendor());
     env.getReporter().handle(Event.info("All external dependencies fetched successfully."));
     return BlazeCommandResult.success();
   }
 
   private BlazeCommandResult fetchRepos(
-      CommandEnvironment env, LoadingPhaseThreadsOption threadsOption, List<String> repos)
+      CommandEnvironment env,
+      LoadingPhaseThreadsOption threadsOption,
+      List<String> repos,
+      List<RepositoryName> fetchedRepos)
       throws InterruptedException {
     ImmutableMap<RepositoryName, RepositoryDirectoryValue> repositoryNamesAndValues;
     try {
@@ -215,6 +318,7 @@ public final class FetchCommand implements BlazeCommand {
       return createFailedBlazeCommandResult(
           env.getReporter(), "Fetching some repos failed with errors: " + notFoundRepos);
     }
+    fetchedRepos.addAll(repositoryNamesAndValues.keySet());
     env.getReporter().handle(Event.info("All requested repos fetched successfully."));
     return BlazeCommandResult.success();
   }

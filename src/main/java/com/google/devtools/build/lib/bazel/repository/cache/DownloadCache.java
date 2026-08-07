@@ -88,6 +88,7 @@ public class DownloadCache {
   public static final String DEFAULT_CACHE_FILENAME = "file";
   public static final String TMP_PREFIX = "tmp-";
   public static final String ID_PREFIX = "id-";
+  public static final String VALIDATION_PREFIX = "validated-";
 
   @Nullable private Path path;
   private boolean useHardlinks;
@@ -121,6 +122,30 @@ public class DownloadCache {
     Preconditions.checkState(isEnabled());
     String idHash = keyType.newHasher().putString(canonicalId, UTF_8).hash().toString();
     return keyType.getCachePath(path).getChild(cacheKey).getChild(ID_PREFIX + idHash).exists();
+  }
+
+  /**
+   * Returns whether a download validation record marker exists for the given content entry.
+   *
+   * <p>Markers live alongside the checksum-keyed content entry (like {@code id-} canonical ID
+   * markers) and share its lifecycle.
+   */
+  public boolean hasValidationRecord(String cacheKey, KeyType keyType, String recordDigest) {
+    Preconditions.checkState(isEnabled());
+    return keyType
+        .getCachePath(path)
+        .getChild(cacheKey)
+        .getChild(VALIDATION_PREFIX + recordDigest)
+        .exists();
+  }
+
+  /** Records a download validation as a marker alongside the checksum-keyed content entry. */
+  public void putValidationRecord(String cacheKey, KeyType keyType, String recordDigest)
+      throws IOException {
+    Preconditions.checkState(isEnabled());
+    Path cacheEntry = keyType.getCachePath(path).getChild(cacheKey);
+    cacheEntry.createDirectoryAndParents();
+    FileSystemUtils.touchFile(cacheEntry.getChild(VALIDATION_PREFIX + recordDigest));
   }
 
   /**

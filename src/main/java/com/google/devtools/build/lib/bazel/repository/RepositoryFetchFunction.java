@@ -31,6 +31,7 @@ import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.RequireR
 import com.google.devtools.build.lib.bazel.repository.cache.LocalRepoContentsCache;
 import com.google.devtools.build.lib.bazel.repository.cache.LocalRepoContentsCache.CandidateRepo;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManifest;
 import com.google.devtools.build.lib.bazel.repository.starlark.NeedsSkyframeRestartException;
 import com.google.devtools.build.lib.bazel.repository.starlark.RepoMetadata;
 import com.google.devtools.build.lib.bazel.repository.starlark.RepoMetadata.Reproducibility;
@@ -314,6 +315,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
         return null;
       }
       digestWriter.writeMarkerFile(result.recordedInputValues());
+      digestWriter.writeDownloadManifest(result.downloadManifestEntries());
       if (result.reproducible() == Reproducibility.YES && !repoDefinition.repoRule().local()) {
         // This repo may be eligible for the local and remote repo contents cache.
         // Replant symlinks before caching to convert absolute symlinks relative if possible, which
@@ -353,7 +355,10 @@ public final class RepositoryFetchFunction implements SkyFunction {
           try {
             newCacheEntry =
                 repoContentsCache.moveToCache(
-                    repoRoot, digestWriter.markerPath, digestWriter.predeclaredInputHash);
+                    repoRoot,
+                    digestWriter.markerPath,
+                    digestWriter.downloadManifestPath,
+                    digestWriter.predeclaredInputHash);
           } catch (IOException e) {
             throw new RepositoryFunctionException(
                 new IOException(
@@ -579,6 +584,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
    */
   private record FetchResult(
       ImmutableList<RepoRecordedInput.WithValue> recordedInputValues,
+      ImmutableList<DownloadManifest.Entry> downloadManifestEntries,
       Reproducibility reproducible) {}
 
   @Nullable
@@ -629,6 +635,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
     }
 
     ImmutableList<RepoRecordedInput.WithValue> recordedInputValues;
+    ImmutableList<DownloadManifest.Entry> downloadManifestEntries;
     RepoMetadata repoMetadata;
     try (Mutability mu = Mutability.create("Starlark repository");
         StarlarkRepositoryContext starlarkRepositoryContext =
@@ -704,6 +711,7 @@ public final class RepositoryFetchFunction implements SkyFunction {
       }
 
       recordedInputValues = starlarkRepositoryContext.getRecordedInputs();
+      downloadManifestEntries = starlarkRepositoryContext.getDownloadManifestEntries();
     } catch (NeedsSkyframeRestartException e) {
       return null;
     } catch (EvalException e) {
@@ -749,7 +757,8 @@ public final class RepositoryFetchFunction implements SkyFunction {
       }
     }
 
-    return new FetchResult(recordedInputValues, repoMetadata.reproducible());
+    return new FetchResult(
+        recordedInputValues, downloadManifestEntries, repoMetadata.reproducible());
   }
 
   private static boolean shouldRequireRepoMetadata(
