@@ -17,6 +17,7 @@ package com.google.devtools.build.lib.starlarkbuildapi;
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
+import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import net.starlark.java.annot.Param;
 import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
@@ -234,6 +235,72 @@ This function must be top-level, i.e. lambdas and nested functions are not allow
             doc = "List of the input files of the action."),
       })
   void doNothing(String mnemonic, Object inputs) throws EvalException;
+
+  @StarlarkMethod(
+      name = "copy",
+      enableOnlyWithFlag = BuildLanguageOptions.EXPERIMENTAL_COPY_ACTION,
+      doc =
+          "Experimental. Creates an action that copies the input to the output.<p>The copy"
+              + " preserves artifact type: declare <code>output</code> with <a"
+              + " href=\"#declare_file\"><code>declare_file()</code></a>, <a"
+              + " href=\"#declare_directory\"><code>declare_directory()</code></a> or <a"
+              + " href=\"#declare_symlink\"><code>declare_symlink()</code></a> to match the type"
+              + " of <code>input</code>.</p><p>The output's content is identical to the input's;"
+              + " only the name differs. For files and directories the content is byte-identical."
+              + " For unresolved symlinks the output is a symlink with the identical target"
+              + " string.</p><p>A <em>source directory</em> input is a special case: it is a"
+              + " file-type artifact (<a href=\"../builtins/File.html#is_directory\"><code>"
+              + "is_directory</code></a> is False — whether a source artifact is a directory is"
+              + " unknowable before execution), but may be copied to an output declared with <a"
+              + " href=\"#declare_directory\"><code>declare_directory()</code></a>. The build"
+              + " fails at execution if such an input turns out not to be a directory.</p>"
+              + "<p>Alternatively, when <code>path</code> is set, <code>input</code>"
+              + " must be a directory (a tree artifact or a source directory): the action extracts"
+              + " the entry at <code>path</code>"
+              + " (relative to the directory's root) out of the directory. Declare"
+              + " <code>output</code> with <a"
+              + " href=\"#declare_file\"><code>declare_file()</code></a> to extract a single file,"
+              + " or <a href=\"#declare_directory\"><code>declare_directory()</code></a> to"
+              + " recursively extract a sub-directory.</p><p>The action is not a spawn: it has no"
+              + " execution strategy, is not sandboxed and never executes remotely.</p>",
+      parameters = {
+        @Param(name = "input", doc = "The file, directory, or symlink to copy.", named = true),
+        @Param(
+            name = "output",
+            doc =
+                "The output of this action, of the same artifact type as <code>input</code> (or a"
+                    + " directory declared with <code>declare_directory()</code> when"
+                    + " <code>input</code> is a source directory).",
+            named = true),
+        @Param(
+            name = "path",
+            allowedTypes = {
+              @ParamType(type = String.class),
+              @ParamType(type = NoneType.class),
+            },
+            named = true,
+            positional = false,
+            defaultValue = "None",
+            doc =
+                "May only be used when <code>input</code> is a directory (a tree artifact or a"
+                    + " source directory). The path of the file or"
+                    + " sub-directory to copy out of the directory, relative to the directory's"
+                    + " root. It must name a file when <code>output</code> is a file and a directory"
+                    + " when <code>output</code> is a directory. The build fails if nothing of the"
+                    + " expected type exists at this path when the action executes."),
+        @Param(
+            name = "progress_message",
+            allowedTypes = {
+              @ParamType(type = String.class),
+              @ParamType(type = NoneType.class),
+            },
+            named = true,
+            positional = false,
+            defaultValue = "None",
+            doc = "Progress message to show to the user during the build."),
+      })
+  void copy(FileApi input, FileApi output, Object path, Object progressMessage)
+      throws EvalException;
 
   @StarlarkMethod(
       name = "symlink",

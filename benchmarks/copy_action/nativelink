@@ -1,0 +1,53 @@
+#!/usr/bin/env dotslash
+
+// DotSlash manifest for the NativeLink RBE server used by the `remote` strategy
+// in bench.py. Running this file fetches the pinned NativeLink release on first
+// use (verified against the digests below), caches it, and execs it with the
+// forwarded arguments — so the benchmark acquires NativeLink reproducibly
+// instead of depending on a manually-placed binary.
+//
+// Hashes/sizes are of the release .tar.gz; `path` selects the binary within it.
+{
+  "name": "nativelink",
+  "platforms": {
+    "linux-x86_64": {
+      "size": 18709801,
+      "hash": "sha256",
+      "digest": "cd861c1acd8c14f023741d35a310f89527aeadcb681e9818d8e823ee72ae017c",
+      "format": "tar.gz",
+      "path": "nativelink",
+      "providers": [
+        {
+          "type": "http",
+          "url": "https://github.com/TraceMachina/nativelink/releases/download/v1.6.1/nativelink-1.6.1-x86_64-unknown-linux-musl.tar.gz"
+        }
+      ]
+    },
+    "linux-aarch64": {
+      "size": 17880236,
+      "hash": "sha256",
+      "digest": "ecde4dd5ca8bcb53356ff65a7f5b7f7ec3107fb25a560e0ce982dc7b630c0b6b",
+      "format": "tar.gz",
+      "path": "nativelink",
+      "providers": [
+        {
+          "type": "http",
+          "url": "https://github.com/TraceMachina/nativelink/releases/download/v1.6.1/nativelink-1.6.1-aarch64-unknown-linux-musl.tar.gz"
+        }
+      ]
+    },
+    "macos-aarch64": {
+      "size": 16524607,
+      "hash": "sha256",
+      "digest": "d3b075ffc6421766ac1e00ab02863cb6baa86a8f2aaf73d7beb123cce0d826e8",
+      "format": "tar.gz",
+      "path": "nativelink",
+      "providers": [
+        {
+          "type": "http",
+          "url": "https://github.com/TraceMachina/nativelink/releases/download/v1.6.1/nativelink-1.6.1-aarch64-apple-darwin.tar.gz"
+        }
+      ]
+    }
+  }
+}
