@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.bazel.repository.decompressor;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.testutil.TestConstants.PRODUCT_NAME;
+import static com.google.devtools.build.lib.testutil.TestConstants.WORKSPACE_NAME;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeFalse;
@@ -107,7 +108,8 @@ public class DecompressorValueTest {
     assumeFalse(
         "Skipping httpBzlDocumentation test in Blaze environment.", PRODUCT_NAME.equals("blaze"));
 
-    String filePath = Runfiles.create().rlocation("_main/tools/build_defs/repo/http.bzl");
+    String filePath =
+        Runfiles.create().rlocation(WORKSPACE_NAME + "/tools/build_defs/repo/http.bzl");
     String contents = Files.readString(Paths.get(filePath), StandardCharsets.UTF_8);
 
     // Find where the archive formats variable is initialized and parse out.

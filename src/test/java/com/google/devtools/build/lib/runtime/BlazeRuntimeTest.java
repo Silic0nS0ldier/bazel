@@ -37,6 +37,7 @@ import com.google.devtools.build.lib.server.GcAndInternerShrinkingIdleTask;
 import com.google.devtools.build.lib.server.IdleTask;
 import com.google.devtools.build.lib.server.InstallBaseGarbageCollectorIdleTask;
 import com.google.devtools.build.lib.testutil.ManualClock;
+import com.google.devtools.build.lib.testutil.TestConstants;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.Dirent;
@@ -227,7 +228,7 @@ public class BlazeRuntimeTest {
                 new BlazeModule() {
                   @Override
                   public void initializeRuleClasses(ConfiguredRuleClassProvider.Builder builder) {
-                    builder.setRunfilesPrefix("_main");
+                    builder.setRunfilesPrefix(TestConstants.WORKSPACE_NAME);
                   }
                 }),
             ImmutableList.of());

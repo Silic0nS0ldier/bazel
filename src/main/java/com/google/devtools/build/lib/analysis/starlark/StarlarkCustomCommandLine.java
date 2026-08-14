@@ -1391,8 +1391,17 @@ public class StarlarkCustomCommandLine extends CommandLine {
 
     @Override
     public String getRunfilesPathString() {
+      return getRunfilesPath().getPathString();
+    }
+
+    @Override
+    public String getRlocationPathString() {
+      return Artifact.runfilesPathToRlocationPath(getRunfilesPath()).getPathString();
+    }
+
+    private PathFragment getRunfilesPath() {
       PathFragment relativePath = execPath.relativeTo(fileset.getExecPath());
-      return fileset.getRunfilesPath().getRelative(relativePath).getPathString();
+      return fileset.getRunfilesPath().getRelative(relativePath);
     }
 
     @Override
