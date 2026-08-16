@@ -1051,6 +1051,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/remote/common:action_key",
         "//src/main/java/com/google/devtools/build/lib/remote/common:bulk_transfer_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/common:lost_inputs_event",
+        "//src/main/java/com/google/devtools/build/lib/remote/disk",
         "//src/main/java/com/google/devtools/build/lib/remote/merkletree",
         "//src/main/java/com/google/devtools/build/lib/remote/options",
         "//src/main/java/com/google/devtools/build/lib/remote/util:digest_util",

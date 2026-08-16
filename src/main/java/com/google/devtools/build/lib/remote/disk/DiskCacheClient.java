@@ -35,7 +35,7 @@ import com.google.devtools.build.lib.remote.common.CacheNotFoundException;
 import com.google.devtools.build.lib.remote.common.MaybePathBacked;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient.Blob;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
-import com.google.devtools.build.lib.remote.util.Utils;
+import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.protobuf.ByteString;
@@ -45,8 +45,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import javax.annotation.Nullable;
 
 /**
  * An on-disk store for the remote action cache.
@@ -71,6 +73,7 @@ public class DiskCacheClient {
 
   private final ImmutableMap<Store, Path> storeRootMap;
   private final Path tmpRoot;
+  @Nullable private final DiskCacheTrust trust;
 
   // Disk cache operations are almost entirely I/O-bound as digests are only computed as part of
   // I/O operations, so using virtual threads is appropriate.
@@ -80,6 +83,12 @@ public class DiskCacheClient {
           Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("disk-cache-", 0).factory()));
 
   public DiskCacheClient(Path root, DigestUtil digestUtil) throws IOException {
+    this(root, digestUtil, /* trust= */ null);
+  }
+
+  public DiskCacheClient(Path root, DigestUtil digestUtil, @Nullable DiskCacheTrust trust)
+      throws IOException {
+    this.trust = trust;
     Path fnRoot =
         isOldStyleDigestFunction(digestUtil.getDigestFunction())
             ? root
@@ -226,31 +235,87 @@ public class DiskCacheClient {
     }
   }
 
-  public ListenableFuture<ActionResult> downloadActionResult(ActionKey actionKey) {
-    return Futures.transformAsync(
-        // Update the mtime on the action result itself before any of the blobs it references.
-        // This ensures that the blobs are always newer than the action result, so that trimming the
-        // cache in LRU order cannot create dangling references.
-        Utils.downloadAsActionResult(actionKey, (digest, out) -> download(digest, out, Store.AC)),
-        actionResult -> {
-          if (actionResult == null) {
-            return immediateFuture(null);
+  /**
+   * The result of a disk cache action result lookup.
+   *
+   * @param actionResult the action result
+   * @param trusted whether referenced blobs are missing locally and the result was served on trust
+   *     that they remain available remotely
+   * @param validatedAt when the entry was last validated, only set for trusted serves
+   */
+  public record CachedResult(
+      ActionResult actionResult, boolean trusted, @Nullable Instant validatedAt) {}
+
+  /**
+   * Looks up an action result, verifying that the blobs it references exist locally.
+   *
+   * <p>If some referenced blobs are missing locally, the result may still be served on trust that
+   * they remain available in the remote CAS, subject to {@link DiskCacheTrust} evaluation of the
+   * entry's last validation time. Trusted serves deliberately do not mark the entry as recently
+   * used, so that trust cannot extend itself; the entry regains recency when it is re-validated
+   * (by a remote cache write-back or a fully passing check).
+   *
+   * @param remoteReadableForSpawn whether the remote cache is readable under the current spawn's
+   *     read policy; trust is never extended without a remote CAS to fall back to
+   */
+  public ListenableFuture<CachedResult> downloadActionResult(
+      ActionKey actionKey, boolean remoteReadableForSpawn) {
+    return executorService.submit(
+        () -> {
+          Path path = toPath(actionKey.digest(), Store.AC);
+
+          // Capture the entry's mtime before the read refreshes it; it reflects the last time the
+          // entry was written or fully validated, which anchors trust evaluation.
+          FileStatus status = path.statIfFound();
+          if (status == null) {
+            return null;
+          }
+          Instant lastValidated = Instant.ofEpochMilli(status.getLastModifiedTime());
+
+          // Update the mtime on the action result itself before any of the blobs it references.
+          // This ensures that the blobs are always newer than the action result, so that trimming
+          // the cache in LRU order cannot create dangling references.
+          if (!refresh(path)) {
+            return null;
+          }
+
+          ActionResult actionResult;
+          try (InputStream in = path.getInputStream()) {
+            actionResult = ActionResult.parseFrom(in, ExtensionRegistryLite.getEmptyRegistry());
+          } catch (FileNotFoundException e) {
+            return null;
           }
 
           try {
             // Verify that all of the referenced blobs exist and update their mtime.
             checkActionResult(actionResult);
           } catch (CacheNotFoundException e) {
+            if (trust != null && remoteReadableForSpawn && trust.mayTrust(lastValidated)) {
+              // Serving on trust must not extend the trust anchor: restore the mtime captured
+              // before the read refreshed it. Best-effort; on shared caches entries owned by
+              // other users may refuse the restore, extending the lease once (recoverable).
+              try {
+                path.setLastModifiedTime(lastValidated.toEpochMilli());
+              } catch (IOException ignored) {
+                // Intentionally left blank.
+              }
+              return new CachedResult(actionResult, /* trusted= */ true, lastValidated);
+            }
             // If at least one of the referenced blobs is missing, consider the action result to be
             // stale. At this point we might have unnecessarily updated the mtime on some of the
             // referenced blobs, but this should happen infrequently, and doing it this way avoids a
             // double pass over the blobs.
-            return immediateFuture(null);
+            return null;
           }
 
-          return immediateFuture(actionResult);
-        },
-        directExecutor());
+          return new CachedResult(actionResult, /* trusted= */ false, /* validatedAt= */ null);
+        });
+  }
+
+  /** Returns the trust state governing this disk cache, if trust is enabled. */
+  @Nullable
+  public DiskCacheTrust getTrust() {
+    return trust;
   }
 
   public ListenableFuture<Void> uploadActionResult(ActionKey actionKey, ActionResult actionResult) {

@@ -64,6 +64,7 @@ import io.netty.util.AbstractReferenceCounted;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -198,14 +199,21 @@ public class CombinedCache extends AbstractReferenceCounted {
 
   /**
    * Class to keep track of which cache (disk or remote) a given [cached] ActionResult comes from.
+   *
+   * <p>For disk cache results, {@code trusted} indicates that referenced blobs are missing locally
+   * and the result was served on trust that they remain available remotely, with {@code
+   * validatedAt} carrying the entry's last validation time (see {@link
+   * com.google.devtools.build.lib.remote.disk.DiskCacheTrust}).
    */
-  public record CachedActionResult(ActionResult actionResult, String cacheName) {
+  public record CachedActionResult(
+      ActionResult actionResult, String cacheName, boolean trusted, @Nullable Instant validatedAt) {
     @Nullable
     public static CachedActionResult remote(ActionResult actionResult) {
       if (actionResult == null) {
         return null;
       }
-      return new CachedActionResult(actionResult, "remote");
+      return new CachedActionResult(
+          actionResult, "remote", /* trusted= */ false, /* validatedAt= */ null);
     }
 
     @Nullable
@@ -213,7 +221,17 @@ public class CombinedCache extends AbstractReferenceCounted {
       if (actionResult == null) {
         return null;
       }
-      return new CachedActionResult(actionResult, "disk");
+      return new CachedActionResult(
+          actionResult, "disk", /* trusted= */ false, /* validatedAt= */ null);
+    }
+
+    @Nullable
+    public static CachedActionResult disk(DiskCacheClient.CachedResult cachedResult) {
+      if (cachedResult == null) {
+        return null;
+      }
+      return new CachedActionResult(
+          cachedResult.actionResult(), "disk", cachedResult.trusted(), cachedResult.validatedAt());
     }
   }
 
@@ -247,9 +265,13 @@ public class CombinedCache extends AbstractReferenceCounted {
       if (spawnExecutionContext != null) {
         spawnExecutionContext.report(SPAWN_CHECKING_DISK_CACHE_EVENT);
       }
+      // Trust for entries with locally missing blobs requires a remote CAS to fall back to under
+      // the current spawn's read policy.
+      boolean remoteReadableForSpawn =
+          remoteCacheClient != null && context.getReadCachePolicy().allowRemoteCache();
       future =
           Futures.transform(
-              diskCacheClient.downloadActionResult(actionKey),
+              diskCacheClient.downloadActionResult(actionKey, remoteReadableForSpawn),
               CachedActionResult::disk,
               directExecutor());
     }
@@ -824,6 +846,11 @@ public class CombinedCache extends AbstractReferenceCounted {
 
   public boolean hasDiskCache() {
     return diskCacheClient != null;
+  }
+
+  @Nullable
+  public DiskCacheClient getDiskCacheClient() {
+    return diskCacheClient;
   }
 
   @Override

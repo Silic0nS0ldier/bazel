@@ -536,6 +536,86 @@ public abstract class RemoteOptions extends CommonRemoteOptions {
 
   public abstract void setDiskCacheGcMaxAge(Duration value);
 
+  /** Value of {@code --experimental_disk_cache_action_result_trust}. */
+  public record DiskCacheActionResultTrust(Kind kind, @Nullable Duration duration) {
+    /** The kind of trust extended to disk cache action results. */
+    public enum Kind {
+      OFF,
+      REMOTE_TTL,
+      DURATION,
+      UNBOUNDED
+    }
+
+    public static final DiskCacheActionResultTrust OFF =
+        new DiskCacheActionResultTrust(Kind.OFF, null);
+
+    /** Converts a flag value to a {@link DiskCacheActionResultTrust}. */
+    public static class TrustConverter extends Converter.Contextless<DiskCacheActionResultTrust> {
+      @Override
+      public DiskCacheActionResultTrust convert(String input) throws OptionsParsingException {
+        return switch (input) {
+          case "off" -> OFF;
+          case "remote-ttl" -> new DiskCacheActionResultTrust(Kind.REMOTE_TTL, null);
+          case "unbounded" -> new DiskCacheActionResultTrust(Kind.UNBOUNDED, null);
+          default ->
+              new DiskCacheActionResultTrust(
+                  Kind.DURATION, new RemoteDurationConverter().convert(input));
+        };
+      }
+
+      @Override
+      public String getTypeDescription() {
+        return "off, remote-ttl, unbounded or a duration";
+      }
+    }
+  }
+
+  @Option(
+      name = "experimental_disk_cache_action_result_trust",
+      defaultValue = "off",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.EXECUTION},
+      converter = DiskCacheActionResultTrust.TrustConverter.class,
+      help =
+          "How long a disk cache action result may be served after it was last validated, even if"
+              + " blobs it references are missing locally (as is normal under"
+              + " --remote_download_outputs=minimal), on the assumption that the blobs remain"
+              + " available in the remote CAS. 'off' (the default) preserves the current"
+              + " behavior: such action results are ignored. 'remote-ttl' trusts for the value of"
+              + " --experimental_remote_cache_ttl. A duration trusts for that duration."
+              + " 'unbounded' trusts indefinitely. Requires a readable remote cache. Stale serves"
+              + " are recovered by lost-input recovery (--rewind_lost_inputs or"
+              + " --experimental_remote_cache_eviction_retries).")
+  public abstract DiskCacheActionResultTrust getDiskCacheActionResultTrust();
+
+  /** Value of {@code --experimental_disk_cache_action_result_trust_revocation}. */
+  public enum DiskCacheTrustRevocation {
+    PRECISE,
+    ALL,
+    OFF;
+
+    /** Converts to {@link DiskCacheTrustRevocation}. */
+    static class Converter extends EnumConverter<DiskCacheTrustRevocation> {
+      public Converter() {
+        super(DiskCacheTrustRevocation.class, "disk cache trust revocation");
+      }
+    }
+  }
+
+  @Option(
+      name = "experimental_disk_cache_action_result_trust_revocation",
+      defaultValue = "precise",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.EXECUTION},
+      converter = DiskCacheTrustRevocation.Converter.class,
+      help =
+          "How proven violations of disk cache action result trust revoke it. 'precise' (the"
+              + " default) suspends trust for the remainder of the server's builds on the first"
+              + " violation that entered the build via a trusted serve, and persistently revokes"
+              + " all trust for the configured remote only if violations continue. 'all' revokes"
+              + " persistently on any lost input. 'off' relies on natural trust expiry alone.")
+  public abstract DiskCacheTrustRevocation getDiskCacheActionResultTrustRevocation();
+
   /** An enum for different levels of checks for concurrent changes. */
   public enum ConcurrentChangesCheckLevel {
     OFF,
@@ -878,7 +958,9 @@ public abstract class RemoteOptions extends CommonRemoteOptions {
       help =
           "If set to true, Bazel will extend the lease for outputs of remote actions during the"
               + " build by sending `FindMissingBlobs` calls periodically to remote cache. The"
-              + " frequency is based on the value of `--experimental_remote_cache_ttl`.")
+              + " frequency is based on the value of `--experimental_remote_cache_ttl`. Has no"
+              + " effect when --rewind_lost_inputs is enabled, which recovers from lost remote"
+              + " outputs instead of keeping them alive.")
   public abstract boolean getRemoteCacheLeaseExtension();
 
   @Option(

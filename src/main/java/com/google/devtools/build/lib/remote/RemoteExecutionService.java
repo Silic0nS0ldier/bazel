@@ -102,6 +102,7 @@ import com.google.devtools.build.lib.remote.common.OperationObserver;
 import com.google.devtools.build.lib.remote.common.OutputDigestMismatchException;
 import com.google.devtools.build.lib.remote.common.ProgressStatusListener;
 import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
+import com.google.devtools.build.lib.remote.disk.DiskCacheTrust;
 import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext.CachePolicy;
 import com.google.devtools.build.lib.remote.common.RemoteExecutionClient;
 import com.google.devtools.build.lib.remote.common.RemotePathResolver;
@@ -613,13 +614,17 @@ public class RemoteExecutionService {
     private final ActionResult actionResult;
     @Nullable private final ExecuteResponse executeResponse;
     @Nullable private final String cacheName;
+    @Nullable private final Instant validatedAt;
     @Nullable private ActionResultMetadata metadata;
 
     /** Creates a new {@link RemoteActionResult} instance from a cached result. */
     public static RemoteActionResult createFromCache(CachedActionResult cachedActionResult) {
       checkArgument(cachedActionResult != null, "cachedActionResult is null");
       return new RemoteActionResult(
-          cachedActionResult.actionResult(), null, cachedActionResult.cacheName());
+          cachedActionResult.actionResult(),
+          null,
+          cachedActionResult.cacheName(),
+          cachedActionResult.validatedAt());
     }
 
     /** Creates a new {@link RemoteActionResult} instance from a execute response. */
@@ -632,9 +637,27 @@ public class RemoteExecutionService {
         ActionResult actionResult,
         @Nullable ExecuteResponse executeResponse,
         @Nullable String cacheName) {
+      this(actionResult, executeResponse, cacheName, /* validatedAt= */ null);
+    }
+
+    public RemoteActionResult(
+        ActionResult actionResult,
+        @Nullable ExecuteResponse executeResponse,
+        @Nullable String cacheName,
+        @Nullable Instant validatedAt) {
       this.actionResult = actionResult;
       this.executeResponse = executeResponse;
       this.cacheName = cacheName;
+      this.validatedAt = validatedAt;
+    }
+
+    /**
+     * Returns when this result was last validated against the remote cache, if it was served from
+     * the disk cache on trust (see {@link DiskCacheTrust}); null otherwise.
+     */
+    @Nullable
+    public Instant getValidatedAt() {
+      return validatedAt;
     }
 
     /** Returns the exit code of remote executed action. */
@@ -795,6 +818,31 @@ public class RemoteExecutionService {
     }
 
     var result = RemoteActionResult.createFromCache(cachedActionResult);
+
+    if (cachedActionResult.trusted()) {
+      // Record the digests this trusted serve introduced so that a later lost input can be
+      // attributed to trusted-origin metadata for evidence-gated revocation. Tree children are
+      // not recorded (enumerating them would require fetching the tree blob, defeating the
+      // purpose); losses of tree children from trusted serves therefore go unattributed.
+      // TODO: per the proposal, violations with unknown provenance surfacing via metadata
+      // persisted by an earlier server should also be treated as trusted-origin.
+      var trust = getDiskCacheTrust();
+      if (trust != null) {
+        var actionResult = cachedActionResult.actionResult();
+        for (var file : actionResult.getOutputFilesList()) {
+          trust.recordTrustedServeDigest(file.getDigest());
+        }
+        for (var dir : actionResult.getOutputDirectoriesList()) {
+          trust.recordTrustedServeDigest(dir.getTreeDigest());
+        }
+        if (actionResult.hasStdoutDigest()) {
+          trust.recordTrustedServeDigest(actionResult.getStdoutDigest());
+        }
+        if (actionResult.hasStderrDigest()) {
+          trust.recordTrustedServeDigest(actionResult.getStderrDigest());
+        }
+      }
+    }
 
     // We only add digests to `knownMissingCasDigests` when LostInputsEvent occurs which will cause
     // the build to abort and rewind, so there is no data race here. This allows us to avoid the
@@ -1277,8 +1325,12 @@ public class RemoteExecutionService {
         result.getOrParseActionResultMetadata(
             combinedCache, digestUtil, context, action.getRemotePathResolver());
 
-    // The expiration time for remote cache entries.
-    var expirationTime = Instant.now().plus(remoteOptions.getRemoteCacheTtl());
+    // The expiration time for remote cache entries. For results served from the disk cache on
+    // trust, the expiry is anchored to the entry's last validation rather than now, so that
+    // staleness does not compound across incremental builds.
+    var expirationAnchor =
+        result.getValidatedAt() != null ? result.getValidatedAt() : Instant.now();
+    var expirationTime = expirationAnchor.plus(remoteOptions.getRemoteCacheTtl());
 
     ActionInput inMemoryOutput = null;
     AtomicReference<ByteString> inMemoryOutputData = new AtomicReference<>(null);
@@ -2061,6 +2113,33 @@ public class RemoteExecutionService {
     for (String digest : event.missingDigests()) {
       knownMissingCasDigests.add(DigestUtil.fromString(digest));
     }
+
+    // Evidence-gated revocation of disk cache action result trust: an isolated trusted-origin
+    // violation suspends trust in memory (degrading lookups to remote re-validation); the
+    // persistent epoch is only advanced if violations continue.
+    var trust = getDiskCacheTrust();
+    if (trust != null) {
+      switch (remoteOptions.getDiskCacheActionResultTrustRevocation()) {
+        case ALL -> trust.revokeAllNow();
+        case PRECISE -> {
+          for (String digest : event.missingDigests()) {
+            if (trust.isTrustedOrigin(DigestUtil.fromString(digest))) {
+              trust.reportTrustedOriginViolation();
+              break;
+            }
+          }
+        }
+        case OFF -> {}
+      }
+    }
+  }
+
+  @Nullable
+  private DiskCacheTrust getDiskCacheTrust() {
+    if (combinedCache == null || combinedCache.getDiskCacheClient() == null) {
+      return null;
+    }
+    return combinedCache.getDiskCacheClient().getTrust();
   }
 
   /** Shuts the service down. */

@@ -69,6 +69,7 @@ import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
 import com.google.devtools.build.lib.remote.common.RemoteExecutionClient;
 import com.google.devtools.build.lib.remote.disk.DiskCacheClient;
 import com.google.devtools.build.lib.remote.disk.DiskCacheGarbageCollectorIdleTask;
+import com.google.devtools.build.lib.remote.disk.DiskCacheTrust;
 import com.google.devtools.build.lib.remote.downloader.GrpcRemoteDownloader;
 import com.google.devtools.build.lib.remote.http.DownloadTimeoutException;
 import com.google.devtools.build.lib.remote.http.HttpException;
@@ -125,6 +126,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.channels.ClosedChannelException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -143,6 +145,11 @@ public final class RemoteModule extends BlazeModule {
       MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(1));
 
   private final Set<Digest> knownMissingCasDigests = Sets.newConcurrentHashSet();
+
+  // Server-lifetime disk cache trust state: per-identity violation counts (suspension) and the
+  // digests introduced by trusted serves, used for evidence-gated revocation.
+  private final DiskCacheTrust.ServerState diskCacheTrustServerState =
+      new DiskCacheTrust.ServerState();
   private boolean useRemoteRepoContentsCache;
 
   @Nullable private PathFragment outputBase;
@@ -291,7 +298,8 @@ public final class RemoteModule extends BlazeModule {
               Preconditions.checkNotNull(env.getWorkingDirectory(), "workingDirectory"),
               digestUtil,
               new RemoteRetrier(
-                  remoteOptions, HTTP_RESULT_CLASSIFIER, retryScheduler, circuitBreaker));
+                  remoteOptions, HTTP_RESULT_CLASSIFIER, retryScheduler, circuitBreaker),
+              createDiskCacheTrust(env, remoteOptions, diskCachePath));
     } catch (IOException e) {
       handleInitFailure(env, e, Code.CACHE_INIT_FAILURE);
       return;
@@ -313,6 +321,78 @@ public final class RemoteModule extends BlazeModule {
             outputService,
             knownMissingCasDigests);
     actionInputFetcher = createActionInputFetcher(combinedCache);
+  }
+
+  /**
+   * Creates the disk cache trust state for {@code --experimental_disk_cache_action_result_trust},
+   * or null when trust is disabled or its prerequisites are not met.
+   */
+  @Nullable
+  private DiskCacheTrust createDiskCacheTrust(
+      CommandEnvironment env, RemoteOptions remoteOptions, @Nullable PathFragment diskCachePath) {
+    var trustOption = remoteOptions.getDiskCacheActionResultTrust();
+    if (trustOption.kind() == RemoteOptions.DiskCacheActionResultTrust.Kind.OFF
+        || diskCachePath == null) {
+      return null;
+    }
+
+    String endpoint =
+        !Strings.isNullOrEmpty(remoteOptions.getRemoteCache())
+            ? remoteOptions.getRemoteCache()
+            : remoteOptions.getRemoteExecutor();
+    if (Strings.isNullOrEmpty(endpoint)) {
+      env.getReporter()
+          .handle(
+              Event.warn(
+                  "--experimental_disk_cache_action_result_trust requires a readable remote"
+                      + " cache; ignoring."));
+      return null;
+    }
+
+    Duration lease =
+        switch (trustOption.kind()) {
+          case REMOTE_TTL -> remoteOptions.getRemoteCacheTtl();
+          case DURATION -> trustOption.duration();
+          case UNBOUNDED -> null;
+          case OFF -> throw new IllegalStateException("handled above");
+        };
+
+    var buildRequestOptions = env.getOptions().getOptions(BuildRequestOptions.class);
+    var executionOptions = env.getOptions().getOptions(ExecutionOptions.class);
+    boolean rewindLostInputs =
+        buildRequestOptions != null && buildRequestOptions.getRewindLostInputs();
+    int evictionRetries =
+        executionOptions != null ? executionOptions.getRemoteRetryOnTransientCacheError() : 0;
+    if (!rewindLostInputs && evictionRetries <= 0) {
+      env.getReporter()
+          .handle(
+              Event.warn(
+                  "--experimental_disk_cache_action_result_trust is enabled but neither"
+                      + " --rewind_lost_inputs nor --experimental_remote_cache_eviction_retries"
+                      + " is; stale trusted serves cannot be recovered automatically."));
+    }
+    Duration gcMaxAge = remoteOptions.getDiskCacheGcMaxAge();
+    if (!gcMaxAge.isZero() && (lease == null || lease.compareTo(gcMaxAge) > 0)) {
+      env.getReporter()
+          .handle(
+              Event.warn(
+                  "--experimental_disk_cache_gc_max_age is shorter than the disk cache action"
+                      + " result trust duration; trusted entries may be collected while still"
+                      + " trusted, costing re-validation round trips."));
+    }
+
+    String identity = endpoint + "|" + Strings.nullToEmpty(remoteOptions.getRemoteInstanceName());
+    try {
+      return DiskCacheTrust.create(
+          env.getWorkingDirectory().getRelative(diskCachePath),
+          identity,
+          lease,
+          diskCacheTrustServerState);
+    } catch (IOException e) {
+      env.getReporter()
+          .handle(Event.warn("Failed to initialize disk cache trust state: " + e.getMessage()));
+      return null;
+    }
   }
 
   @Nullable
@@ -844,7 +924,10 @@ public final class RemoteModule extends BlazeModule {
         try {
           diskCacheClient =
               CombinedCacheClientFactory.createDiskCache(
-                  env.getWorkingDirectory(), diskCachePath, digestUtil);
+                  env.getWorkingDirectory(),
+                  diskCachePath,
+                  digestUtil,
+                  createDiskCacheTrust(env, remoteOptions, diskCachePath));
         } catch (Exception e) {
           handleInitFailure(env, e, Code.CACHE_INIT_FAILURE);
           return false;
@@ -884,7 +967,10 @@ public final class RemoteModule extends BlazeModule {
         try {
           diskCacheClient =
               CombinedCacheClientFactory.createDiskCache(
-                  env.getWorkingDirectory(), diskCachePath, digestUtil);
+                  env.getWorkingDirectory(),
+                  diskCachePath,
+                  digestUtil,
+                  createDiskCacheTrust(env, remoteOptions, diskCachePath));
         } catch (Exception e) {
           handleInitFailure(env, e, Code.CACHE_INIT_FAILURE);
           return false;

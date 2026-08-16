@@ -95,7 +95,16 @@ public class RemoteOutputChecker implements OutputChecker {
     this.lastRemoteOutputChecker = lastRemoteOutputChecker;
   }
 
-  /** Sets this checker to check the TTL of remote metadata when deciding whether to trust it. */
+  /**
+   * Sets this checker to check the TTL of remote metadata when deciding whether to trust it.
+   *
+   * <p>This is a test-only hook with no production callers: TTL enforcement was removed in favor
+   * of optimistically trusting expired metadata and relying on build/action rewinding to recover
+   * when contents are actually gone (commit 50ca1b6147, fixing
+   * https://github.com/bazelbuild/bazel/issues/26140), then reintroduced solely behind this hook
+   * (commit 64d8f68237). Without a clock, {@link #shouldTrustMetadata} trusts remote metadata
+   * regardless of its expiration time.
+   */
   public void setCheckMetadataTtl(Clock clock) {
     this.clock = clock;
   }

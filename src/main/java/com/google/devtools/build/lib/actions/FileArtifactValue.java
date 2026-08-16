@@ -183,6 +183,12 @@ public abstract class FileArtifactValue implements SkyValue, FileArtifactMetadat
    *
    * <p>The expiration time does not factor into equality, as it can be mutated by {@link
    * #setExpirationTime}.
+   *
+   * <p>The expiration time is advisory: nothing in production enforces it. Its only consumers are
+   * {@code RemoteLeaseExtension} (to select which outputs to extend and when to wake up) and a
+   * test-only TTL check in {@code RemoteOutputChecker#setCheckMetadataTtl}. Expired metadata is
+   * still trusted, with build/action rewinding recovering when contents are actually gone (see
+   * commit 50ca1b6147, https://github.com/bazelbuild/bazel/issues/26140).
    */
   @Nullable
   public Instant getExpirationTime() {

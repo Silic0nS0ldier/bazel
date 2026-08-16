@@ -44,6 +44,19 @@ public abstract class CommonRemoteOptions extends OptionsBase {
               + " repeating this flag.")
   public abstract List<RegexPatternOption> getRemoteDownloadRegex();
 
+  // The TTL declared here is no longer enforced. Expired metadata used to force re-downloads and
+  // invalidate action cache entries, but both behaviors were removed in favor of optimistically
+  // reusing remote metadata and relying on build/action rewinding to recover when contents are
+  // actually gone. Evidence;
+  // - commit 23d03e1a06: expired outputs are no longer eagerly downloaded under BwoB.
+  // - commit 50ca1b6147 (https://github.com/bazelbuild/bazel/issues/26140): expired metadata no
+  //   longer invalidates action cache entries.
+  // - commit 64d8f68237: the remaining TTL check was gated behind
+  //   RemoteOutputChecker#setCheckMetadataTtl, which has no production callers.
+  // Today this value only determines the (advisory) expiration stamped on remote output metadata
+  // and the refresh cadence of --experimental_remote_cache_lease_extension. The avoidance of
+  // repeated GetActionResult calls in incremental builds is unconditional and does not consult
+  // this value.
   @Option(
       name = "experimental_remote_cache_ttl",
       defaultValue = "3h",
@@ -51,12 +64,15 @@ public abstract class CommonRemoteOptions extends OptionsBase {
       effectTags = {OptionEffectTag.EXECUTION},
       converter = RemoteDurationConverter.class,
       help =
-          "The guaranteed minimal TTL of blobs in the remote cache after their digests are recently"
-              + " referenced e.g. by an ActionResult or FindMissingBlobs. Bazel does several"
-              + " optimizations based on the blobs' TTL e.g. doesn't repeatedly call"
-              + " GetActionResult in an incremental build. The value should be set slightly less"
-              + " than the real TTL since there is a gap between when the server returns the"
-              + " digests and when Bazel receives them.")
+          "The assumed minimal TTL of blobs in the remote cache after their digests are recently"
+              + " referenced e.g. by an ActionResult or FindMissingBlobs. Bazel uses this value to"
+              + " set the expiration time recorded on remote output metadata and to derive the"
+              + " refresh frequency of --experimental_remote_cache_lease_extension. The TTL is not"
+              + " otherwise enforced: Bazel optimistically keeps using remote metadata past its"
+              + " expiration and relies on build or action rewinding to recover if contents have"
+              + " actually been evicted. The value should be set slightly less than the real TTL"
+              + " since there is a gap between when the server returns the digests and when Bazel"
+              + " receives them.")
   public abstract Duration getRemoteCacheTtl();
 
   /** Returns the specified duration. Assumes seconds if unitless. */
