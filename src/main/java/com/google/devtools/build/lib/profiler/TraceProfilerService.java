@@ -162,6 +162,13 @@ public interface TraceProfilerService extends BlazeService {
   void setVfsTypeHeuristics(Map<String, ? extends Predicate<? super String>> vfsTypeHeuristics);
 
   /**
+   * Sets the number of resource collection intervals to buffer before flushing collected counters
+   * to the profile. A value of 0 buffers until profiling stops. Must be called before {@link
+   * #start}.
+   */
+  void setMetricsBatchSize(int metricsBatchSize);
+
+  /**
    * Enable profiling.
    *
    * <p>Subsequent calls to beginTask/endTask will be recorded in the provided output stream. Please

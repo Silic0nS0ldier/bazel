@@ -1503,8 +1503,12 @@ sh_test(
     srcs = ["profile_test.sh"],
     data = [
         ":test-deps",
+        "//scripts:jq",
         "@bazel_tools//tools/bash/runfiles",
     ],
+    env = {
+        "JQ_RLOCATIONPATH": "$(rlocationpath //scripts:jq)",
+    },
 )
 
 sh_test(
