@@ -886,6 +886,32 @@ public final class SymbolicMacroTest extends BuildViewTestCase {
   }
 
   @Test
+  public void starlarkValueAttr_isPassedThrough() throws Exception {
+    scratch.file(
+        "pkg/foo.bzl",
+        """
+        def _impl(name, visibility, payload):
+            print("payload is %s" % repr(payload))
+        my_macro = macro(
+            implementation = _impl,
+            attrs = {
+              "payload": attr.value(configurable=False),
+            },
+        )
+        """);
+    scratch.file(
+        "pkg/BUILD",
+        """
+        load(":foo.bzl", "my_macro")
+        my_macro(name="abc", payload={"a": [1, 2.5, True, None]})
+        """);
+
+    Package pkg = getPackage("pkg");
+    assertPackageNotInError(pkg);
+    assertContainsEvent("payload is {\"a\": [1, 2.5, True, None]}");
+  }
+
+  @Test
   public void defaultAttrValue_isUsedWhenNotOverridden() throws Exception {
     scratch.file(
         "pkg/foo.bzl",

@@ -93,6 +93,52 @@ message FilesetEntry {
   optional string strip_prefix = 6;
 }
 
+// An arbitrary structured Starlark value, as held by an attr.value() attribute.
+message StarlarkValue {
+  // The kind of a SEQUENCE value.
+  enum SequenceKind {
+    LIST = 1;
+    TUPLE = 2;
+    SET = 3;
+  }
+
+  // Indicates which of the value fields below is populated. NONE populates
+  // none of them.
+  enum Type {
+    NONE = 1;
+    BOOL = 2;
+    INT = 3;
+    FLOAT = 4;
+    STRING = 5;
+    SEQUENCE = 6;
+    DICT = 7;
+  }
+
+  message DictEntry {
+    required StarlarkValue key = 1;
+    required StarlarkValue value = 2;
+  }
+
+  required Type type = 1;
+
+  optional bool bool_value = 2;
+
+  // Starlark ints are arbitrary precision, so the value is rendered in its
+  // decimal string form.
+  optional string int_value = 3;
+
+  optional double float_value = 4;
+
+  optional string string_value = 5;
+
+  // Populated when type is SEQUENCE.
+  optional SequenceKind sequence_kind = 6;
+  repeated StarlarkValue sequence_value = 7;
+
+  // Populated when type is DICT.
+  repeated DictEntry dict_value = 8;
+}
+
 // A rule attribute. Each attribute must have a type and one of the various
 // value fields populated - for the most part.
 //
@@ -139,6 +185,8 @@ message Attribute {
     LABEL_KEYED_STRING_DICT = 21;  // label_keyed_string_dict
 
     DEPRECATED_STRING_DICT_UNARY = 17;
+
+    STARLARK_VALUE = 22;      // starlark_value
   }
 
   // Values for the TriState field type.
@@ -180,6 +228,7 @@ message Attribute {
     repeated int32 int_list_value = 13;
     repeated LabelDictUnaryEntry label_dict_unary_value = 15;
     repeated LabelKeyedStringDictEntry label_keyed_string_dict_value = 17;
+    optional StarlarkValue starlark_value = 18;
 
     repeated bytes DEPRECATED_string_dict_unary_value = 14;
   }
@@ -272,6 +321,10 @@ message Attribute {
 
   // If this is a label-keyed string dict, each entry will be stored here.
   repeated LabelKeyedStringDictEntry label_keyed_string_dict_value = 22;
+
+  // If this is an arbitrary structured Starlark value (see attr.value()), the
+  // value is stored here.
+  optional StarlarkValue starlark_value = 24;
 
   // If this attribute's value is an expression containing one or more select
   // expressions, then its type is SELECTOR_LIST and a SelectorList will be

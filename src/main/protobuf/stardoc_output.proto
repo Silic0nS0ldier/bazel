@@ -74,6 +74,8 @@ enum AttributeType {
   OUTPUT_LIST = 13;
   LABEL_DICT_UNARY = 14;
   LABEL_LIST_DICT = 15;
+  // An arbitrary structured Starlark value; see attr.value().
+  STARLARK_VALUE = 16;
 }
 
 // Representation of a Starlark rule definition.

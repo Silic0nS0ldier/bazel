@@ -1331,6 +1331,61 @@ public interface StarlarkAttrModuleApi extends StarlarkValue {
       throws EvalException;
 
   @StarlarkMethod(
+      name = "value",
+      doc =
+          """
+          Creates a schema for an attribute holding an arbitrary structured Starlark value.
+
+          <p>Accepted values are any composition of <code>None</code>, <code>bool</code>,
+          <code>int</code>, <code>float</code>, <code>str</code>, <code>tuple</code>,
+          <code>list</code>, <code>set</code> and <code>dict</code>. Functions, providers,
+          <code>Label</code>s and other context-carrying values are rejected.
+
+          <p>The value is deeply copied and frozen on assignment, and never contributes
+          dependencies to the target, so it is not a substitute for
+          <a href='#label'><code>attr.label</code></a>.
+          """,
+      parameters = {
+        @Param(
+            name = CONFIGURABLE_ARG,
+            allowedTypes = {
+              @ParamType(type = Boolean.class),
+              @ParamType(type = Starlark.UnboundMarker.class),
+            },
+            defaultValue = "unbound",
+            doc = CONFIGURABLE_ARG_DOC,
+            named = true,
+            positional = false),
+        @Param(
+            name = DEFAULT_ARG,
+            defaultValue = "None",
+            doc = DEFAULT_DOC,
+            named = true,
+            positional = false),
+        @Param(
+            name = DOC_ARG,
+            allowedTypes = {@ParamType(type = String.class), @ParamType(type = NoneType.class)},
+            defaultValue = "None",
+            doc = DOC_DOC,
+            named = true,
+            positional = false),
+        @Param(
+            name = MANDATORY_ARG,
+            defaultValue = "False",
+            doc = MANDATORY_DOC,
+            named = true,
+            positional = false)
+      },
+      useStarlarkThread = true)
+  Descriptor valueAttribute(
+      Object configurable,
+      Object defaultValue,
+      Object doc,
+      Boolean mandatory,
+      StarlarkThread thread)
+      throws EvalException;
+
+  @StarlarkMethod(
       name = "license",
       doc = "Creates a schema for a license attribute.",
       // TODO(bazel-team): Implement proper license support for Starlark.

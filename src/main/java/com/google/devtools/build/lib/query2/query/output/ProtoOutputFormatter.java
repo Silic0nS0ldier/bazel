@@ -101,7 +101,8 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
           BuildType.OUTPUT,
           Type.BOOLEAN,
           BuildType.TRISTATE,
-          BuildType.LICENSE);
+          BuildType.LICENSE,
+          Types.STARLARK_VALUE);
 
   private AspectResolver aspectResolver;
   private DependencyFilter dependencyFilter;

@@ -30,8 +30,13 @@ import com.google.devtools.build.lib.testutil.MoreAsserts;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import net.starlark.java.eval.Dict;
+import net.starlark.java.eval.Mutability;
+import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkList;
+import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.Tuple;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -264,6 +269,50 @@ public class TypeTest {
     assertThat(converted).isEqualTo(input);
     assertThat(converted).isNotSameInstanceAs(input);
     assertThat(collectLabels(Types.STRING_DICT, converted)).isEmpty();
+  }
+
+  @Test
+  public void testStarlarkValue() throws Exception {
+    try (Mutability mu = Mutability.create("test")) {
+      Dict<Object, Object> inner =
+          Dict.builder().put("k", (Object) StarlarkInt.of(1)).build(mu);
+      StarlarkList<Object> input =
+          StarlarkList.of(
+              mu,
+              Starlark.NONE,
+              Boolean.TRUE,
+              StarlarkInt.of(7),
+              StarlarkFloat.of(2.5),
+              "s",
+              Tuple.of("a", "b"),
+              inner);
+
+      Object converted = Types.STARLARK_VALUE.convert(input, null);
+
+      assertThat(Starlark.repr(converted, StarlarkSemantics.DEFAULT))
+          .isEqualTo("[None, True, 7, 2.5, \"s\", (\"a\", \"b\"), {\"k\": 1}]");
+      // The value must be deeply copied and frozen, so that later mutations of the input are not
+      // observable and the attribute value cannot be mutated.
+      assertThat(converted).isNotSameInstanceAs(input);
+      assertThat(((StarlarkList<?>) converted).isImmutable()).isTrue();
+      assertThat(((Dict<?, ?>) ((StarlarkList<?>) converted).get(6)).isImmutable()).isTrue();
+      assertThat(collectLabels(Types.STARLARK_VALUE, converted)).isEmpty();
+    }
+  }
+
+  @Test
+  public void testStarlarkValueRejectsUnsupportedValue() throws Exception {
+    Type.ConversionException e =
+        assertThrows(
+            Type.ConversionException.class,
+            () ->
+                Types.STARLARK_VALUE.convert(
+                    StarlarkList.immutableOf(Label.parseCanonicalUnchecked("//foo:bar")), null));
+    assertThat(e)
+        .hasMessageThat()
+        .contains(
+            "expected a structured Starlark value (None, bool, int, float, str, tuple, list, set or"
+                + " dict)");
   }
 
   @Test

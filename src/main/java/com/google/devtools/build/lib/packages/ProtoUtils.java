@@ -34,6 +34,7 @@ import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 import static com.google.devtools.build.lib.packages.Type.STRING_NO_INTERN;
 import static com.google.devtools.build.lib.packages.Types.INTEGER_LIST;
+import static com.google.devtools.build.lib.packages.Types.STARLARK_VALUE;
 import static com.google.devtools.build.lib.packages.Types.STRING_DICT;
 import static com.google.devtools.build.lib.packages.Types.STRING_LIST;
 import static com.google.devtools.build.lib.packages.Types.STRING_LIST_DICT;
@@ -74,6 +75,7 @@ public class ProtoUtils {
           .put(TRISTATE, Discriminator.TRISTATE)
           .put(INTEGER_LIST, Discriminator.INTEGER_LIST)
           .put(LABEL_KEYED_STRING_DICT, Discriminator.LABEL_KEYED_STRING_DICT)
+          .put(STARLARK_VALUE, Discriminator.STARLARK_VALUE)
           .build();
 
   /** Returns the {@link Discriminator} value corresponding to the provided {@link Type}. */

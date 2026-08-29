@@ -682,6 +682,38 @@ EOF
   expect_not_log "location=\"${TEST_TMPDIR}/.*/foo/BUILD:[0-9]*:[0-9]*"
 }
 
+function test_starlark_value_attribute_output() {
+  rm -rf foo
+  mkdir -p foo
+  cat > foo/rule.bzl <<'EOF'
+def _impl(ctx):
+    pass
+
+my_rule = rule(
+    implementation = _impl,
+    attrs = {"payload": attr.value()},
+)
+EOF
+  cat > foo/BUILD <<'EOF'
+load(":rule.bzl", "my_rule")
+
+my_rule(
+    name = "main",
+    payload = {"a": [1, 2.5, True, None], "b": ("x", "y")},
+)
+EOF
+
+  bazel query --output=xml '//foo:main' >& $TEST_log || fail "Expected success"
+  expect_log "<starlark-value name=\"payload\""
+  # Values are rendered as a Starlark repr (with XML entity escaping).
+  expect_log "&quot;b&quot;: (&quot;x&quot;, &quot;y&quot;)"
+
+  bazel query --output=proto '//foo:main' > output_proto \
+    || fail "Expected success"
+  # The structured proto encoding stores dict keys and string values verbatim.
+  grep -q "payload" output_proto || fail "Expected payload attribute in proto"
+}
+
 function test_subdirectory_named_external() {
   mkdir -p foo/external foo/bar
   cat > foo/external/BUILD <<EOF

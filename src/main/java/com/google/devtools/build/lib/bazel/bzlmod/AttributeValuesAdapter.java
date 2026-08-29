@@ -40,8 +40,11 @@ import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.Starlark;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkList;
+import net.starlark.java.eval.StarlarkSet;
+import net.starlark.java.eval.Tuple;
 
 /** Helps serialize/deserialize {@link AttributeValues}, which contains Starlark values. */
 public class AttributeValuesAdapter extends TypeAdapter<AttributeValues> {
@@ -73,37 +76,62 @@ public class AttributeValuesAdapter extends TypeAdapter<AttributeValues> {
   /**
    * Starlark Object Types Bool Integer String Label List (Int, label, string) Dict (String,list) &
    * (Label, String)
+   *
+   * <p>Values that JSON cannot represent unambiguously (floats, tuples, sets, out-of-int32-range
+   * integers and dicts with non-string keys) are emitted in the tagged form produced by {@link
+   * #tagged}. Such values only arise from {@code attr.value()} attributes.
    */
   private JsonElement serializeObject(Object obj) {
     if (obj.equals(Starlark.NONE)) {
       return JsonNull.INSTANCE;
     } else if (obj instanceof Boolean bool) {
       return new JsonPrimitive(bool);
-    } else if (obj instanceof StarlarkInt) {
+    } else if (obj instanceof StarlarkInt starlarkInt) {
       try {
-        return new JsonPrimitive(((StarlarkInt) obj).toInt("serialization into the lockfile"));
+        return new JsonPrimitive(starlarkInt.toInt("serialization into the lockfile"));
       } catch (EvalException e) {
-        throw new IllegalArgumentException("Unable to parse StarlarkInt to Integer: " + e);
+        return tagged(TAG_BIG_INT, new JsonPrimitive(starlarkInt.toString()));
       }
+    } else if (obj instanceof StarlarkFloat starlarkFloat) {
+      // Serialized via Double.toString, which round-trips exactly and covers infinities and NaN.
+      return tagged(TAG_FLOAT, new JsonPrimitive(Double.toString(starlarkFloat.toDouble())));
     } else if (obj instanceof String || obj instanceof Label) {
       return new JsonPrimitive(serializeObjToString(obj));
-    } else if (obj instanceof Dict) {
+    } else if (obj instanceof Dict<?, ?> dict) {
+      if (!dict.keySet().stream().allMatch(k -> k instanceof String || k instanceof Label)) {
+        JsonArray entries = new JsonArray();
+        for (Map.Entry<?, ?> entry : dict.entrySet()) {
+          JsonArray pair = new JsonArray();
+          pair.add(serializeObject(entry.getKey()));
+          pair.add(serializeObject(entry.getValue()));
+          entries.add(pair);
+        }
+        return tagged(TAG_DICT, entries);
+      }
       JsonObject jsonObject = new JsonObject();
-      for (Map.Entry<?, ?> entry : ((Dict<?, ?>) obj).entrySet()) {
+      for (Map.Entry<?, ?> entry : dict.entrySet()) {
         jsonObject.add(serializeObjToString(entry.getKey()), serializeObject(entry.getValue()));
       }
       return jsonObject;
-    } else if (obj instanceof Iterable) {
-      // ListType supports any kind of Iterable, including Tuples and StarlarkLists. All of them
-      // are converted to an equivalent StarlarkList during deserialization.
-      JsonArray jsonArray = new JsonArray();
-      for (Object item : (Iterable<?>) obj) {
-        jsonArray.add(serializeObject(item));
-      }
-      return jsonArray;
+    } else if (obj instanceof Tuple tuple) {
+      return tagged(TAG_TUPLE, serializeIterable(tuple));
+    } else if (obj instanceof StarlarkSet<?> set) {
+      return tagged(TAG_SET, serializeIterable(set));
+    } else if (obj instanceof Iterable<?> iterable) {
+      // ListType supports any kind of Iterable, including StarlarkLists. All of them are converted
+      // to an equivalent StarlarkList during deserialization.
+      return serializeIterable(iterable);
     } else {
       throw new IllegalArgumentException("Unsupported type: " + obj.getClass());
     }
+  }
+
+  private JsonArray serializeIterable(Iterable<?> iterable) {
+    JsonArray jsonArray = new JsonArray();
+    for (Object item : iterable) {
+      jsonArray.add(serializeObject(item));
+    }
+    return jsonArray;
   }
 
   private Object deserializeObject(JsonElement json) {
@@ -122,6 +150,9 @@ public class AttributeValuesAdapter extends TypeAdapter<AttributeValues> {
       }
     } else if (json.isJsonObject()) {
       JsonObject jsonObject = json.getAsJsonObject();
+      if (jsonObject.has(TAG_KEY)) {
+        return deserializeTagged(jsonObject);
+      }
       Dict.Builder<Object, Object> dict = Dict.builder();
       for (Map.Entry<String, JsonElement> entry : jsonObject.entrySet()) {
         dict.put(deserializeStringToObject(entry.getKey()), deserializeObject(entry.getValue()));
@@ -137,6 +168,61 @@ public class AttributeValuesAdapter extends TypeAdapter<AttributeValues> {
     } else {
       throw new IllegalArgumentException("Unsupported JSON element: " + json);
     }
+  }
+
+  // These keys start and end with the string escape sequence, so they can never collide with a
+  // serialized user-provided dict key: serializeObjToString adds another layer of escaping to such
+  // strings.
+  @VisibleForTesting static final String TAG_KEY = "'type'";
+  private static final String VALUE_KEY = "'value'";
+
+  private static final String TAG_FLOAT = "float";
+  private static final String TAG_BIG_INT = "bigint";
+  private static final String TAG_TUPLE = "tuple";
+  private static final String TAG_SET = "set";
+  private static final String TAG_DICT = "dict";
+
+  private static JsonObject tagged(String tag, JsonElement value) {
+    JsonObject jsonObject = new JsonObject();
+    jsonObject.add(TAG_KEY, new JsonPrimitive(tag));
+    jsonObject.add(VALUE_KEY, value);
+    return jsonObject;
+  }
+
+  private Object deserializeTagged(JsonObject jsonObject) {
+    String tag = jsonObject.get(TAG_KEY).getAsString();
+    JsonElement value = jsonObject.get(VALUE_KEY);
+    switch (tag) {
+      case TAG_FLOAT -> {
+        return StarlarkFloat.of(Double.parseDouble(value.getAsString()));
+      }
+      case TAG_BIG_INT -> {
+        return StarlarkInt.parse(value.getAsString(), 10);
+      }
+      case TAG_TUPLE -> {
+        return Tuple.copyOf(deserializeElements(value.getAsJsonArray()));
+      }
+      case TAG_SET -> {
+        return StarlarkSet.immutableCopyOf(deserializeElements(value.getAsJsonArray()));
+      }
+      case TAG_DICT -> {
+        Dict.Builder<Object, Object> dict = Dict.builder();
+        for (JsonElement pair : value.getAsJsonArray()) {
+          JsonArray entry = pair.getAsJsonArray();
+          dict.put(deserializeObject(entry.get(0)), deserializeObject(entry.get(1)));
+        }
+        return dict.buildImmutable();
+      }
+      default -> throw new IllegalArgumentException("Unsupported tagged value: " + tag);
+    }
+  }
+
+  private List<Object> deserializeElements(JsonArray jsonArray) {
+    List<Object> elements = new ArrayList<>(jsonArray.size());
+    for (JsonElement item : jsonArray) {
+      elements.add(deserializeObject(item));
+    }
+    return elements;
   }
 
   @VisibleForTesting static final String STRING_ESCAPE_SEQUENCE = "'";
