@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.bazel.repository.downloader;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.bazel.repository.downloader.DownloaderTestUtils.sendLines;
 import static com.google.devtools.build.lib.bazel.repository.downloader.HttpParser.readHttpRequest;
@@ -33,7 +34,11 @@ import com.google.common.hash.Hashing;
 import com.google.common.io.ByteStreams;
 import com.google.devtools.build.lib.authandtls.StaticCredentials;
 import com.google.devtools.build.lib.bazel.repository.cache.DownloadCache;
+import com.google.devtools.build.lib.buildeventstream.FetchEvent;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
+import com.google.devtools.build.lib.events.StoredEventHandler;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.JavaIoFileSystem;
@@ -1335,6 +1340,144 @@ public class HttpDownloaderTest {
       assertThat(server2Headers).containsKey("custom-header");
       assertThat(server2Headers.get("custom-header")).containsExactly("custom-value");
     }
+  }
+
+  @Test
+  public void download_socketException_warnsAboutEachRetriedAttempt() throws Exception {
+    StoredEventHandler storedEventHandler = new StoredEventHandler();
+    Downloader downloader = mock(Downloader.class);
+    HttpDownloader httpDownloader = mock(HttpDownloader.class);
+    DownloadManager downloadManager =
+        new DownloadManager(downloadCache, downloader, httpDownloader, storedEventHandler);
+    downloadManager.setRetries(5);
+    AtomicInteger times = new AtomicInteger(0);
+    byte[] data = "content".getBytes(UTF_8);
+    doAnswer(
+            (Answer<Void>)
+                invocationOnMock -> {
+                  if (times.getAndIncrement() < 2) {
+                    throw new SocketException("Connection reset");
+                  }
+                  Path output = invocationOnMock.getArgument(5, Path.class);
+                  try (OutputStream outputStream = output.getOutputStream()) {
+                    ByteStreams.copy(new ByteArrayInputStream(data), outputStream);
+                  }
+
+                  return null;
+                })
+        .when(downloader)
+        .download(any(), any(), any(), any(), any(), any(), any(), any(), any(), eq("testRepo"));
+
+    Path unused =
+        download(
+            downloadManager,
+            ImmutableList.of(URI.create("http://localhost/foo")),
+            ImmutableMap.of(),
+            ImmutableMap.of(),
+            Optional.empty(),
+            "testCanonicalId",
+            Optional.empty(),
+            fs.getPath(workingDir.newFile().getAbsolutePath()),
+            ImmutableMap.of(),
+            "testRepo");
+
+    ImmutableList<String> warnings =
+        storedEventHandler.getEvents().stream()
+            .filter(event -> event.getKind() == EventKind.WARNING)
+            .map(Event::getMessage)
+            .collect(toImmutableList());
+    assertThat(warnings).hasSize(2);
+    assertThat(warnings.get(0))
+        .contains(
+            "Download of [http://localhost/foo] for testRepo failed on attempt 1 of 6, retrying:");
+    assertThat(warnings.get(0)).contains("java.net.SocketException: Connection reset");
+    assertThat(warnings.get(1)).contains("failed on attempt 2 of 6");
+  }
+
+  @Test
+  public void download_postsFetchEventWithTransferDetails() throws Exception {
+    StoredEventHandler storedEventHandler = new StoredEventHandler();
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName(null))) {
+      @SuppressWarnings("unused")
+      Future<?> possiblyIgnoredError =
+          executor.submit(
+              () -> {
+                try (Socket socket = server.accept()) {
+                  readHttpRequest(socket.getInputStream());
+                  sendLines(
+                      socket,
+                      "HTTP/1.1 200 OK",
+                      "Date: Fri, 31 Dec 1999 23:59:59 GMT",
+                      "Connection: close",
+                      "Content-Type: text/plain",
+                      "Content-Length: 5",
+                      "",
+                      "hello");
+                }
+                return null;
+              });
+
+      URI url = URI.create(String.format("http://localhost:%d/foo", server.getLocalPort()));
+      httpDownloader.download(
+          ImmutableList.of(url),
+          ImmutableMap.of(),
+          StaticCredentials.EMPTY,
+          Optional.empty(),
+          "testCanonicalId",
+          fs.getPath(workingDir.newFile().getAbsolutePath()),
+          storedEventHandler,
+          ImmutableMap.of(),
+          Optional.empty(),
+          "testRepo");
+
+      FetchEvent fetchEvent =
+          storedEventHandler.getPosts().stream()
+              .filter(FetchEvent.class::isInstance)
+              .map(FetchEvent.class::cast)
+              .findFirst()
+              .orElseThrow();
+      assertThat(fetchEvent.url()).isEqualTo(url.toString());
+      assertThat(fetchEvent.success()).isTrue();
+      assertThat(fetchEvent.error()).isNull();
+      assertThat(fetchEvent.attempts()).isEqualTo(1);
+      assertThat(fetchEvent.bytesRead()).isEqualTo(5);
+      assertThat(fetchEvent.duration()).isNotNull();
+    }
+  }
+
+  @Test
+  public void download_failedFetchEventCarriesError() throws Exception {
+    StoredEventHandler storedEventHandler = new StoredEventHandler();
+    URI url;
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName(null))) {
+      url = URI.create(String.format("http://localhost:%d/foo", server.getLocalPort()));
+    }
+    // The server socket is closed, so connecting to the port fails.
+
+    assertThrows(
+        IOException.class,
+        () ->
+            httpDownloader.download(
+                ImmutableList.of(url),
+                ImmutableMap.of(),
+                StaticCredentials.EMPTY,
+                Optional.empty(),
+                "testCanonicalId",
+                fs.getPath(workingDir.newFile().getAbsolutePath()),
+                storedEventHandler,
+                ImmutableMap.of(),
+                Optional.empty(),
+                "testRepo"));
+
+    FetchEvent fetchEvent =
+        storedEventHandler.getPosts().stream()
+            .filter(FetchEvent.class::isInstance)
+            .map(FetchEvent.class::cast)
+            .findFirst()
+            .orElseThrow();
+    assertThat(fetchEvent.success()).isFalse();
+    assertThat(fetchEvent.error()).contains("ConnectException");
+    assertThat(fetchEvent.attempts()).isAtLeast(1);
   }
 
   public Path download(
