@@ -157,6 +157,19 @@ public final class ArtifactTest {
   }
 
   @Test
+  public void isDirectory_sourceArtifact_falseByDefault() throws Exception {
+    // With the opt-in SourceDirectoryIsDirectoryFlag disabled (the default), source artifacts are
+    // never reported as directories -- not even one whose path really is a directory on disk. This
+    // pins the historical behavior; SourceArtifactIsDirectoryTest covers the enabled behavior.
+    ArtifactRoot root = ArtifactRoot.asSourceRoot(Root.fromPath(scratch.dir("/foo")));
+    Artifact sourceFile = ActionsTestUtil.createArtifact(root, scratch.file("/foo/file.txt"));
+    Artifact sourceDir = ActionsTestUtil.createArtifact(root, scratch.dir("/foo/subdir"));
+
+    assertThat(sourceFile.isDirectory()).isFalse();
+    assertThat(sourceDir.isDirectory()).isFalse();
+  }
+
+  @Test
   public void testIsFileType() throws Exception {
     ArtifactRoot root = ArtifactRoot.asSourceRoot(Root.fromPath(scratch.dir("/foo")));
     Artifact javaFile = ActionsTestUtil.createArtifact(root, scratch.file("/foo/Bar.java"));
