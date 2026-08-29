@@ -585,6 +585,17 @@ public abstract class BuildLanguageOptions extends OptionsBase {
   public abstract boolean getExperimentalRuleExtensionApi();
 
   @Option(
+      name = "experimental_copy_action",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "If true, the `ctx.actions.copy()` API is available: a built-in action that copies its"
+              + " input artifact to its output artifact without a spawn.")
+  public abstract boolean getExperimentalCopyAction();
+
+  @Option(
       name = "experimental_dormant_deps",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -938,6 +949,7 @@ public abstract class BuildLanguageOptions extends OptionsBase {
                 INCOMPATIBLE_DISABLE_TARGET_DEFAULT_PROVIDER_FIELDS,
                 getIncompatibleDisableTargetDefaultProviderFields())
             .setBool(EXPERIMENTAL_RULE_EXTENSION_API, getExperimentalRuleExtensionApi())
+            .setBool(EXPERIMENTAL_COPY_ACTION, getExperimentalCopyAction())
             .setBool(EXPERIMENTAL_DORMANT_DEPS, getExperimentalDormantDeps())
             .setBool(EXPERIMENTAL_STARLARK_TYPE_SYNTAX, getExperimentalStarlarkTypeSyntax())
             .setBool(
@@ -1123,6 +1135,7 @@ public abstract class BuildLanguageOptions extends OptionsBase {
       "-incompatible_disable_target_default_provider_fields";
   public static final String EXPERIMENTAL_RULE_EXTENSION_API =
       FlagConstants.DEFAULT_EXPERIMENTAL_RULE_EXTENSION_API_NAME;
+  public static final String EXPERIMENTAL_COPY_ACTION = "-experimental_copy_action";
   public static final String EXPERIMENTAL_DORMANT_DEPS = "-experimental_dormant_deps";
 
   public static final String EXPERIMENTAL_STARLARK_TYPE_SYNTAX =

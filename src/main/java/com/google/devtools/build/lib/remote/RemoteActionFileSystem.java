@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.devtools.build.lib.actions.Action;
 import com.google.devtools.build.lib.actions.ActionExecutionException;
@@ -48,6 +49,7 @@ import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.FileStatus;
 import com.google.devtools.build.lib.vfs.FileStatusWithDigest;
 import com.google.devtools.build.lib.vfs.FileSystem;
+import com.google.devtools.build.lib.vfs.MetadataPropagatingFileSystem;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.SymlinkTargetType;
@@ -103,7 +105,8 @@ import javax.annotation.Nullable;
  * sources, such as the same path existing in multiple underlying sources with different type or
  * contents.
  */
-public class RemoteActionFileSystem extends FileSystem implements PathCanonicalizer.Resolver {
+public class RemoteActionFileSystem extends FileSystem
+    implements PathCanonicalizer.Resolver, MetadataPropagatingFileSystem {
   private final PathFragment execRoot;
   private final PathFragment outputBase;
   private final InputMetadataProvider inputArtifactData;
@@ -315,6 +318,115 @@ public class RemoteActionFileSystem extends FileSystem implements PathCanonicali
         FileArtifactValue.createForRemoteFileWithMaterializationData(
             digest, size, /* locationIndex= */ 1, expirationTime, inMemoryOutput);
     remoteOutputTree.injectFile(path, metadata);
+  }
+
+  @Override
+  public boolean copyFileByMetadata(PathFragment source, PathFragment target) throws IOException {
+    if (!isOutput(target)) {
+      return false;
+    }
+    var status = statInternal(source, FollowMode.FOLLOW_ALL, StatSources.IN_MEMORY_ONLY);
+    if (!(status instanceof FileStatusWithMetadata statWithMetadata)
+        || !statWithMetadata.isFile()
+        || !statWithMetadata.getMetadata().isRemote()) {
+      return false;
+    }
+    FileArtifactValue metadata = statWithMetadata.getMetadata();
+    injectRemoteFile(
+        target,
+        metadata.getDigest(),
+        metadata.getSize(),
+        metadata.getExpirationTime(),
+        /* inMemoryOutput= */ false);
+    return true;
+  }
+
+  @Override
+  public boolean copyFileBackedBySource(
+      PathFragment target, byte[] digest, long size, PathFragment resolvedSource)
+      throws IOException {
+    if (!isOutput(target)) {
+      return false;
+    }
+    // Only worth deferring under Build without the Bytes. If this output would be downloaded to the
+    // local tree anyway (e.g. --remote_download_outputs=all, or a local build with a disk cache), a
+    // direct physical copy is cheaper than uploading and then downloading it back.
+    if (inputFetcher
+        .getRemoteOutputChecker()
+        .shouldDownloadOutput(target.relativeTo(execRoot), /* treeRootExecPath= */ null)) {
+      return false;
+    }
+    // Proactively upload the source's content to the CAS (a no-op if already present) so the output
+    // is a genuine remote-backed artifact — its blob available to any consumer, local or remote —
+    // then record the reference. No bytes are written to the local output tree.
+    try {
+      getFromFuture(inputFetcher.uploadToCas(digest, size, getPath(resolvedSource)));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IOException("interrupted while uploading copied source " + resolvedSource, e);
+    }
+    injectRemoteFile(
+        target, digest, size, /* expirationTime= */ null, /* inMemoryOutput= */ false);
+    return true;
+  }
+
+  @Override
+  public boolean copyTreeBackedBySource(PathFragment target, PathFragment resolvedSource)
+      throws IOException {
+    if (!isOutput(target)) {
+      return false;
+    }
+    // Gate as for single files: if this output tree would be downloaded to the local tree anyway,
+    // a direct physical copy is cheaper than uploading and then downloading it back.
+    PathFragment targetExecPath = target.relativeTo(execRoot);
+    if (inputFetcher
+        .getRemoteOutputChecker()
+        .shouldDownloadOutput(targetExecPath, /* treeRootExecPath= */ targetExecPath)) {
+      return false;
+    }
+    // Hash each contained file (the cost a physical copy pays when its outputs are digested),
+    // upload all contents to the CAS concurrently (each a no-op if already present), and record
+    // the outputs as content-by-digest. No bytes are written to the local output tree. Injection
+    // happens as the walk proceeds; a failed upload fails the action, discarding the injections.
+    List<ListenableFuture<Void>> uploads = new ArrayList<>();
+    uploadTreeBackedBySource(getPath(resolvedSource), target, uploads);
+    try {
+      getFromFuture(Futures.allAsList(uploads));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IOException(
+          "interrupted while uploading copied source directory " + resolvedSource, e);
+    }
+    return true;
+  }
+
+  /**
+   * Walks the local directory {@code sourceDir}, starting a CAS upload for every contained file
+   * and injecting the corresponding remote metadata under {@code target}. Symlinks are
+   * dereferenced; a dangling symlink is an error, matching physical tree copying.
+   */
+  private void uploadTreeBackedBySource(
+      Path sourceDir, PathFragment target, List<ListenableFuture<Void>> uploads)
+      throws IOException {
+    for (Dirent dirent : sourceDir.readdir(Symlinks.FOLLOW)) {
+      Path sourceChild = sourceDir.getChild(dirent.getName());
+      PathFragment targetChild = target.getChild(dirent.getName());
+      switch (dirent.getType()) {
+        case FILE -> {
+          Path resolvedChild = sourceChild.resolveSymbolicLinks();
+          byte[] digest = resolvedChild.getDigest();
+          long size = resolvedChild.getFileSize();
+          uploads.add(inputFetcher.uploadToCas(digest, size, resolvedChild));
+          injectRemoteFile(
+              targetChild, digest, size, /* expirationTime= */ null, /* inMemoryOutput= */ false);
+        }
+        case DIRECTORY -> uploadTreeBackedBySource(sourceChild, targetChild, uploads);
+        default ->
+            throw new IOException(
+                String.format(
+                    "cannot copy '%s': unsupported file type or dangling symlink", sourceChild));
+      }
+    }
   }
 
   @Override

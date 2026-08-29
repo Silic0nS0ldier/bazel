@@ -92,6 +92,17 @@ sh_test(
 )
 
 sh_test(
+    name = "copy_action_test",
+    size = "medium",
+    srcs = ["copy_action_test.sh"],
+    data = [
+        ":test-deps",
+        "@bazel_tools//tools/bash/runfiles",
+    ],
+    tags = ["no_windows"],
+)
+
+sh_test(
     name = "bazel_example_test",
     size = "large",
     srcs = ["bazel_example_test.sh"],
