@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.remote;
 
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadValidationRecordStore;
 import com.google.devtools.build.lib.remote.common.RemoteExecutionClient;
 import com.google.devtools.build.lib.runtime.RemoteRepoContentsCache;
 import com.google.devtools.build.lib.runtime.RepositoryRemoteExecutor;
@@ -86,5 +87,11 @@ class RepositoryRemoteHelpersFactoryImpl implements RepositoryRemoteHelpersFacto
         acceptCached,
         uploadLocalResults,
         verboseFailures);
+  }
+
+  @Nullable
+  @Override
+  public DownloadValidationRecordStore createDownloadValidationRecordStore() {
+    return new DownloadValidationRecordStoreImpl(cache, buildRequestId, commandId, acceptCached);
   }
 }

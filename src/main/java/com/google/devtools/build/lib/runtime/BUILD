@@ -451,6 +451,7 @@ java_library(
     deps = [
         ":remote_repo_contents_cache",
         ":repository_remote_executor",
+        "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
         "//third_party:jsr305",
     ],
 )

@@ -72,6 +72,7 @@ public class DownloadManager {
   private int retries = 0;
   @Nullable private Credentials netrcCreds;
   private CredentialFactory credentialFactory = StaticCredentials::new;
+  @Nullable private DownloadValidator downloadValidator;
 
   /** Creates {@code Credentials} from a map of per-{@code URI} authentication headers. */
   public interface CredentialFactory {
@@ -122,6 +123,71 @@ public class DownloadManager {
     this.credentialFactory = credentialFactory;
   }
 
+  public void setDownloadValidator(@Nullable DownloadValidator downloadValidator) {
+    this.downloadValidator = downloadValidator;
+  }
+
+  public boolean hasDownloadValidator() {
+    return downloadValidator != null;
+  }
+
+  /**
+   * Validates recorded download manifest entries without any repository fetch: URLs pass through
+   * the current rewriter configuration and into the validation engine exactly as a fresh fetch's
+   * downloads would. Used by {@code bazel fetch --validate} for up-to-date repositories.
+   */
+  public void validateManifestEntries(
+      List<DownloadManifest.Entry> entries,
+      Path tmpDir,
+      Map<String, String> clientEnv,
+      String context)
+      throws IOException, InterruptedException {
+    if (downloadValidator == null) {
+      return;
+    }
+    for (DownloadManifest.Entry entry : entries) {
+      if (entry.hasHeaders()) {
+        eventHandler.handle(
+            Event.warn(
+                String.format(
+                    "Download validation: skipping a download of %s recorded with explicit"
+                        + " headers; it is validated only during real fetches.",
+                    context)));
+        continue;
+      }
+      Checksum checksum;
+      try {
+        checksum = Checksum.fromSubresourceIntegrity(entry.integrity());
+      } catch (Checksum.InvalidChecksumException e) {
+        throw new IOException(
+            String.format("Invalid checksum in download manifest of %s: %s", context, entry), e);
+      }
+      ImmutableList<URI> urls =
+          entry.urls().stream().map(URI::create).collect(toImmutableList());
+      ImmutableList<URI> rewrittenUrls = urls;
+      Map<URI, Map<String, List<String>>> authHeaders = ImmutableMap.of();
+      if (rewriter != null) {
+        ImmutableList<UrlRewriter.RewrittenURL> mappings = rewriter.amend(urls);
+        rewrittenUrls = mappings.stream().map(RewrittenURL::url).collect(toImmutableList());
+        authHeaders = rewriter.updateAuthHeaders(mappings, authHeaders, netrcCreds);
+      }
+      if (rewrittenUrls.isEmpty()) {
+        continue;
+      }
+      downloadValidator.validate(
+          rewrittenUrls,
+          ImmutableMap.of(),
+          credentialFactory.create(authHeaders),
+          checksum,
+          /* canonicalId= */ "",
+          downloader,
+          tmpDir,
+          clientEnv,
+          context,
+          entry.allowFail());
+    }
+  }
+
   public Future<Path> startDownload(
       ExecutorService executorService,
       List<URI> originalUrls,
@@ -134,7 +200,8 @@ public class DownloadManager {
       Map<String, String> clientEnv,
       String context,
       Phaser downloadPhaser,
-      boolean mayHardlink) {
+      boolean mayHardlink,
+      boolean allowFail) {
     return executorService.submit(
         () -> {
           if (downloadPhaser.register() != 0) {
@@ -152,7 +219,8 @@ public class DownloadManager {
                 output,
                 clientEnv,
                 context,
-                mayHardlink);
+                mayHardlink,
+                allowFail);
           } finally {
             downloadPhaser.arrive();
           }
@@ -199,7 +267,8 @@ public class DownloadManager {
       Path output,
       Map<String, String> clientEnv,
       String context,
-      boolean mayHardlink)
+      boolean mayHardlink,
+      boolean allowFail)
       throws IOException, InterruptedException {
     if (Thread.interrupted()) {
       throw new InterruptedException();
@@ -240,6 +309,26 @@ public class DownloadManager {
     }
     Path destination = getDownloadDestination(fileNameUrl, type, output);
     ImmutableSet<String> candidateFileNames = getCandidateFileNames(mainUrl, destination);
+
+    // Validation runs before any checksum-first cache consultation: its purpose is to exercise
+    // URLs that cached content would otherwise mask. Downloads-disabled mode cannot fetch, so
+    // validation is skipped rather than guaranteed to fail.
+    if (downloadValidator != null
+        && checksum.isPresent()
+        && !rewrittenUrls.isEmpty()
+        && !disableDownload) {
+      downloadValidator.validate(
+          rewrittenUrls,
+          headers,
+          credentialFactory.create(rewrittenAuthHeaders),
+          checksum.get(),
+          canonicalId,
+          downloader,
+          destination.getParentDirectory(),
+          clientEnv,
+          context,
+          allowFail);
+    }
 
     // Is set to true if the value should be cached by the checksum value provided
     boolean isCachingByProvidedChecksum = false;

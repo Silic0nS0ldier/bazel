@@ -718,18 +718,27 @@ java_library(
 
 java_library(
     name = "repository_remote_helpers_factory_impl",
-    srcs = ["RepositoryRemoteHelpersFactoryImpl.java"],
+    srcs = [
+        "DownloadValidationRecordStoreImpl.java",
+        "RepositoryRemoteHelpersFactoryImpl.java",
+    ],
     deps = [
         ":combined_cache",
         ":remote_execution_cache",
         ":remote_repo_contents_cache_impl",
         ":remote_repository_remote_executor",
         "//src/main/java/com/google/devtools/build/lib/analysis:blaze_directories",
+        "//src/main/java/com/google/devtools/build/lib/bazel/repository/downloader",
         "//src/main/java/com/google/devtools/build/lib/remote/common",
+        "//src/main/java/com/google/devtools/build/lib/remote/util:tracing_metadata_utils",
+        "//src/main/java/com/google/devtools/build/lib/remote/util:utils",
         "//src/main/java/com/google/devtools/build/lib/runtime:remote_repo_contents_cache",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_executor",
         "//src/main/java/com/google/devtools/build/lib/runtime:repository_remote_helpers_factory",
+        "//third_party:guava",
         "//third_party:jsr305",
+        "@com_google_protobuf//:protobuf_java",
+        "@remoteapis//:build_bazel_remote_execution_v2_remote_execution_java_proto",
     ],
 )
 

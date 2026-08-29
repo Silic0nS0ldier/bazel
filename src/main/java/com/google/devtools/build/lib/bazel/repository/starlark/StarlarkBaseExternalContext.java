@@ -38,6 +38,7 @@ import com.google.devtools.build.lib.bazel.repository.decompressor.DecompressorD
 import com.google.devtools.build.lib.bazel.repository.decompressor.DecompressorValue;
 import com.google.devtools.build.lib.bazel.repository.downloader.Checksum;
 import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManager;
+import com.google.devtools.build.lib.bazel.repository.downloader.DownloadManifest;
 import com.google.devtools.build.lib.bazel.repository.downloader.HttpUtils;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
@@ -83,6 +84,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -168,6 +170,9 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
   protected final String identifyingStringForLogging;
   protected final Label.RepoMappingRecorder repoMappingRecorder;
   private final LinkedHashMap<RepoRecordedInput, String> recordedInputs = new LinkedHashMap<>();
+  // Synchronised: downloads may be issued concurrently via block = False.
+  private final List<DownloadManifest.Entry> downloadManifestEntries =
+      Collections.synchronizedList(new ArrayList<>());
   private final RepositoryRemoteExecutor remoteExecutor;
   private final List<AsyncTask> asyncTasks;
   private final boolean allowWatchingPathsOutsideWorkspace;
@@ -310,6 +315,13 @@ public abstract class StarlarkBaseExternalContext implements AutoCloseable, Star
     return recordedInputs.entrySet().stream()
         .map(e -> new RepoRecordedInput.WithValue(e.getKey(), e.getValue()))
         .collect(toImmutableList());
+  }
+
+  /** Returns the checksum-bearing downloads observed so far, for the download manifest. */
+  public ImmutableList<DownloadManifest.Entry> getDownloadManifestEntries() {
+    synchronized (downloadManifestEntries) {
+      return ImmutableList.copyOf(downloadManifestEntries);
+    }
   }
 
   protected void checkInOutputDirectory(String operation, StarlarkPath path)
@@ -827,6 +839,11 @@ When <code>sha256</code> or <code>integrity</code> is user specified, setting an
       checksumValidation = e;
     }
 
+    if (checksum.isPresent() && checksumValidation == null && !urls.isEmpty()) {
+      downloadManifestEntries.add(
+          DownloadManifest.Entry.of(urls, checksum.get(), allowFail, !headers.isEmpty()));
+    }
+
     StarlarkPath outputPath = getPath(output);
     WorkspaceRuleEvent w =
         WorkspaceRuleEvent.newDownloadEvent(
@@ -872,7 +889,8 @@ When <code>sha256</code> or <code>integrity</code> is user specified, setting an
               downloadPhaser,
               // The repo rule may modify the file after the download, so we cannot guarantee that
               // hardlinking is safe.
-              /* mayHardlink= */ false);
+              /* mayHardlink= */ false,
+              allowFail);
       download =
           new PendingDownload(
               executable,
@@ -1101,6 +1119,11 @@ Strip the given number of leading components from file paths on extraction. Only
       checksumValidation = e;
     }
 
+    if (checksum.isPresent() && checksumValidation == null && !urls.isEmpty()) {
+      downloadManifestEntries.add(
+          DownloadManifest.Entry.of(urls, checksum.get(), allowFail, !headers.isEmpty()));
+    }
+
     Map<String, String> renameFilesMap =
         Dict.cast(renameFiles, String.class, String.class, "rename_files");
 
@@ -1142,7 +1165,8 @@ Strip the given number of leading components from file paths on extraction. Only
               downloadPhaser,
               // The archive is not going to be modified and not accessible to the user, so its safe
               // to hardlink.
-              /* mayHardlink= */ true);
+              /* mayHardlink= */ true,
+              allowFail);
       // Ensure that the download is cancelled if the repo rule is restarted as it runs in its own
       // executor.
       PendingDownload pendingTask =

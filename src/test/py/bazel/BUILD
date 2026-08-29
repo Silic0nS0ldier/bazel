@@ -79,6 +79,13 @@ py_test(
 )
 
 py_test(
+    name = "download_validation_test",
+    size = "large",
+    srcs = ["download_validation_test.py"],
+    deps = [":test_base"],
+)
+
+py_test(
     name = "bazel_external_repository_test",
     size = "large",
     srcs = ["bazel_external_repository_test.py"],

@@ -30,6 +30,7 @@ import com.google.devtools.common.options.OptionMetadataTag;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsClass;
 import com.google.devtools.common.options.OptionsParsingException;
+import com.google.devtools.common.options.RegexPatternOption;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -177,6 +178,40 @@ public abstract class RepositoryOptions extends OptionsBase {
           still run an arbitrary executable that accesses the Internet.
           """)
   public abstract boolean getDisableDownload();
+
+  @Option(
+      name = "experimental_repository_download_validation",
+      defaultValue = "off",
+      converter = DownloadValidationMode.Converter.class,
+      documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
+      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          """
+          Validates that download URLs serve content matching their declared checksum, catching
+          definitions whose URL was updated without a checksum update and mirrors that are missing
+          content otherwise masked by checksum-keyed caches. Each URL is exercised at most once;
+          successful validations are recorded in the repository download cache and skipped on
+          subsequent fetches. A checksum mismatch always fails the fetch. `tolerant` reports
+          unfetchable URLs as warnings; `strict` fails the fetch on them.
+          """)
+  public abstract DownloadValidationMode getDownloadValidation();
+
+  @Option(
+      name = "experimental_repository_download_validation_urls",
+      defaultValue = "null",
+      allowMultiple = true,
+      converter = Converters.RegexPatternConverter.class,
+      documentationCategory = OptionDocumentationCategory.BAZEL_CLIENT_OPTIONS,
+      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          """
+          Restricts download validation to URLs fully matching any of the given regular
+          expressions. URLs are matched after any downloader config rewriting, i.e. as actually
+          fetched in this environment. If unset, all URLs are validated.
+          """)
+  public abstract List<RegexPatternOption> getDownloadValidationUrls();
 
   @Option(
       name = "experimental_repository_downloader_retries",
@@ -509,6 +544,20 @@ public abstract class RepositoryOptions extends OptionsBase {
     public static class Converter extends EnumConverter<LockfileMode> {
       public Converter() {
         super(LockfileMode.class, "Lockfile mode");
+      }
+    }
+  }
+
+  /** An enum for specifying how download validation failures are treated. */
+  public enum DownloadValidationMode {
+    OFF, // Don't validate downloads.
+    TOLERANT, // Validate; report unfetchable URLs as warnings (mismatches still fail).
+    STRICT; // Validate; fail the fetch on unfetchable URLs.
+
+    /** Converts to {@link DownloadValidationMode}. */
+    public static class Converter extends EnumConverter<DownloadValidationMode> {
+      public Converter() {
+        super(DownloadValidationMode.class, "download validation mode");
       }
     }
   }

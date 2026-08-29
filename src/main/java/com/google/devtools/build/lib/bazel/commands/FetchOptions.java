@@ -63,6 +63,18 @@ public abstract class FetchOptions extends OptionsBase {
   public abstract List<String> getRepos();
 
   @Option(
+      name = "validate",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "Validate that the downloads of the fetched repositories serve content matching their"
+              + " declared checksums: up-to-date repositories are checked from their recorded"
+              + " download manifests without re-running implementation functions. Requires"
+              + " --experimental_repository_download_validation.")
+  public abstract boolean getValidate();
+
+  @Option(
       name = "force",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.BZLMOD,
