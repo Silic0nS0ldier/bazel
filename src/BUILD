@@ -349,6 +349,127 @@ genrule(
     ("_nojdk", "_nojdk"),
 ]]
 
+# ---------------------------------------------------------------------------
+# Experimental R8-processed Bazel variants (shrunk/optimized, not obfuscated).
+# Build with `bazel build //src:bazel-r8-full` or `//src:bazel-r8-compat`.
+# ---------------------------------------------------------------------------
+
+java_binary(
+    name = "r8_jar_tool",
+    srcs = ["R8JarTool.java"],
+    main_class = "R8JarTool",
+    deps = ["//third_party:asm"],
+)
+
+# R8's classfile backend cannot handle multi-release jars or module-info.
+genrule(
+    name = "bazel_server_r8_stripped",
+    srcs = ["//src/main/java/com/google/devtools/build/lib/bazel:BazelServer_deploy.jar"],
+    outs = ["BazelServer_r8_stripped.jar"],
+    cmd = "$(location :r8_jar_tool) strip $(SRCS) $@",
+    tools = [":r8_jar_tool"],
+)
+
+[genrule(
+    name = "bazel_server_r8_" + mode + "_raw",
+    srcs = [
+        ":BazelServer_r8_stripped.jar",
+        "bazel-r8.pro",
+        "@android_tools_r8//jar",
+    ],
+    outs = ["BazelServer_r8_" + mode + "_raw.jar"],
+    cmd = "$(JAVABASE)/bin/java -Xmx8g -cp $(location @android_tools_r8//jar)" +
+          " com.android.tools.r8.R8 --classfile --release " + flag +
+          " --lib $(JAVABASE)" +
+          " --pg-conf $(location bazel-r8.pro)" +
+          " --output $@ $(location :BazelServer_r8_stripped.jar)",
+    toolchains = ["@rules_java//toolchains:current_host_java_runtime"],
+    tools = ["@rules_java//toolchains:current_host_java_runtime"],
+) for mode, flag in [
+    ("full", ""),
+    ("compat", "--pg-compat"),
+]]
+
+# Restore the manifest R8 drops, remove the stale INDEX.LIST, and (full mode
+# only) reconcile InnerClasses attribute flags with raw class access flags —
+# R8 full mode diverges these, breaking JDK annotation proxies at runtime.
+[genrule(
+    name = "bazel_server_r8_" + mode,
+    srcs = [
+        ":BazelServer_r8_" + mode + "_raw.jar",
+        "//src/main/java/com/google/devtools/build/lib/bazel:BazelServer_deploy.jar",
+    ],
+    outs = ["BazelServer_r8_" + mode + ".jar"],
+    cmd = "$(location :r8_jar_tool) fix" +
+          " $(location :BazelServer_r8_" + mode + "_raw.jar)" +
+          " $(location //src/main/java/com/google/devtools/build/lib/bazel:BazelServer_deploy.jar)" +
+          " $@" + fix_flag,
+    tools = [":r8_jar_tool"],
+) for mode, fix_flag in [
+    ("full", " --fix-inner-classes"),
+    ("compat", ""),
+]]
+
+[genrule(
+    name = "install_base_key-file-r8-" + mode,
+    srcs = [
+        ":BazelServer_r8_" + mode + ".jar",
+        "//src/main/java/net/starlark/java/eval:cpu_profiler_jni",
+        "//src/main/cpp:client",
+        "//src/main/tools:process-wrapper",
+        "//src/main/tools:linux-sandbox",
+        "//tools/osx:xcode-locator",
+        "//:platforms-srcs",
+        ":embedded_tools_jdk_minimal",
+    ] + select({
+        "//src/conditions:windows": [],
+        "//conditions:default": [
+            "//src/main/tools:daemonize",
+        ],
+    }),
+    outs = ["install_base_key_r8_" + mode],
+    cmd = "$(location :md5) $(SRCS) > $@",
+    tools = [":md5"],
+) for mode in [
+    "full",
+    "compat",
+]]
+
+[package_zip(
+    name = "package-zip-r8-" + mode,
+    srcs = [
+        ":embedded_tools_jdk_minimal.zip",
+        "//:platforms-srcs",
+        # Non-ordered items follow:
+        "//src/main/java/net/starlark/java/eval:cpu_profiler_jni",
+        "//src/main/tools:process-wrapper",
+        "//src/main/tools:linux-sandbox",
+        "//tools/osx:xcode-locator",
+    ] + select({
+        "//src/conditions:windows": [],
+        "//conditions:default": [
+            "//src/main/tools:daemonize",
+        ],
+    }),
+    out = "package_r8_" + mode + ".zip",
+    dev_build = False,
+    install_base_key = "install_base_key_r8_" + mode,
+    server_jar = ":BazelServer_r8_" + mode + ".jar",
+) for mode in [
+    "full",
+    "compat",
+]]
+
+[bazel_binary(
+    name = "bazel-bin-r8-" + mode,
+    out = "bazel-r8-" + mode,
+    client = "//src/main/cpp:client",
+    package_zip = "package-zip-r8-" + mode,
+) for mode in [
+    "full",
+    "compat",
+]]
+
 # Build an executable named `bazel.exe` (and suffixes).
 # Works on all platforms but only makes sense on Windows.
 [copy_file(

@@ -406,6 +406,17 @@ use_repo(cc_configure, "local_config_cc")
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+# Standalone R8 for the experimental //src:bazel-r8-{full,compat} variants.
+# 8.11.18 is the minimum version that compiles the Bazel server jar without
+# an internal compiler error.
+http_jar(
+    name = "android_tools_r8",
+    sha256 = "fbe6f7d59d46d6296919f6cc4793536439921d357c9a6bbf45ea4acc3c8736a7",
+    urls = ["https://maven.google.com/com/android/tools/r8/8.11.18/r8-8.11.18.jar"],
+)
+
 # DO NOT UPDATE the jq versions, they are used to verify compatibility with old and new versions.
 http_file(
     name = "jq_linux_amd64",
