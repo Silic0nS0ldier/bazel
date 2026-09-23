@@ -1176,6 +1176,291 @@ validation_outputs_test = analysistest.make(_validation_outputs_test_impl)
 Running validation actions is controlled by the `--run_validations` command line
 flag, which defaults to true.
 
+## Rule extensibility {#rule_extensibility}
+
+Beyond what a single `rule()` definition offers, Bazel provides two mechanisms
+for sharing implementation logic: *subrules*, which package a reusable piece of
+an implementation function together with the private dependencies it needs, and
+*rule inheritance*, which lets one rule extend another.
+
+Both are experimental, and both are usable out of the box: Bazel ships the
+allowlists that gate them wide open. A distribution that vendors `@bazel_tools`
+can narrow them, and an individual rule can restrict who extends it with
+`extendable`.
+
+### Subrules {#subrules}
+
+A *subrule* encapsulates a reusable piece of rule implementation logic —
+typically a set of actions that depend on private tools or files — so it can be
+shared across multiple rules and aspects without repeating attribute
+declarations or implementation code.
+
+#### Defining a subrule
+
+Use the [`subrule`](/rules/lib/globals/bzl#subrule) function in a `.bzl` file.
+A subrule has an `implementation` function and an optional `attrs` dictionary.
+It must be assigned to a global variable before it can be used:
+
+```python
+def _compile_impl(ctx, src, _compiler):
+    output = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.run(
+        executable = _compiler,
+        arguments = [src.path, output.path],
+        inputs = [src],
+        outputs = [output],
+    )
+    return output
+
+_compile = subrule(
+    implementation = _compile_impl,
+    attrs = {
+        "_compiler": attr.label(
+            default = "//tools:compiler",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
+)
+```
+
+`attrs` may only declare *private* attributes — the name must start with `_` —
+and each one must be `attr.label` or `attr.label_list` with a non-computed
+default. The subrule's users therefore cannot configure them; they are an
+implementation detail of the subrule itself.
+
+#### Using a subrule from a rule or aspect
+
+Any rule or aspect that calls a subrule must declare it in its `subrules`
+parameter. The subrule's private attributes are automatically lifted onto the
+declaring rule or aspect (under mangled names) and are invisible to its users
+and to `ctx.attr`:
+
+```python
+def _my_rule_impl(ctx):
+    out = _compile(ctx.file.src)
+    return [DefaultInfo(files = depset([out]))]
+
+my_rule = rule(
+    implementation = _my_rule_impl,
+    attrs = {"src": attr.label(allow_single_file = True)},
+    subrules = [_compile],
+)
+```
+
+The same applies to aspects:
+
+```python
+_my_aspect = aspect(
+    implementation = _my_aspect_impl,
+    subrules = [_compile],
+)
+```
+
+#### Passing arguments to a subrule
+
+Calling a subrule invokes its implementation function with:
+
+1.  A [`subrule_ctx`](/rules/lib/builtins/subrule_ctx) as the first positional
+    argument. This is *not* the caller's `ctx`; it exposes a restricted API
+    (`actions`, `label`, `fragments`, `toolchains`).
+2.  Any positional and keyword arguments passed at the call site, forwarded
+    unchanged.
+3.  One keyword argument per entry in `attrs`, named exactly as the attribute
+    is declared, holding the resolved dependency.
+
+So the `_compile` subrule above is called as `_compile(src)` and its
+implementation is declared as `def _compile_impl(ctx, src, _compiler)`.
+
+The value passed for an `attrs` entry depends on how the attribute is declared:
+
+| Attribute declaration                     | Value passed          |
+| ----------------------------------------- | --------------------- |
+| `attr.label(executable = True)`           | `FilesToRunProvider`  |
+| `attr.label(allow_single_file = True)`    | `File`                |
+| `attr.label(...)`                         | `Target`              |
+| `attr.label_list(...)`                    | `[Target]`            |
+
+Callers cannot override an attribute by passing a keyword argument of the same
+name; doing so is an error.
+
+Warning: Unlike rules and aspects, the default labels of a subrule's private
+attributes are currently visibility-checked against the `.bzl` file of the
+*consuming* rule rather than the file that declares the subrule. A subrule's
+private tools must therefore be visible to every rule that uses the subrule.
+See [issue #31168](https://github.com/bazelbuild/bazel/issues/31168).
+
+#### Toolchains in subrules
+
+A subrule may declare a toolchain in its `toolchains` parameter and access the
+resolved toolchain through `ctx.toolchains`. Three restrictions apply:
+
+*   **At most one toolchain per subrule.** Declaring more is an error. A subrule
+    may, however, depend on other subrules that each declare their own
+    toolchain, so splitting a subrule into smaller ones works around the limit.
+*   **The consuming rule must have
+    [automatic exec groups](/extending/auto-exec-groups) enabled.** Reading
+    `ctx.toolchains` from a subrule fails otherwise.
+*   **Actions must not select an execution platform themselves.** Passing
+    `toolchain` or `exec_group` to `ctx.actions.run` or `ctx.actions.run_shell`
+    is an error inside a subrule; Bazel passes the subrule's own toolchain for
+    you, so that the action lands in the automatic exec group belonging to that
+    toolchain.
+
+```python
+def _compile_impl(ctx, src):
+    compiler = ctx.toolchains["//tools:compiler_toolchain_type"].compiler
+    output = ctx.actions.declare_file(ctx.label.name + ".out")
+    ctx.actions.run(
+        executable = compiler,
+        arguments = [src.path, output.path],
+        inputs = [src],
+        outputs = [output],
+        # no `toolchain = ...` — it is implied and rejected if given
+    )
+    return output
+
+_compile = subrule(
+    implementation = _compile_impl,
+    toolchains = ["//tools:compiler_toolchain_type"],
+)
+```
+
+#### Composing subrules
+
+A subrule can depend on other subrules by listing them in its own `subrules`
+parameter. Attributes and toolchains are collected over the transitive closure
+of subrule dependencies, so only the directly called subrule needs to be
+declared by the consuming rule or aspect:
+
+```python
+_link = subrule(
+    implementation = _link_impl,
+    subrules = [_compile],  # _compile's attrs are lifted automatically
+)
+
+my_rule = rule(
+    implementation = _my_rule_impl,
+    subrules = [_link],  # no need to also list _compile
+)
+```
+
+A subrule may only call the subrules it declares itself; calling one that only
+its caller declared is an error.
+
+### Rule inheritance {#rule_inheritance}
+
+A rule can extend another rule using the `parent` parameter of
+[`rule`](/rules/lib/globals/bzl#rule):
+
+```python
+# parent.bzl
+def _parent_impl(ctx):
+    ...
+
+parent_rule = rule(
+    implementation = _parent_impl,
+    extendable = True,
+    attrs = {"srcs": attr.label_list(allow_files = True)},
+)
+```
+
+```python
+# child.bzl
+load(":parent.bzl", "parent_rule")
+
+def _child_impl(ctx):
+    providers = ctx.super()  # runs the parent implementation
+    # additional child logic here
+    return providers
+
+child_rule = rule(
+    implementation = _child_impl,
+    parent = parent_rule,
+)
+```
+
+The child rule takes on the following from its parent:
+
+*   `executable` and `test` are inherited and cannot be changed.
+*   Attributes are inherited. Advertised `providers` are merged, so the child
+    must return everything the parent advertises.
+*   `fragments`, `toolchains`, `exec_groups`, and `exec_compatible_with` are
+    merged, and the merged set is what the child's implementation can access.
+*   Automatic exec groups are enabled or disabled as the parent has them.
+*   The parent's incoming configuration transition (`cfg`) is applied after the
+    child's own.
+
+Legacy or deprecated `rule()` parameters may not be set on a child rule, and a
+rule using them cannot be a parent.
+
+#### Overriding an inherited attribute
+
+Declaring an attribute in the child under a name the parent already uses
+overrides it rather than conflicting. Only the default value and the list of
+aspects may be changed; everything else is taken from the parent. Bazel rejects
+an override that:
+
+*   targets a built-in or private attribute, or an attribute the parent did not
+    define in Starlark;
+*   changes the attribute's type, or targets an attribute that is not
+    `attr.label` or `attr.label_list`;
+*   sets `providers`, `allow_files`, `allow_rules`, `cfg`, or other flags, since
+    those are inherited from the parent.
+
+#### `ctx.super()`
+
+[`ctx.super()`](/rules/lib/builtins/ctx#super) invokes the parent rule's
+implementation function and returns its providers. Every rule with a `parent`
+must call it exactly once: calling it twice, or not at all, is an error.
+
+The return value is a list of providers, not a `Target`, so a specific provider
+cannot be looked up on it with index notation. `ctx.super()` is not available in
+aspects.
+
+#### Controlling who may extend a rule
+
+The `extendable` parameter of `rule` decides which rules may name it as a
+`parent`:
+
+*   Unset — this is the default. The rule may be extended from any package
+    listed in `@bazel_tools//tools/allowlists/extend_rule_allowlist`, which
+    Bazel ships as `packages = ["public"]`, so by default this allows
+    everything.
+*   `True` — any rule may extend it, bypassing the allowlist regardless of how
+    the distribution has set it.
+*   `False` — the rule may not be extended.
+*   A label — points at a `package_group`; only rules defined in one of the
+    listed packages may extend it.
+
+Some rules cannot be extended at all, and setting `extendable` to `True` or to
+a label on one of them is an error: analysis tests, build settings, rules with
+`_skylark_testable = True`, and rules that do not output to the bin directory.
+
+#### Subrules are not inherited
+
+A child rule does not inherit its parent's `subrules`, in either direction: a
+child that calls a subrule its parent declared must list that subrule in its own
+`subrules` parameter, and a parent cannot call a subrule that only the child
+declared.
+
+Redeclaring a subrule that the child's **direct** parent also declares is fine.
+Bazel filters those out before lifting attributes, so each one is contributed to
+the rule class exactly once.
+
+Warning: Outside that case, redeclaring a subrule the parent already pulls in
+collides, and fails at load time with `cannot add attribute: There is already a
+built-in attribute '$//pkg:defs.bzl%_subrule%_attr' which cannot be
+overridden.` There are two ways to hit this:
+
+*   The child declares a subrule that its parent uses only *transitively*,
+    through another subrule. Fix it by also listing that subrule in the
+    parent's own `subrules`.
+*   A rule three or more levels down an inheritance chain declares a subrule
+    that an ancestor above its direct parent declared. Only the direct parent's
+    `subrules` are consulted, so fix it by listing the subrule on every rule in
+    the chain between the two.
+
 ## Deprecated features
 
 ### Deprecated predeclared outputs

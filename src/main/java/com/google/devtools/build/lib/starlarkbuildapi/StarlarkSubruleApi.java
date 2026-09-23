@@ -25,9 +25,22 @@ import net.starlark.java.eval.StarlarkValue;
     name = "Subrule",
     category = DocCategory.BUILTIN,
     doc =
-        "Experimental: a building block for writing rules with shared code. For more information,"
-            + " please see the subrule proposal:"
-            + " https://docs.google.com/document/d/1RbNC88QieKvBEwir7iV5zZU08AaMlOzxhVkPnmKDedQ")
+        """
+        Represents a subrule: a reusable piece of rule implementation logic that can be shared
+        across multiple rules and aspects. A subrule is created via the
+        <a href="../globals/bzl.html#subrule"><code>subrule()</code></a> function.
+        <p>A subrule encapsulates private (implicit) attribute declarations and the
+        implementation function that uses them. When a rule or aspect declares a subrule
+        in its <code>subrules</code> parameter, the subrule's private attributes are
+        automatically added to that rule or aspect and are invisible to end users.
+        <p>A subrule may itself depend on other subrules by listing them in its own
+        <code>subrules</code> parameter, in which case the declaring rule or aspect must
+        only list the top-level subrule.
+        <p>A <code>Subrule</code> instance is callable from within a rule or aspect
+        implementation function. Calling it invokes the subrule's implementation with a
+        fresh <a href="../builtins/subrule_ctx.html">subrule_ctx</a> as the first
+        argument.
+        """)
 public interface StarlarkSubruleApi extends StarlarkValue {
 
   static Optional<String> getUserDefinedNameIfSubruleAttr(

@@ -732,14 +732,44 @@ declared.
             defaultValue = "None",
             positional = false,
             doc =
-                "Experimental: the Stalark rule that is extended. When set the public"
-                    + " attributes are merged as well as advertised providers. The rule matches"
-                    + " <code>executable</code> and <code>test</code> from the parent. Values of"
-                    + " <code>fragments</code>, <code>toolchains</code>,"
-                    + " <code>exec_compatible_with</code>, and <code>exec_groups</code> are"
-                    + " merged. Legacy or deprecated parameters may not be set. Incoming"
-                    + " configuration transition <code>cfg</code> of parent is applied after this"
-                    + " rule's incoming configuration."),
+                """
+                Experimental: A Starlark rule to extend. When set:
+                <ul>
+                <li>Attributes declared on the parent are inherited. Declaring an attribute of the
+                same name on the child <em>overrides</em> the inherited one rather than conflicting
+                with it, but only the default value and the aspects may differ. Overriding is
+                rejected unless the parent's attribute is public, Starlark-defined and of type
+                <code>attr.label</code> or <code>attr.label_list</code>, and the child keeps its
+                type and flags unchanged.</li>
+                <li>Providers advertised by the parent (<code>providers = [...]</code>) must be
+                returned.</li>
+                <li><code>fragments</code>, <code>toolchains</code> and <code>exec_groups</code> are
+                merged, and the merged set is what the child's implementation may access. Inheriting
+                the same exec group with differing requirements from multiple parents is an error.
+                Automatic exec groups are enabled for the child exactly as they are for the
+                parent.</li>
+                <li>Execution platform constraints from the parent (<code>exec_compatible_with</code>
+                on <code>rule</code> and <code>exec_group</code>) are applied.</li>
+                <li>The incoming configuration transition (<code>cfg</code>) from the parent is applied
+                after the child rule's own incoming configuration transition.</li>
+                </ul>
+                <p><code>executable</code> and <code>test</code> must be the same as the parent rule.</p>
+                <p>The child rule's implementation must call <a href="../builtins/ctx.html#super">
+                <code>ctx.super()</code></a> exactly once to invoke the parent's implementation
+                function and obtain its providers; calling it twice or not at all is an error. Note
+                that the return value is a list of providers (not <code>Target</code>), so specific
+                provider types cannot be accessed using index notation.</p>
+                <p><code>subrules</code> are <em>not</em> inherited. A child that calls a subrule
+                declared by the parent must declare that subrule itself, and vice versa.
+                Redeclaring a subrule that the direct parent also declares is fine, but declaring
+                one that the parent only uses transitively, or that an ancestor above the direct
+                parent declared, collides with the already-lifted attribute and fails at load
+                time.</p>
+                <p>Legacy or deprecated <code>rule()</code> parameters may not be set on a child rule,
+                and a rule using them cannot be a parent.
+                <p>See <a href="https://bazel.build/extending/rules#rule_inheritance">Rule
+                inheritance</a> for usage documentation.</p>
+                """),
         @Param(
             name = "extendable",
             named = true,
@@ -752,9 +782,25 @@ declared.
               @ParamType(type = NoneType.class),
             },
             doc =
-                "Experimental: A label of an allowlist defining which rules can extending this"
-                    + " rule. It can be set also to True/False to always allow/disallow extending."
-                    + " Bazel defaults to always allowing extensions."),
+                """
+                Experimental: Controls which other rules may extend this rule via the
+                <code>parent</code> parameter.
+                <ul>
+                  <li>Unset (the default): the rule may be extended from any package listed in
+                      <code>@bazel_tools//tools/allowlists/extend_rule_allowlist</code>, which
+                      Bazel ships as <code>packages = ["public"]</code>, so by default this allows
+                      everything.</li>
+                  <li><code>True</code>: any rule may extend this one, bypassing that allowlist
+                      regardless of how the distribution has set it.</li>
+                  <li><code>False</code>: this rule may not be extended.</li>
+                  <li>A label string or <code>Label</code>: points to a <code>package_group</code>;
+                      only rules defined in one of the listed packages may extend this rule.</li>
+                </ul>
+                <p>Some rules cannot be extended at all, and setting this to <code>True</code> or to
+                a label on one of them is an error: analysis tests, build settings, rules with
+                <code>_skylark_testable = True</code>, and rules that do not output to the bin
+                directory.
+                """),
         @Param(
             name = "subrules",
             allowedTypes = {
@@ -763,7 +809,11 @@ declared.
             named = true,
             defaultValue = "[]",
             positional = false,
-            doc = "Experimental: List of subrules used by this rule."),
+            doc =
+                """
+                Experimental: List of subrules used by this rule.
+                <p>See <a href="https://bazel.build/extending/rules#subrules">Subrules</a> for usage documentation.</p>
+                """),
       },
       useStarlarkThread = true)
   StarlarkCallable rule(
@@ -1040,7 +1090,11 @@ providers. That is, <code>[FooInfo, BarInfo]</code> will automatically be conver
             named = true,
             defaultValue = "[]",
             positional = false,
-            doc = "Experimental: list of subrules used by this aspect.")
+            doc =
+                """
+                Experimental: List of subrules used by this aspect.
+                <p>See <a href="https://bazel.build/extending/rules#subrules">Subrules</a> for usage documentation.</p>
+                """)
       },
       useStarlarkThread = true)
   StarlarkAspectApi aspect(
@@ -1124,12 +1178,45 @@ providers. That is, <code>[FooInfo, BarInfo]</code> will automatically be conver
   @StarlarkMethod(
       name = "subrule",
       doc =
-          "Constructs a new instance of a subrule. The result of this function must be stored in "
-              + "a global variable before it can be used.",
+          """
+          Creates a new subrule. Subrules are a mechanism for sharing common implementation logic
+          between rules and aspects. A subrule encapsulates a piece of rule implementation
+          — typically actions that rely on private (implicit) tool or file dependencies —
+          that can be reused across multiple rules without duplicating attribute declarations.
+          <p>Rules and aspects that use a subrule must declare it in their
+          <code>subrules</code> parameter. The subrule's private attributes are
+          automatically lifted to the declaring rule or aspect, becoming invisible to
+          users of that rule.
+          <p>The result of this function must be assigned to a global variable in a .bzl
+          file before it can be called.
+          <p>Subrules are not inherited through rule extension: a rule that extends another
+          must declare for itself any subrule it calls, even if its parent already declares it.
+          Redeclaring a subrule that the direct parent also declares is fine; see
+          <a href="../globals/bzl.html#rule.parent"><code>rule(parent = ...)</code></a> for the
+          cases where it instead collides.
+          <p>See the
+          <a href="https://bazel.build/extending/rules#subrules">Rules page</a>
+          for usage documentation and examples.
+          """,
       parameters = {
         @Param(
             name = "implementation",
-            doc = "The Starlark function implementing this subrule",
+            doc =
+                """
+                The Starlark function implementing this subrule. Calling the subrule invokes it
+                with:
+                <ol>
+                <li>a <a href="../builtins/subrule_ctx.html">subrule_ctx</a> as the first positional
+                argument (this is not the caller's <code>ctx</code>),</li>
+                <li>any positional and keyword arguments given at the call site, forwarded
+                unchanged, and</li>
+                <li>one keyword argument per entry in <code>attrs</code>, named exactly as the
+                attribute is declared.</li>
+                </ol>
+                <p>So a subrule declaring <code>attrs = {"_tool": ...}</code> and called as
+                <code>my_subrule(src, opt = True)</code> needs an implementation declared as
+                <code>def _impl(ctx, src, opt, _tool)</code>.
+                """,
             named = true,
             positional = false,
             allowedTypes = {@ParamType(type = StarlarkFunction.class)}),
@@ -1140,21 +1227,29 @@ providers. That is, <code>[FooInfo, BarInfo]</code> will automatically be conver
             positional = false,
             defaultValue = "{}",
             doc =
-                "A dictionary to declare all the (private) attributes of the subrule. "
-                    + "<p/>Subrules may only have private attributes that are label-typed (i.e. "
-                    + "label or label-list). The resolved values corresponding to these labels are"
-                    + " automatically passed by Bazel to the subrule's implementation function as"
-                    + " named arguments (thus the implementation function is required to accept"
-                    + " named parameters matching the attribute names). The types of these values"
-                    + " will be: "
-                    + "<ul><li><code>FilesToRunProvider</code> for label attributes with"
-                    + " <code>executable=True</code></li>"
-                    + "<li><code>File</code> for label attributes"
-                    + " with <code>allow_single_file=True</code></li>"
-                    + "<li><code>Target</code> for"
-                    + " all other label attributes</li>"
-                    + "<li><code>[Target]</code> for all label-list"
-                    + " attributes</li></ul>"),
+                """
+                A dictionary to declare all the (private) attributes of the subrule.
+                <p>Subrules may only have private attributes that are label-typed (i.e. label or
+                label-list). The resolved values corresponding to these labels are automatically
+                passed by Bazel to the subrule's implementation function as named arguments (thus
+                the implementation function is required to accept named parameters matching the
+                attribute names). The types of these values will be:
+                <ul>
+                <li><code>FilesToRunProvider</code> for label attributes with
+                <code>executable=True</code></li>
+                <li><code>File</code> for label attributes with
+                <code>allow_single_file=True</code></li>
+                <li><code>Target</code> for all other label attributes</li>
+                <li><code>[Target]</code> for all label-list attributes</li>
+                </ul>
+                <p>A caller may not override one of these attributes by passing a keyword argument
+                of the same name; doing so is an error.
+                <p><b>Known issue:</b> unlike rules and aspects, the default labels of a subrule's
+                attributes are visibility-checked against the .bzl file of the <em>consuming</em>
+                rule or aspect rather than the file declaring the subrule, so they must be visible
+                to every user of the subrule. See
+                <a href="https://github.com/bazelbuild/bazel/issues/31168">issue #31168</a>.
+                """),
         @Param(
             name = "toolchains",
             allowedTypes = {@ParamType(type = Sequence.class)},
@@ -1162,13 +1257,24 @@ providers. That is, <code>[FooInfo, BarInfo]</code> will automatically be conver
             positional = false,
             defaultValue = "[]",
             doc =
-                "If set, the set of toolchains this subrule requires. The list can contain String,"
-                    + " Label, or StarlarkToolchainTypeApi objects, in any combination. Toolchains"
-                    + " will be found by checking the current platform, and provided to the subrule"
-                    + " implementation via <code>ctx.toolchains</code>. Note that AEGs need to be"
-                    + " enabled on the consuming rule(s) if this parameter is set. In case you"
-                    + " haven't migrated to AEGs yet, see"
-                    + " https://bazel.build/extending/auto-exec-groups#migration-aegs."),
+                """
+                If set, the toolchain this subrule requires. The list can contain String, Label, or
+                StarlarkToolchainTypeApi objects, in any combination. The toolchain will be found
+                by checking the current platform, and provided to the subrule implementation via
+                <code>ctx.toolchains</code>.
+                <p>A subrule may require <b>at most one</b> toolchain. A subrule may however depend
+                on other subrules that each require their own toolchain, so decomposing a subrule
+                further works around this limit.
+                <p>Automatic exec groups (AEGs) must be enabled on the consuming rule(s) if this
+                parameter is set. In case you haven't migrated to AEGs yet, see
+                <a href="https://bazel.build/extending/auto-exec-groups#migration-aegs">Migrating
+                to AEGs</a>.
+                <p>Actions declared by the subrule must not select an execution platform
+                themselves: passing <code>toolchain</code> or <code>exec_group</code> to
+                <code>ctx.actions.run</code> or <code>ctx.actions.run_shell</code> is an error
+                inside a subrule. Bazel supplies the subrule's own toolchain, so that the action
+                runs in the automatic exec group belonging to it.
+                """),
         @Param(
             name = "fragments",
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
@@ -1184,7 +1290,13 @@ providers. That is, <code>[FooInfo, BarInfo]</code> will automatically be conver
             named = true,
             positional = false,
             defaultValue = "[]",
-            doc = "List of other subrules needed by this subrule.")
+            doc =
+                """
+                List of other subrules needed by this subrule. Attributes and toolchains are
+                collected over the transitive closure of subrule dependencies, so a rule or aspect
+                only needs to declare the subrules it calls directly. A subrule may only call the
+                subrules it declares here.
+                """)
       },
       useStarlarkThread = true)
   StarlarkSubruleApi subrule(
