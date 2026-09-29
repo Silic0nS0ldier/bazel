@@ -17,14 +17,17 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.testutil.MoreAsserts.assertContainsEvent;
 import static com.google.devtools.build.lib.testutil.TestConstants.PRODUCT_NAME;
 import static com.google.devtools.build.lib.testutil.TestConstants.WORKSPACE_NAME;
+import static org.junit.Assert.assertThrows;
 
 import com.github.luben.zstd.ZstdInputStream;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.BuildConfigurationEvent;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.RunfilesTree;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
@@ -48,7 +51,12 @@ import com.google.testing.junit.testparameterinjector.TestParameterInjector;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import net.starlark.java.syntax.Location;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -280,6 +288,153 @@ public final class CompactSpawnLogContextTest extends SpawnLogContextTestBase {
             + " to the server log file for details.");
     assertThat(storedEventHandler.getEvents()).hasSize(1);
     assertThat(storedEventHandler.getPosts()).isEmpty();
+  }
+
+  @Test
+  public void testConcurrentLogging() throws Exception {
+    // Emulate a burst of spawns completing at once whose inputs share most of their nested sets.
+    int numLibs = 50;
+    List<NestedSet<ActionInput>> libs = new ArrayList<>();
+    List<Artifact> allFiles = new ArrayList<>();
+    List<Spawn> spawns = new ArrayList<>();
+    for (int i = 0; i < numLibs; i++) {
+      Artifact file = ActionsTestUtil.createArtifact(rootDir, "lib" + i);
+      writeFile(file, "lib" + i);
+      allFiles.add(file);
+      NestedSetBuilder<ActionInput> lib = NestedSetBuilder.<ActionInput>stableOrder().add(file);
+      for (int dep = Math.max(0, i - 5); dep < i; dep++) {
+        lib.addTransitive(libs.get(dep));
+      }
+      libs.add(lib.build());
+
+      for (int j = 0; j < 4; j++) {
+        Artifact src = ActionsTestUtil.createArtifact(rootDir, "src" + i + "_" + j);
+        writeFile(src, "src" + i + "_" + j);
+        allFiles.add(src);
+        spawns.add(
+            defaultSpawnBuilder()
+                .withOwnerLabel("//pkg:spawn" + i + "_" + j)
+                .withInputs(
+                    NestedSetBuilder.<ActionInput>stableOrder()
+                        .add(src)
+                        .addTransitive(libs.get(i))
+                        .build())
+                .build());
+      }
+    }
+    InputMetadataProvider inputMetadataProvider =
+        createInputMetadataProvider(allFiles.toArray(new Artifact[0]));
+
+    SpawnLogContext sequential = createSpawnLogContext();
+    for (Spawn spawn : spawns) {
+      sequential.logSpawn(
+          spawn,
+          inputMetadataProvider,
+          createInputMap(),
+          fs,
+          defaultTimeout(),
+          defaultSpawnResult());
+    }
+    long sequentialInputSets =
+        closeAndReadCompactLog(sequential).stream()
+            .filter(Protos.ExecLogEntry::hasInputSet)
+            .count();
+    ImmutableList<SpawnExec> expected = readSpawnExecs();
+
+    SpawnLogContext concurrent = createSpawnLogContext();
+    int numThreads = 16;
+    ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+    CyclicBarrier barrier = new CyclicBarrier(numThreads);
+    List<Future<?>> futures = new ArrayList<>();
+    for (int t = 0; t < numThreads; t++) {
+      int offset = t;
+      futures.add(
+          executor.submit(
+              () -> {
+                barrier.await();
+                // Each thread logs every spawn, in a different order, to maximize overlap.
+                for (int i = 0; i < spawns.size(); i++) {
+                  concurrent.logSpawn(
+                      spawns.get((i * 7 + offset) % spawns.size()),
+                      inputMetadataProvider,
+                      createInputMap(),
+                      fs,
+                      defaultTimeout(),
+                      defaultSpawnResult());
+                }
+                return null;
+              }));
+    }
+    for (Future<?> future : futures) {
+      future.get();
+    }
+    executor.shutdown();
+
+    ImmutableList<Protos.ExecLogEntry> entries = closeAndReadCompactLog(concurrent);
+
+    // Shared entries are deduplicated even under contention.
+    assertThat(
+            entries.stream()
+                .filter(Protos.ExecLogEntry::hasFile)
+                .map(e -> e.getFile().getPath()))
+        .containsNoDuplicates();
+    assertThat(entries.stream().filter(Protos.ExecLogEntry::hasFile)).hasSize(allFiles.size());
+    // Shared sets are logged once, while each spawn logs its own (unshared) top-level set.
+    assertThat(entries.stream().filter(Protos.ExecLogEntry::hasInputSet).count())
+        .isEqualTo(sequentialInputSets + (numThreads - 1) * spawns.size());
+
+    // The log can be parsed in a single pass and describes the same spawns.
+    ImmutableList<SpawnExec> actual = readSpawnExecs();
+    assertThat(actual).hasSize(numThreads * spawns.size());
+    assertThat(ImmutableSet.copyOf(actual)).containsExactlyElementsIn(expected);
+  }
+
+  @Test
+  public void testFailedEntryCanBeRetried() throws Exception {
+    Artifact file = ActionsTestUtil.createArtifact(rootDir, "file");
+    Spawn spawn = defaultSpawnBuilder().withInputs(file).build();
+    // Without metadata, the digest is computed from the filesystem, which fails for a missing file.
+    InputMetadataProvider inputMetadataProvider = createInputMetadataProvider();
+
+    SpawnLogContext context = createSpawnLogContext();
+
+    assertThrows(
+        IOException.class,
+        () ->
+            context.logSpawn(
+                spawn,
+                inputMetadataProvider,
+                createInputMap(file),
+                fs,
+                defaultTimeout(),
+                defaultSpawnResult()));
+
+    writeFile(file, "abc");
+    context.logSpawn(
+        spawn,
+        inputMetadataProvider,
+        createInputMap(file),
+        fs,
+        defaultTimeout(),
+        defaultSpawnResult());
+
+    closeAndAssertLog(
+        context,
+        defaultSpawnExecBuilder()
+            .addInputs(File.newBuilder().setPath("file").setDigest(getDigest("abc")))
+            .build());
+  }
+
+  private ImmutableList<SpawnExec> readSpawnExecs() throws IOException {
+    ImmutableList.Builder<SpawnExec> result = ImmutableList.builder();
+    try (SpawnLogReconstructor reconstructor =
+        new SpawnLogReconstructor(logPath.getInputStream())) {
+      SpawnExec ex;
+      while ((ex = reconstructor.read()) != null) {
+        result.add(ex);
+      }
+    }
+    return result.build();
   }
 
   @Override

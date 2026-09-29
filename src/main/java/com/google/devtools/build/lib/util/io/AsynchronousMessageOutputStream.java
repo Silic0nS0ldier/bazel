@@ -38,12 +38,29 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @ThreadSafety.ThreadSafe
 public class AsynchronousMessageOutputStream<T extends Message> implements MessageOutputStream<T> {
-  private static final byte[] POISON_PILL = new byte[1];
+  /**
+   * A message that a caller has prepared for writing with {@link #writePrepared}, for example by
+   * serializing it ahead of time.
+   *
+   * @param <M> the type of message that {@link #writeDelimitedTo} writes
+   */
+  @FunctionalInterface
+  public interface PreparedMessage<M extends Message> {
+    /**
+     * Writes the message in the same format as {@link
+     * MessageLite#writeDelimitedTo(java.io.OutputStream)}.
+     *
+     * <p>Called on the stream's writer thread, which all writes share, so it should do little work.
+     */
+    void writeDelimitedTo(OutputStream out) throws IOException;
+  }
+
+  private static final PreparedMessage<?> POISON_PILL = out -> {};
 
   private final Thread writerThread;
   // Maybe we should use an ArrayBlockingQueue instead, and accept that write may block if the
   // buffer is full?
-  private final BlockingQueue<byte[]> queue = new LinkedBlockingDeque<>();
+  private final BlockingQueue<PreparedMessage<?>> queue = new LinkedBlockingDeque<>();
   // The future returned by closeAsync().
   private final SettableFuture<Void> closeFuture = SettableFuture.create();
   // To store any exception raised from the writes.
@@ -61,9 +78,9 @@ public class AsynchronousMessageOutputStream<T extends Message> implements Messa
         new Thread(
             () -> {
               try {
-                byte[] data;
-                while ((data = queue.take()) != POISON_PILL) {
-                  out.write(data);
+                PreparedMessage<?> message;
+                while ((message = queue.take()) != POISON_PILL) {
+                  message.writeDelimitedTo(out);
                 }
               } catch (InterruptedException e) {
                 // Exit quietly.
@@ -96,14 +113,8 @@ public class AsynchronousMessageOutputStream<T extends Message> implements Messa
   public void write(T m) {
     Preconditions.checkNotNull(m);
 
-    if (closeFuture.isDone()) {
-      if (exception.get() != null) {
-        // There was a previous write failure. Silently return without doing anything.
-        return;
-      } else {
-        // Attempted to write after closing.
-        throw new IllegalStateException();
-      }
+    if (!acceptsWrites()) {
+      return;
     }
 
     final int size = m.getSerializedSize();
@@ -117,7 +128,43 @@ public class AsynchronousMessageOutputStream<T extends Message> implements Messa
       return;
     }
 
-    Uninterruptibles.putUninterruptibly(queue, bos.toByteArray());
+    byte[] bytes = bos.toByteArray();
+    Uninterruptibles.putUninterruptibly(queue, out -> out.write(bytes));
+  }
+
+  /**
+   * Writes a message that the caller has prepared, for example to keep serialization outside of a
+   * lock it holds while writing.
+   *
+   * <p>The same ordering guarantees as for {@link #write} apply. An exception thrown by {@code
+   * message} is handled like a failed write.
+   */
+  public void writePrepared(PreparedMessage<T> message) {
+    Preconditions.checkNotNull(message);
+
+    if (!acceptsWrites()) {
+      return;
+    }
+
+    Uninterruptibles.putUninterruptibly(queue, message);
+  }
+
+  /**
+   * Returns false if writes should be silently dropped due to a previous write failure.
+   *
+   * @throws IllegalStateException if the stream has been closed
+   */
+  private boolean acceptsWrites() {
+    if (closeFuture.isDone()) {
+      if (exception.get() != null) {
+        // There was a previous write failure. Silently return without doing anything.
+        return false;
+      } else {
+        // Attempted to write after closing.
+        throw new IllegalStateException();
+      }
+    }
+    return true;
   }
 
   /**
