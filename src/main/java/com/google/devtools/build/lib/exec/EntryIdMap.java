@@ -19,11 +19,11 @@ import static com.google.devtools.build.lib.profiler.ProfilerTask.SPAWN_LOG;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import it.unimi.dsi.fastutil.HashCommon;
-import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
@@ -37,11 +37,11 @@ import javax.annotation.concurrent.GuardedBy;
  * proceed in parallel. A failed computation isn't remembered: the next request for the key,
  * including one that was waiting on the failed computation, computes it again.
  *
- * <p>This is a sharded primitive map rather than a {@link java.util.concurrent.ConcurrentHashMap}
- * because it may hold millions of entries and the latter would use several times more memory per
- * entry. A single lock isn't an option either: nearly every lookup finds an existing entry, and
- * with hundreds of threads logging spawns at once, even a short critical section around each
- * lookup becomes a bottleneck.
+ * <p>Nearly every lookup finds an existing entry, so those lookups don't lock. Only recording an
+ * ID and tracking entries being computed lock, and the map is sharded so that those rarely contend.
+ * Each shard is a plain open-addressing table rather than a {@link
+ * java.util.concurrent.ConcurrentHashMap}, because the map may hold millions of entries and the
+ * latter would use several times more memory per entry.
  */
 final class EntryIdMap {
 
@@ -52,17 +52,81 @@ final class EntryIdMap {
   }
 
   private static final class Shard {
-    // Use a specialized map for minimal memory footprint.
+    /**
+     * An open-addressing hash table from keys to IDs.
+     *
+     * <p>Its arrays are only written while holding the shard's lock, so code holding it reads them
+     * plainly. A slot's ID is written before its key is published (with release semantics), so a
+     * reader that sees a key (with acquire semantics) also sees its ID. Keys are never removed.
+     */
+    private static final class Table {
+      private final AtomicReferenceArray<Object> keys;
+      private final int[] ids;
+
+      private Table(int capacity) {
+        keys = new AtomicReferenceArray<>(capacity);
+        ids = new int[capacity];
+      }
+    }
+
+    private static final int INITIAL_CAPACITY = 16;
+
+    // Replaced rather than modified when it grows, so that readers always see a consistent table.
+    private volatile Table table = new Table(INITIAL_CAPACITY);
+
     @GuardedBy("this")
-    private final Object2IntOpenHashMap<Object> ids = new Object2IntOpenHashMap<>();
+    private int size = 0;
 
     @GuardedBy("this")
     private final HashMap<Object, InFlightEntry> inFlight = new HashMap<>();
 
-    Shard() {
-      // NO_ID is never stored, so getInt returning it means the key is absent, which takes a single
-      // unboxed lookup.
-      ids.defaultReturnValue(EntryWriter.NO_ID);
+    /**
+     * Returns the ID recorded for {@code key}, or {@link EntryWriter#NO_ID} if there is none yet.
+     *
+     * <p>Doesn't lock. Without the shard's lock, it may miss an ID that is being recorded
+     * concurrently.
+     */
+    private int get(Object key) {
+      Table t = table;
+      int mask = t.ids.length - 1;
+      for (int i = hash(key) & mask; ; i = (i + 1) & mask) {
+        Object k = t.keys.getAcquire(i);
+        if (k == null) {
+          return EntryWriter.NO_ID;
+        }
+        if (k.equals(key)) {
+          return t.ids[i];
+        }
+      }
+    }
+
+    /** Records the ID of a key that has none. */
+    @GuardedBy("this")
+    private void put(Object key, int id) {
+      Table t = table;
+      // Keep the load factor at most 3/4, so that probing always reaches an empty slot.
+      if ((size + 1) * 4 > t.ids.length * 3) {
+        Table grown = new Table(t.ids.length * 2);
+        for (int i = 0; i < t.ids.length; i++) {
+          Object k = t.keys.getPlain(i);
+          if (k != null) {
+            insert(grown, k, t.ids[i]);
+          }
+        }
+        table = t = grown;
+      }
+      insert(t, key, id);
+      size++;
+    }
+
+    private static void insert(Table t, Object key, int id) {
+      int mask = t.ids.length - 1;
+      int i = hash(key) & mask;
+      while (t.keys.getPlain(i) != null) {
+        i = (i + 1) & mask;
+      }
+      t.ids[i] = id;
+      t.keys.setRelease(i, key);
     }
   }
 
@@ -99,11 +163,16 @@ final class EntryIdMap {
    */
   int getOrCompute(Object key, IdComputer computer) throws IOException, InterruptedException {
     Shard shard = getShard(key);
+    // Nearly every request finds an ID recorded earlier, so look for one without locking first.
+    int recorded = shard.get(key);
+    if (recorded != EntryWriter.NO_ID) {
+      return recorded;
+    }
     while (true) {
       InFlightEntry inFlight;
       boolean isOwner = false;
       synchronized (shard) {
-        int id = shard.ids.getInt(key);
+        int id = shard.get(key);
         if (id != EntryWriter.NO_ID) {
           return id;
         }
@@ -133,10 +202,14 @@ final class EntryIdMap {
     }
   }
 
+  private static int hash(Object key) {
+    return HashCommon.mix(key.hashCode());
+  }
+
   private Shard getShard(Object key) {
     // Use the high bits: the shard's own hash table uses the low bits of the same mixed hash, so
     // using those here would leave most of its slots unused.
-    return shards[HashCommon.mix(key.hashCode()) >>> (Integer.SIZE - SHARD_BITS)];
+    return shards[hash(key) >>> (Integer.SIZE - SHARD_BITS)];
   }
 
   private static int compute(Object key, IdComputer computer, Shard shard, InFlightEntry inFlight)
@@ -155,7 +228,7 @@ final class EntryIdMap {
     // Record the ID before forgetting the in-flight entry, atomically, so that no concurrent
     // request can find neither and compute the entry again.
     synchronized (shard) {
-      shard.ids.put(key, id);
+      shard.put(key, id);
       shard.inFlight.remove(key);
     }
     inFlight.id.complete(id);

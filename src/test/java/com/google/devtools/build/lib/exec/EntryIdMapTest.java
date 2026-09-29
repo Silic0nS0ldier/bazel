@@ -22,11 +22,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.After;
 import org.junit.Test;
@@ -191,6 +193,51 @@ public final class EntryIdMapTest {
             });
 
     assertThat(map.getOrCompute("parent", () -> -1)).isEqualTo(parent);
+  }
+
+  @Test
+  public void concurrentRequestsWhileTablesGrow() throws Exception {
+    int numKeys = 200_000;
+    int numThreads = 16;
+    String[] keys = new String[numKeys];
+    for (int i = 0; i < numKeys; i++) {
+      keys[i] = "key" + i;
+    }
+    AtomicIntegerArray computations = new AtomicIntegerArray(numKeys);
+    int[][] seen = new int[numThreads][numKeys];
+    CyclicBarrier barrier = new CyclicBarrier(numThreads);
+    List<Future<?>> futures = new ArrayList<>();
+    for (int t = 0; t < numThreads; t++) {
+      int thread = t;
+      futures.add(
+          executor.submit(
+              () -> {
+                barrier.await();
+                // Each thread visits every key, in a different order, so that lookups race with
+                // inserts and with the tables growing.
+                for (int j = 0; j < numKeys; j++) {
+                  int k = (int) ((j * 7919L + thread * 104729L) % numKeys);
+                  seen[thread][k] =
+                      map.getOrCompute(
+                          keys[k],
+                          () -> {
+                            computations.incrementAndGet(k);
+                            return nextId.getAndIncrement();
+                          });
+                }
+                return null;
+              }));
+    }
+    for (Future<?> future : futures) {
+      future.get(60, SECONDS);
+    }
+
+    for (int k = 0; k < numKeys; k++) {
+      assertThat(computations.get(k)).isEqualTo(1);
+      for (int t = 1; t < numThreads; t++) {
+        assertThat(seen[t][k]).isEqualTo(seen[0][k]);
+      }
+    }
   }
 
   /**
