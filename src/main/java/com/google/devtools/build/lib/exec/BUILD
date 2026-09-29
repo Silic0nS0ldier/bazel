@@ -273,6 +273,8 @@ java_library(
     name = "spawn_log_context",
     srcs = [
         "CompactSpawnLogContext.java",
+        "EntryIdMap.java",
+        "EntryWriter.java",
         "ExpandedSpawnLogContext.java",
         "SpawnLogContext.java",
     ],
