@@ -18,10 +18,11 @@ import static org.junit.Assert.assertThrows;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
-import com.google.devtools.build.lib.util.io.AsynchronousMessageOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
@@ -36,8 +37,7 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public final class EntryWriterTest {
   private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-  private final EntryWriter writer =
-      new EntryWriter(new AsynchronousMessageOutputStream<>("test", bytes));
+  private final EntryWriter writer = new EntryWriter("test", bytes);
 
   /** An entry whose serialization is roughly {@code size} bytes. */
   private static ExecLogEntry.Builder entryOfSize(int size) {
@@ -140,5 +140,39 @@ public final class EntryWriterTest {
         IllegalArgumentException.class, () -> writer.writeWithId(entryOfSize(10).setId(5)));
     assertThrows(
         IllegalArgumentException.class, () -> writer.writeWithoutId(entryOfSize(10).setId(5)));
+  }
+
+  @Test
+  public void writesAfterWriterWasIdle() throws Exception {
+    assertThat(writer.writeWithId(entryOfSize(10))).isEqualTo(1);
+    // Long enough for the writer thread to catch up and start waiting for more entries.
+    Thread.sleep(20);
+    assertThat(writer.writeWithId(entryOfSize(10))).isEqualTo(2);
+
+    assertThat(closeAndRead().stream().map(ExecLogEntry::getId)).containsExactly(1, 2).inOrder();
+  }
+
+  @Test
+  public void writeFailureIsReportedOnClose() throws Exception {
+    EntryWriter failing =
+        new EntryWriter(
+            "failing",
+            new OutputStream() {
+              @Override
+              public void write(int b) throws IOException {
+                throw new IOException("disk full");
+              }
+            });
+    failing.writeWithId(entryOfSize(10));
+    failing.writeWithId(entryOfSize(10));
+
+    IOException e = assertThrows(IOException.class, failing::close);
+    assertThat(e).hasMessageThat().isEqualTo("disk full");
+  }
+
+  @Test
+  public void rejectsWritesAfterClose() throws Exception {
+    writer.close();
+    assertThrows(IllegalStateException.class, () -> writer.writeWithId(entryOfSize(10)));
   }
 }

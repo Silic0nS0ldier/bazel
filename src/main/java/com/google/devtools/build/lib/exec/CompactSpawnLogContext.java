@@ -51,7 +51,6 @@ import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.remote.options.RemoteOptions;
 import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
 import com.google.devtools.build.lib.util.StringEncoding;
-import com.google.devtools.build.lib.util.io.AsynchronousMessageOutputStream;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -189,20 +188,15 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     this.compressionService = compressionService;
     this.invocationId = invocationId;
     this.reporter = reporter;
-    this.entryWriter = new EntryWriter(getOutputStream(out, displayName));
+    this.entryWriter = new EntryWriter(displayName, getOutputStream(out));
 
     logInvocation();
   }
 
-  private AsynchronousMessageOutputStream<ExecLogEntry> getOutputStream(
-      OutputStream out, String name)
-      throws IOException {
-    // Use an AsynchronousMessageOutputStream so that compression and I/O occur in a separate
-    // thread. This ensures concurrent writes don't tear and avoids blocking execution.
+  private OutputStream getOutputStream(OutputStream out) throws IOException {
     // Buffer in front of the compressor: entries are written in several small pieces, and each
-    // write to it is a native call. That thread limits the log's throughput, so this matters.
-    return new AsynchronousMessageOutputStream<>(
-        name, new BufferedOutputStream(compressionService.newZstdOutputStream(out), 64 * 1024));
+    // write to it is a native call. The writer thread limits the log's throughput, so this matters.
+    return new BufferedOutputStream(compressionService.newZstdOutputStream(out), 64 * 1024);
   }
 
   private void logInvocation() throws IOException, InterruptedException {
