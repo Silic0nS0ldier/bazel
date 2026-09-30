@@ -82,7 +82,10 @@ final class EntryWriter {
 
   // The last node appended, or one of its recent predecessors (appenders help it catch up). Only
   // the writer thread knows the start of the list, so that written nodes can be garbage collected.
-  @SuppressWarnings("unused") // accessed through TAIL
+  //
+  // Read through TAIL.getAcquire, since appending only needs acquire ordering (a plain volatile
+  // read asks for more). Error Prone can't see VarHandle accesses, so it reports it as unused.
+  @SuppressWarnings("unused")
   private volatile Node tail;
 
   private volatile boolean closed = false;
@@ -167,7 +170,8 @@ final class EntryWriter {
           try {
             writeDelimited(next);
           } catch (IOException | RuntimeException e) {
-            // Like AsynchronousMessageOutputStream: drop later writes, report the failure on close.
+            // The log may now end in a partial entry, so later entries are dropped rather than
+            // written after it. close() reports the failure.
             failure.compareAndSet(null, e);
           }
         }
