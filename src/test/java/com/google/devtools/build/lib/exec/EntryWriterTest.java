@@ -109,9 +109,10 @@ public final class EntryWriterTest {
   @Test
   public void bytesMatchWriteDelimitedTo() throws Exception {
     // IDs cross the 1-byte varint boundary (128), and body sizes cross it for the length prefix.
+    // One entry is larger than the writer's 64 KiB buffer.
     ByteArrayOutputStream expected = new ByteArrayOutputStream();
     for (int i = 0; i < 200; i++) {
-      ExecLogEntry.Builder entry = entryOfSize(i * 3);
+      ExecLogEntry.Builder entry = entryOfSize(i == 100 ? 100_000 : i * 3);
       if (i % 5 == 0) {
         entry.build().writeDelimitedTo(expected);
         writer.writeWithoutId(entry);
