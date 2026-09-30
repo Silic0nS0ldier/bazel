@@ -205,6 +205,32 @@ final class NativePosixFiles {
   @VisibleForTesting
   static native void mkfifo(String path, int mode) throws IOException;
 
+  /**
+   * Opens a file for reading, returning a raw file descriptor.
+   *
+   * <p>Unlike {@link java.io.FileInputStream}, this doesn't register a cleanup action with the
+   * JDK's shared {@link java.lang.ref.Cleaner}, whose lock every such open and close takes. The
+   * caller must {@link #close} the descriptor.
+   *
+   * @throws IOException iff the open(2) call failed
+   */
+  static native int openRead(String path) throws IOException;
+
+  /**
+   * Reads up to {@code length} bytes from a file descriptor opened with {@link #openRead}.
+   *
+   * @return the number of bytes read, or 0 at end of file
+   * @throws IOException iff the read(2) call failed
+   */
+  static native int read(int fd, byte[] buffer, int offset, int length) throws IOException;
+
+  /**
+   * Closes a file descriptor opened with {@link #openRead}.
+   *
+   * @throws IOException iff the close(2) call failed
+   */
+  static native void close(int fd) throws IOException;
+
   /********************************************************************
    *                                                                  *
    *                  Linux extended file attributes                  *
