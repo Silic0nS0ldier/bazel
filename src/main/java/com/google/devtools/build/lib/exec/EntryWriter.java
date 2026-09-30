@@ -25,7 +25,6 @@ import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import javax.annotation.Nullable;
 
@@ -92,7 +91,10 @@ final class EntryWriter {
   private volatile Node tail;
 
   private volatile boolean closed = false;
-  private final AtomicReference<Throwable> failure = new AtomicReference<>();
+  // The first IOException or RuntimeException from writing or closing the log, with later ones
+  // suppressed. Errors aren't recorded: they reach the writer thread's uncaught exception handler.
+  // Only used by the writer thread, and by close() once that thread has finished.
+  @Nullable private Exception failure;
   private final OutputStream out;
   // Buffers writes to out: entries are written in several small pieces, and each write to a
   // compressor is a native call. Only used by the writer thread.
@@ -185,13 +187,13 @@ final class EntryWriter {
           }
         }
         idleWaitNanos = MIN_IDLE_WAIT_NANOS;
-        if (failure.get() == null) {
+        if (failure == null) {
           try {
             writeDelimited(next);
           } catch (IOException | RuntimeException e) {
             // The log may now end in a partial entry, so later entries are dropped rather than
             // written after it. close() reports the failure.
-            failure.compareAndSet(null, e);
+            recordFailure(e);
           }
         }
         next.bodyWithoutId = null;
@@ -202,7 +204,7 @@ final class EntryWriter {
       try {
         out.close();
       } catch (IOException | RuntimeException e) {
-        failure.compareAndSet(null, e);
+        recordFailure(e);
       }
     }
   }
@@ -225,14 +227,25 @@ final class EntryWriter {
     coded.writeRawBytes(node.bodyWithoutId);
   }
 
-  /** Writes buffered entries to the output stream, unless a failure means they're dropped. */
+  /**
+   * Writes buffered entries to the output stream without flushing it, unless a failure means
+   * they're dropped.
+   */
   private void flush() {
-    if (failure.get() == null) {
+    if (failure == null) {
       try {
         coded.flush();
       } catch (IOException | RuntimeException e) {
-        failure.compareAndSet(null, e);
+        recordFailure(e);
       }
+    }
+  }
+
+  private void recordFailure(Exception e) {
+    if (failure == null) {
+      failure = e;
+    } else {
+      failure.addSuppressed(e);
     }
   }
 
@@ -252,11 +265,10 @@ final class EntryWriter {
     closed = true;
     LockSupport.unpark(writerThread);
     Uninterruptibles.joinUninterruptibly(writerThread);
-    @Nullable Throwable t = failure.get();
-    if (t instanceof IOException e) {
+    if (failure instanceof IOException e) {
       throw e;
     }
-    if (t instanceof RuntimeException e) {
+    if (failure instanceof RuntimeException e) {
       throw e;
     }
   }

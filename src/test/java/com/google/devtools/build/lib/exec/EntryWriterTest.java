@@ -195,12 +195,19 @@ public final class EntryWriterTest {
               public void write(int b) throws IOException {
                 throw new IOException("disk full");
               }
+
+              @Override
+              public void close() throws IOException {
+                throw new IOException("close failed");
+              }
             });
     failing.writeWithId(entryOfSize(10));
     failing.writeWithId(entryOfSize(10));
 
     IOException e = assertThrows(IOException.class, failing::close);
     assertThat(e).hasMessageThat().isEqualTo("disk full");
+    assertThat(e.getSuppressed()).hasLength(1);
+    assertThat(e.getSuppressed()[0]).hasMessageThat().isEqualTo("close failed");
   }
 
   @Test
