@@ -17,6 +17,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertThrows;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.testing.GcFinalization;
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
 import java.io.ByteArrayInputStream;
@@ -24,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -244,6 +246,24 @@ public final class EntryWriterTest {
         ExecLogEntry.parseDelimitedFrom(new ByteArrayInputStream(bytes.toByteArray()));
     assertThat(entry.getId()).isEqualTo(1);
     releaser.join();
+  }
+
+  @Test
+  public void writtenEntriesCanBeGarbageCollected() throws Exception {
+    // Before anything is written, the tail is the node the list starts from.
+    WeakReference<Object> start = new WeakReference<>(writer.tailForTesting());
+    ByteArrayOutputStream expected = new ByteArrayOutputStream();
+    for (int i = 0; i < 1000; i++) {
+      ExecLogEntry.Builder entry = entryOfSize(100);
+      entry.clone().setId(i + 1).build().writeDelimitedTo(expected);
+      writer.writeWithId(entry);
+    }
+    while (bytes.size() < expected.size()) {
+      Thread.sleep(1);
+    }
+
+    // The writer is still open but has written everything, so it should only retain its last node.
+    GcFinalization.awaitClear(start);
   }
 
   @Test

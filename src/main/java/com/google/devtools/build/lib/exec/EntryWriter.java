@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.exec;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
 import com.google.protobuf.CodedOutputStream;
@@ -95,12 +96,19 @@ final class EntryWriter {
   private final OutputStream out;
   private final Thread writerThread;
 
+  // The last node the writer thread has written, and the only reference to where it is in the list,
+  // so that nodes before it can be garbage collected. A local variable or the thread's Runnable
+  // would keep the start of the list reachable for as long as the thread runs. Only used by the
+  // writer thread, after its initial value.
+  private Node written;
+
   /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
   EntryWriter(String name, OutputStream out) {
     this.out = out;
     Node start = new Node(/* bodyWithoutId= */ null);
     this.tail = start;
-    this.writerThread = new Thread(() -> writeAll(start), "exec-log-writer:" + name);
+    this.written = start;
+    this.writerThread = new Thread(this::writeAll, "exec-log-writer:" + name);
     writerThread.start();
   }
 
@@ -149,8 +157,7 @@ final class EntryWriter {
   }
 
   /** Runs on the writer thread: writes nodes in list order until closed and caught up. */
-  private void writeAll(Node start) {
-    Node written = start;
+  private void writeAll() {
     long idleWaitNanos = MIN_IDLE_WAIT_NANOS;
     try {
       while (true) {
@@ -207,6 +214,11 @@ final class EntryWriter {
     cos.writeRawBytes(idPart);
     cos.flush();
     out.write(node.bodyWithoutId);
+  }
+
+  @VisibleForTesting
+  Object tailForTesting() {
+    return tail;
   }
 
   /**
