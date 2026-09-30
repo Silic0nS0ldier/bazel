@@ -94,6 +94,9 @@ final class EntryWriter {
   private volatile boolean closed = false;
   private final AtomicReference<Throwable> failure = new AtomicReference<>();
   private final OutputStream out;
+  // Buffers writes to out: entries are written in several small pieces, and each write to a
+  // compressor is a native call. Only used by the writer thread.
+  private final CodedOutputStream coded;
   private final Thread writerThread;
 
   // The last node the writer thread has written, and the only reference to where it is in the list,
@@ -105,6 +108,7 @@ final class EntryWriter {
   /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
   EntryWriter(String name, OutputStream out) {
     this.out = out;
+    this.coded = CodedOutputStream.newInstance(out, /* bufferSize= */ 64 * 1024);
     Node start = new Node(/* bodyWithoutId= */ null);
     this.tail = start;
     this.written = start;
@@ -170,6 +174,8 @@ final class EntryWriter {
               break;
             }
           } else {
+            // Caught up, so there's time to spare: don't leave written entries in the buffer.
+            flush();
             // Every entry must be written before close() returns, so interrupts are ignored. The
             // flag is cleared because parkNanos returns immediately while it's set.
             Thread.interrupted();
@@ -192,6 +198,7 @@ final class EntryWriter {
         written = next;
       }
     } finally {
+      flush();
       try {
         out.close();
       } catch (IOException | RuntimeException e) {
@@ -203,20 +210,30 @@ final class EntryWriter {
   /**
    * Writes a node in the same format as {@link ExecLogEntry#writeDelimitedTo}.
    *
-   * <p>The entry is written as a message holding only the ID followed by the rest of the entry. The
-   * ID is field 1, which a full serialization writes first, so this produces exactly the bytes of
-   * {@link ExecLogEntry#writeDelimitedTo} for the entry with its ID.
+   * <p>The entry is written as its ID field followed by the rest of the entry. The ID is field 1,
+   * which a full serialization writes first, so this produces exactly the bytes of {@link
+   * ExecLogEntry#writeDelimitedTo} for the entry with its ID.
    */
   private void writeDelimited(Node node) throws IOException {
-    byte[] idPart =
-        node.id == NO_ID
-            ? new byte[0]
-            : ExecLogEntry.newBuilder().setId(node.id).build().toByteArray();
-    CodedOutputStream cos = CodedOutputStream.newInstance(out, /* bufferSize= */ 16);
-    cos.writeUInt32NoTag(idPart.length + node.bodyWithoutId.length);
-    cos.writeRawBytes(idPart);
-    cos.flush();
-    out.write(node.bodyWithoutId);
+    boolean hasId = node.id != NO_ID;
+    int idSize =
+        hasId ? CodedOutputStream.computeUInt32Size(ExecLogEntry.ID_FIELD_NUMBER, node.id) : 0;
+    coded.writeUInt32NoTag(idSize + node.bodyWithoutId.length);
+    if (hasId) {
+      coded.writeUInt32(ExecLogEntry.ID_FIELD_NUMBER, node.id);
+    }
+    coded.writeRawBytes(node.bodyWithoutId);
+  }
+
+  /** Writes buffered entries to the output stream, unless a failure means they're dropped. */
+  private void flush() {
+    if (failure.get() == null) {
+      try {
+        coded.flush();
+      } catch (IOException | RuntimeException e) {
+        failure.compareAndSet(null, e);
+      }
+    }
   }
 
   @VisibleForTesting
