@@ -17,18 +17,22 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertThrows;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -38,6 +42,12 @@ import org.junit.runners.JUnit4;
 public final class EntryWriterTest {
   private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
   private final EntryWriter writer = new EntryWriter("test", bytes);
+
+  @After
+  public void closeWriter() throws Exception {
+    // Stops the writer thread in tests that don't close the writer. Closing again is harmless.
+    writer.close();
+  }
 
   /** An entry whose serialization is roughly {@code size} bytes. */
   private static ExecLogEntry.Builder entryOfSize(int size) {
@@ -189,6 +199,51 @@ public final class EntryWriterTest {
 
     IOException e = assertThrows(IOException.class, failing::close);
     assertThat(e).hasMessageThat().isEqualTo("disk full");
+  }
+
+  @Test
+  public void closeWaitsForTheWriterWhenInterrupted() throws Exception {
+    // The writer thread blocks on its first write until released, so it's still writing when the
+    // interrupted close() starts.
+    CountDownLatch released = new CountDownLatch(1);
+    EntryWriter blocked =
+        new EntryWriter(
+            "blocked",
+            new OutputStream() {
+              @Override
+              public void write(int b) {
+                Uninterruptibles.awaitUninterruptibly(released);
+                bytes.write(b);
+              }
+
+              @Override
+              public void write(byte[] b, int off, int len) {
+                Uninterruptibles.awaitUninterruptibly(released);
+                bytes.write(b, off, len);
+              }
+            });
+    blocked.writeWithId(entryOfSize(10));
+    Thread releaser =
+        new Thread(
+            () -> {
+              Uninterruptibles.sleepUninterruptibly(Duration.ofMillis(100));
+              released.countDown();
+            });
+    releaser.start();
+
+    Thread.currentThread().interrupt();
+    try {
+      blocked.close();
+    } finally {
+      // Also clears the interrupt, so that it doesn't leak into later tests.
+      assertThat(Thread.interrupted()).isTrue();
+    }
+
+    assertThat(released.getCount()).isEqualTo(0);
+    ExecLogEntry entry =
+        ExecLogEntry.parseDelimitedFrom(new ByteArrayInputStream(bytes.toByteArray()));
+    assertThat(entry.getId()).isEqualTo(1);
+    releaser.join();
   }
 
   @Test
