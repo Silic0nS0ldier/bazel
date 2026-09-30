@@ -58,6 +58,12 @@ final class EntryIdMap {
 
     @GuardedBy("this")
     private final HashMap<Object, InFlightEntry> inFlight = new HashMap<>();
+
+    Shard() {
+      // NO_ID is never stored, so getInt returning it means the key is absent, which takes a single
+      // unboxed lookup.
+      ids.defaultReturnValue(EntryWriter.NO_ID);
+    }
   }
 
   /** An entry that is being computed by {@link #owner}. */
@@ -88,7 +94,8 @@ final class EntryIdMap {
    * therefore reference it.
    *
    * <p>{@code computer} may request IDs for other keys. If it (transitively) requests {@code key}
-   * itself, the nested request is computed without deduplication rather than deadlocking.
+   * itself, the nested request is computed without deduplication rather than deadlocking. Requests
+   * that wait on each other across threads aren't detected, so they must not form a cycle.
    */
   int getOrCompute(Object key, IdComputer computer) throws IOException, InterruptedException {
     Shard shard = getShard(key);
@@ -96,7 +103,7 @@ final class EntryIdMap {
       InFlightEntry inFlight;
       boolean isOwner = false;
       synchronized (shard) {
-        int id = shard.ids.getOrDefault(key, EntryWriter.NO_ID);
+        int id = shard.ids.getInt(key);
         if (id != EntryWriter.NO_ID) {
           return id;
         }

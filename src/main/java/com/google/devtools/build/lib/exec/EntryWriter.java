@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.exec;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
 import com.google.protobuf.CodedOutputStream;
@@ -24,7 +25,6 @@ import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import javax.annotation.Nullable;
 
@@ -35,9 +35,11 @@ import javax.annotation.Nullable;
  * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
  * lock-free linked list that the writer thread consumes in order. An entry's ID is derived from
  * its position in that list: each node records how many IDs precede it, and a node is appended by
- * a single compare-and-swap on its predecessor, which fixes both its place in the log and its ID at
- * once. So IDs are consecutive in log order, and an ID only exists once its entry is in the log,
- * which ensures that an entry is written after every entry it references.
+ * a compare-and-set of its predecessor's {@code next} field from null to the node, which fixes both
+ * its place in the log and its ID at once. {@code tail} only records a recent node to start from,
+ * so moving it is best effort and any thread may do it. So IDs are consecutive in log order, and an
+ * ID only exists once its entry is in the log, which ensures that an entry is written after every
+ * entry it references.
  */
 final class EntryWriter {
 
@@ -82,20 +84,37 @@ final class EntryWriter {
 
   // The last node appended, or one of its recent predecessors (appenders help it catch up). Only
   // the writer thread knows the start of the list, so that written nodes can be garbage collected.
-  @SuppressWarnings("unused") // accessed through TAIL
+  //
+  // Read through TAIL.getAcquire, since appending only needs acquire ordering (a plain volatile
+  // read asks for more). Error Prone can't see VarHandle accesses, so it reports it as unused.
+  @SuppressWarnings("unused")
   private volatile Node tail;
 
   private volatile boolean closed = false;
-  private final AtomicReference<Throwable> failure = new AtomicReference<>();
+  // The first IOException or RuntimeException from writing or closing the log, with later ones
+  // suppressed. Errors aren't recorded: they reach the writer thread's uncaught exception handler.
+  // Only used by the writer thread, and by close() once that thread has finished.
+  @Nullable private Exception failure;
   private final OutputStream out;
+  // Buffers writes to out: entries are written in several small pieces, and each write to a
+  // compressor is a native call. Only used by the writer thread.
+  private final CodedOutputStream coded;
   private final Thread writerThread;
+
+  // The last node the writer thread has written, and the only reference to where it is in the list,
+  // so that nodes before it can be garbage collected. A local variable or the thread's Runnable
+  // would keep the start of the list reachable for as long as the thread runs. Only used by the
+  // writer thread, after its initial value.
+  private Node written;
 
   /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
   EntryWriter(String name, OutputStream out) {
     this.out = out;
+    this.coded = CodedOutputStream.newInstance(out, /* bufferSize= */ 64 * 1024);
     Node start = new Node(/* bodyWithoutId= */ null);
     this.tail = start;
-    this.writerThread = new Thread(() -> writeAll(start), "exec-log-writer:" + name);
+    this.written = start;
+    this.writerThread = new Thread(this::writeAll, "exec-log-writer:" + name);
     writerThread.start();
   }
 
@@ -135,6 +154,7 @@ final class EntryWriter {
       // can be updated freely on every attempt.
       node.idCount = last.idCount + (withId ? 1 : 0);
       node.id = withId ? node.idCount : NO_ID;
+      // Linking the node appends it; advancing the tail afterwards is only an optimization.
       if (NEXT.compareAndSet(last, null, node)) {
         TAIL.compareAndSet(this, last, node);
         return node.id;
@@ -143,8 +163,7 @@ final class EntryWriter {
   }
 
   /** Runs on the writer thread: writes nodes in list order until closed and caught up. */
-  private void writeAll(Node start) {
-    Node written = start;
+  private void writeAll() {
     long idleWaitNanos = MIN_IDLE_WAIT_NANOS;
     try {
       while (true) {
@@ -157,28 +176,35 @@ final class EntryWriter {
               break;
             }
           } else {
+            // Caught up, so there's time to spare: don't leave written entries in the buffer.
+            flush();
+            // Every entry must be written before close() returns, so interrupts are ignored. The
+            // flag is cleared because parkNanos returns immediately while it's set.
+            Thread.interrupted();
             LockSupport.parkNanos(this, idleWaitNanos);
             idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
             continue;
           }
         }
         idleWaitNanos = MIN_IDLE_WAIT_NANOS;
-        if (failure.get() == null) {
+        if (failure == null) {
           try {
             writeDelimited(next);
           } catch (IOException | RuntimeException e) {
-            // Like AsynchronousMessageOutputStream: drop later writes, report the failure on close.
-            failure.compareAndSet(null, e);
+            // The log may now end in a partial entry, so later entries are dropped rather than
+            // written after it. close() reports the failure.
+            recordFailure(e);
           }
         }
         next.bodyWithoutId = null;
         written = next;
       }
     } finally {
+      flush();
       try {
         out.close();
       } catch (IOException | RuntimeException e) {
-        failure.compareAndSet(null, e);
+        recordFailure(e);
       }
     }
   }
@@ -186,20 +212,46 @@ final class EntryWriter {
   /**
    * Writes a node in the same format as {@link ExecLogEntry#writeDelimitedTo}.
    *
-   * <p>This relies on serialized protocol buffer messages merging when written back to back: the
-   * entry is written as a message holding only the ID followed by the rest of the entry. The two
-   * set disjoint fields, so the result is exactly as long as serializing the entry with its ID.
+   * <p>The entry is written as its ID field followed by the rest of the entry. The ID is field 1,
+   * which a full serialization writes first, so this produces exactly the bytes of {@link
+   * ExecLogEntry#writeDelimitedTo} for the entry with its ID.
    */
   private void writeDelimited(Node node) throws IOException {
-    byte[] idPart =
-        node.id == NO_ID
-            ? new byte[0]
-            : ExecLogEntry.newBuilder().setId(node.id).build().toByteArray();
-    CodedOutputStream cos = CodedOutputStream.newInstance(out, /* bufferSize= */ 16);
-    cos.writeUInt32NoTag(idPart.length + node.bodyWithoutId.length);
-    cos.writeRawBytes(idPart);
-    cos.flush();
-    out.write(node.bodyWithoutId);
+    boolean hasId = node.id != NO_ID;
+    int idSize =
+        hasId ? CodedOutputStream.computeUInt32Size(ExecLogEntry.ID_FIELD_NUMBER, node.id) : 0;
+    coded.writeUInt32NoTag(idSize + node.bodyWithoutId.length);
+    if (hasId) {
+      coded.writeUInt32(ExecLogEntry.ID_FIELD_NUMBER, node.id);
+    }
+    coded.writeRawBytes(node.bodyWithoutId);
+  }
+
+  /**
+   * Writes buffered entries to the output stream without flushing it, unless a failure means
+   * they're dropped.
+   */
+  private void flush() {
+    if (failure == null) {
+      try {
+        coded.flush();
+      } catch (IOException | RuntimeException e) {
+        recordFailure(e);
+      }
+    }
+  }
+
+  private void recordFailure(Exception e) {
+    if (failure == null) {
+      failure = e;
+    } else {
+      failure.addSuppressed(e);
+    }
+  }
+
+  @VisibleForTesting
+  Object tailForTesting() {
+    return tail;
   }
 
   /**
@@ -213,11 +265,10 @@ final class EntryWriter {
     closed = true;
     LockSupport.unpark(writerThread);
     Uninterruptibles.joinUninterruptibly(writerThread);
-    @Nullable Throwable t = failure.get();
-    if (t instanceof IOException e) {
+    if (failure instanceof IOException e) {
       throw e;
     }
-    if (t instanceof RuntimeException e) {
+    if (failure instanceof RuntimeException e) {
       throw e;
     }
   }

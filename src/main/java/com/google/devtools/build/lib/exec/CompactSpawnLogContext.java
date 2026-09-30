@@ -60,7 +60,6 @@ import com.google.devtools.build.lib.vfs.XattrProvider;
 import com.google.errorprone.annotations.CheckReturnValue;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -183,16 +182,12 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     this.xattrProvider = xattrProvider;
     this.invocationId = invocationId;
     this.reporter = reporter;
-    this.entryWriter = new EntryWriter(outputPath.toString(), getOutputStream(outputPath));
+    this.entryWriter =
+        new EntryWriter(
+            outputPath.toString(),
+            new ZstdOutputStream(new BufferedOutputStream(outputPath.getOutputStream())));
 
     logInvocation();
-  }
-
-  private static OutputStream getOutputStream(Path path) throws IOException {
-    // Buffer in front of the compressor: entries are written in several small pieces, and each
-    // write to it is a native call. The writer thread limits the log's throughput, so this matters.
-    return new BufferedOutputStream(
-        new ZstdOutputStream(new BufferedOutputStream(path.getOutputStream())), 64 * 1024);
   }
 
   private void logInvocation() throws IOException, InterruptedException {

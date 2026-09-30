@@ -17,18 +17,24 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertThrows;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.testing.GcFinalization;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -38,6 +44,12 @@ import org.junit.runners.JUnit4;
 public final class EntryWriterTest {
   private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
   private final EntryWriter writer = new EntryWriter("test", bytes);
+
+  @After
+  public void closeWriter() throws Exception {
+    // Stops the writer thread in tests that don't close the writer. Closing again is harmless.
+    writer.close();
+  }
 
   /** An entry whose serialization is roughly {@code size} bytes. */
   private static ExecLogEntry.Builder entryOfSize(int size) {
@@ -92,6 +104,28 @@ public final class EntryWriterTest {
     assertThat(read.stream().map(ExecLogEntry::getId)).containsExactly(1, EntryWriter.NO_ID, 2)
         .inOrder();
     assertThat(read.get(1)).isEqualTo(spawn.build());
+  }
+
+  @Test
+  public void bytesMatchWriteDelimitedTo() throws Exception {
+    // IDs cross the 1-byte varint boundary (128), and body sizes cross it for the length prefix.
+    // One entry is larger than the writer's 64 KiB buffer.
+    ByteArrayOutputStream expected = new ByteArrayOutputStream();
+    for (int i = 0; i < 200; i++) {
+      ExecLogEntry.Builder entry = entryOfSize(i == 100 ? 100_000 : i * 3);
+      if (i % 5 == 0) {
+        entry.build().writeDelimitedTo(expected);
+        writer.writeWithoutId(entry);
+      } else {
+        ExecLogEntry.Builder withoutId = entry.clone();
+        int id = writer.writeWithId(withoutId);
+        entry.setId(id).build().writeDelimitedTo(expected);
+      }
+    }
+
+    writer.close();
+
+    assertThat(bytes.toByteArray()).isEqualTo(expected.toByteArray());
   }
 
   @Test
@@ -162,12 +196,100 @@ public final class EntryWriterTest {
               public void write(int b) throws IOException {
                 throw new IOException("disk full");
               }
+
+              @Override
+              public void close() throws IOException {
+                throw new IOException("close failed");
+              }
             });
     failing.writeWithId(entryOfSize(10));
     failing.writeWithId(entryOfSize(10));
 
     IOException e = assertThrows(IOException.class, failing::close);
     assertThat(e).hasMessageThat().isEqualTo("disk full");
+    assertThat(e.getSuppressed()).hasLength(1);
+    assertThat(e.getSuppressed()[0]).hasMessageThat().isEqualTo("close failed");
+  }
+
+  @Test
+  public void closeWaitsForTheWriterWhenInterrupted() throws Exception {
+    // The writer thread blocks on its first write until released, so it's still writing when the
+    // interrupted close() starts.
+    CountDownLatch released = new CountDownLatch(1);
+    EntryWriter blocked =
+        new EntryWriter(
+            "blocked",
+            new OutputStream() {
+              @Override
+              public void write(int b) {
+                Uninterruptibles.awaitUninterruptibly(released);
+                bytes.write(b);
+              }
+
+              @Override
+              public void write(byte[] b, int off, int len) {
+                Uninterruptibles.awaitUninterruptibly(released);
+                bytes.write(b, off, len);
+              }
+            });
+    blocked.writeWithId(entryOfSize(10));
+    Thread releaser =
+        new Thread(
+            () -> {
+              Uninterruptibles.sleepUninterruptibly(Duration.ofMillis(100));
+              released.countDown();
+            });
+    releaser.start();
+
+    Thread.currentThread().interrupt();
+    try {
+      blocked.close();
+    } finally {
+      // Also clears the interrupt, so that it doesn't leak into later tests.
+      assertThat(Thread.interrupted()).isTrue();
+    }
+
+    assertThat(released.getCount()).isEqualTo(0);
+    ExecLogEntry entry =
+        ExecLogEntry.parseDelimitedFrom(new ByteArrayInputStream(bytes.toByteArray()));
+    assertThat(entry.getId()).isEqualTo(1);
+    releaser.join();
+  }
+
+  @Test
+  public void writerThreadIgnoresInterrupts() throws Exception {
+    Thread writerThread =
+        Thread.getAllStackTraces().keySet().stream()
+            .filter(t -> t.getName().equals("exec-log-writer:test"))
+            .findFirst()
+            .orElseThrow();
+
+    writerThread.interrupt();
+    // An idle writer clears the interrupt before waiting again, instead of spinning with it set.
+    while (writerThread.isInterrupted()) {
+      Thread.sleep(1);
+    }
+
+    assertThat(writer.writeWithId(entryOfSize(10))).isEqualTo(1);
+    assertThat(closeAndRead()).hasSize(1);
+  }
+
+  @Test
+  public void writtenEntriesCanBeGarbageCollected() throws Exception {
+    // Before anything is written, the tail is the node the list starts from.
+    WeakReference<Object> start = new WeakReference<>(writer.tailForTesting());
+    ByteArrayOutputStream expected = new ByteArrayOutputStream();
+    for (int i = 0; i < 1000; i++) {
+      ExecLogEntry.Builder entry = entryOfSize(100);
+      entry.clone().setId(i + 1).build().writeDelimitedTo(expected);
+      writer.writeWithId(entry);
+    }
+    while (bytes.size() < expected.size()) {
+      Thread.sleep(1);
+    }
+
+    // The writer is still open but has written everything, so it should only retain its last node.
+    GcFinalization.awaitClear(start);
   }
 
   @Test
