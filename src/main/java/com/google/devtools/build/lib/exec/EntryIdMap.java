@@ -88,7 +88,8 @@ final class EntryIdMap {
    * therefore reference it.
    *
    * <p>{@code computer} may request IDs for other keys. If it (transitively) requests {@code key}
-   * itself, the nested request is computed without deduplication rather than deadlocking.
+   * itself, the nested request is computed without deduplication rather than deadlocking. Requests
+   * that wait on each other across threads aren't detected, so they must not form a cycle.
    */
   int getOrCompute(Object key, IdComputer computer) throws IOException, InterruptedException {
     Shard shard = getShard(key);
