@@ -249,6 +249,24 @@ public final class EntryWriterTest {
   }
 
   @Test
+  public void writerThreadIgnoresInterrupts() throws Exception {
+    Thread writerThread =
+        Thread.getAllStackTraces().keySet().stream()
+            .filter(t -> t.getName().equals("exec-log-writer:test"))
+            .findFirst()
+            .orElseThrow();
+
+    writerThread.interrupt();
+    // An idle writer clears the interrupt before waiting again, instead of spinning with it set.
+    while (writerThread.isInterrupted()) {
+      Thread.sleep(1);
+    }
+
+    assertThat(writer.writeWithId(entryOfSize(10))).isEqualTo(1);
+    assertThat(closeAndRead()).hasSize(1);
+  }
+
+  @Test
   public void writtenEntriesCanBeGarbageCollected() throws Exception {
     // Before anything is written, the tail is the node the list starts from.
     WeakReference<Object> start = new WeakReference<>(writer.tailForTesting());

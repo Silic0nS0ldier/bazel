@@ -170,6 +170,9 @@ final class EntryWriter {
               break;
             }
           } else {
+            // Every entry must be written before close() returns, so interrupts are ignored. The
+            // flag is cleared because parkNanos returns immediately while it's set.
+            Thread.interrupted();
             LockSupport.parkNanos(this, idleWaitNanos);
             idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
             continue;
