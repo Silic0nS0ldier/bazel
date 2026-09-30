@@ -35,9 +35,11 @@ import javax.annotation.Nullable;
  * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
  * lock-free linked list that the writer thread consumes in order. An entry's ID is derived from
  * its position in that list: each node records how many IDs precede it, and a node is appended by
- * a single compare-and-swap on its predecessor, which fixes both its place in the log and its ID at
- * once. So IDs are consecutive in log order, and an ID only exists once its entry is in the log,
- * which ensures that an entry is written after every entry it references.
+ * a compare-and-set of its predecessor's {@code next} field from null to the node, which fixes both
+ * its place in the log and its ID at once. {@code tail} only records a recent node to start from,
+ * so moving it is best effort and any thread may do it. So IDs are consecutive in log order, and an
+ * ID only exists once its entry is in the log, which ensures that an entry is written after every
+ * entry it references.
  */
 final class EntryWriter {
 
@@ -138,6 +140,7 @@ final class EntryWriter {
       // can be updated freely on every attempt.
       node.idCount = last.idCount + (withId ? 1 : 0);
       node.id = withId ? node.idCount : NO_ID;
+      // Linking the node appends it; advancing the tail afterwards is only an optimization.
       if (NEXT.compareAndSet(last, null, node)) {
         TAIL.compareAndSet(this, last, node);
         return node.id;
@@ -190,9 +193,9 @@ final class EntryWriter {
   /**
    * Writes a node in the same format as {@link ExecLogEntry#writeDelimitedTo}.
    *
-   * <p>This relies on serialized protocol buffer messages merging when written back to back: the
-   * entry is written as a message holding only the ID followed by the rest of the entry. The two
-   * set disjoint fields, so the result is exactly as long as serializing the entry with its ID.
+   * <p>The entry is written as a message holding only the ID followed by the rest of the entry. The
+   * ID is field 1, which a full serialization writes first, so this produces exactly the bytes of
+   * {@link ExecLogEntry#writeDelimitedTo} for the entry with its ID.
    */
   private void writeDelimited(Node node) throws IOException {
     byte[] idPart =

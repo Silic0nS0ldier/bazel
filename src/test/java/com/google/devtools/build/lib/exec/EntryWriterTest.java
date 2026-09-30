@@ -95,6 +95,27 @@ public final class EntryWriterTest {
   }
 
   @Test
+  public void bytesMatchWriteDelimitedTo() throws Exception {
+    // IDs cross the 1-byte varint boundary (128), and body sizes cross it for the length prefix.
+    ByteArrayOutputStream expected = new ByteArrayOutputStream();
+    for (int i = 0; i < 200; i++) {
+      ExecLogEntry.Builder entry = entryOfSize(i * 3);
+      if (i % 5 == 0) {
+        entry.build().writeDelimitedTo(expected);
+        writer.writeWithoutId(entry);
+      } else {
+        ExecLogEntry.Builder withoutId = entry.clone();
+        int id = writer.writeWithId(withoutId);
+        entry.setId(id).build().writeDelimitedTo(expected);
+      }
+    }
+
+    writer.close();
+
+    assertThat(bytes.toByteArray()).isEqualTo(expected.toByteArray());
+  }
+
+  @Test
   public void concurrentWritesHaveConsecutiveIdsInFileOrder() throws Exception {
     int numThreads = 16;
     int perThread = 2000;
