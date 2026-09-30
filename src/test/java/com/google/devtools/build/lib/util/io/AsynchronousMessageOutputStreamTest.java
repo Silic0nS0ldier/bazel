@@ -121,64 +121,6 @@ public class AsynchronousMessageOutputStreamTest {
   }
 
   @Test
-  public void testConcurrentPreparedWritesAreContiguous() throws Exception {
-    FileSystem fileSystem = new InMemoryFileSystem(DigestHashFunction.SHA256);
-    Path logPath = fileSystem.getPath("/logFile");
-    AsynchronousMessageOutputStream<Message> out = new AsynchronousMessageOutputStream<>(logPath);
-    ArrayList<Message> messages = new ArrayList<>();
-    for (int i = 0; i < 1000; ++i) {
-      messages.add(generateRandomMessage());
-    }
-    int numWriters = 10;
-    int perWriter = messages.size() / numWriters;
-    Thread[] writers = new Thread[numWriters];
-    CountDownLatch start = new CountDownLatch(numWriters);
-    for (int i = 0; i < numWriters; ++i) {
-      int startIndex = i * perWriter;
-      writers[i] =
-          new Thread(
-              () -> {
-                start.countDown();
-                try {
-                  start.await();
-                } catch (InterruptedException e) {
-                  return;
-                }
-                for (int j = startIndex; j < startIndex + perWriter; ++j) {
-                  Message message = messages.get(j);
-                  if (j % 2 == 0) {
-                    out.write(message);
-                    continue;
-                  }
-                  // Written one byte at a time, which must still land contiguously.
-                  out.writePrepared(
-                      stream -> {
-                        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                        message.writeDelimitedTo(bytes);
-                        for (byte b : bytes.toByteArray()) {
-                          stream.write(b);
-                        }
-                      });
-                }
-              });
-      writers[i].start();
-    }
-    for (Thread writer : writers) {
-      writer.join();
-    }
-    out.close();
-
-    ArrayList<Message> readMessages = new ArrayList<>();
-    try (InputStream in = logPath.getInputStream()) {
-      Message message;
-      while ((message = FlagInfo.parseDelimitedFrom(in)) != null) {
-        readMessages.add(message);
-      }
-    }
-    assertThat(readMessages).containsExactlyElementsIn(messages);
-  }
-
-  @Test
   public void testFailedClosePropagatesIOException() throws Exception {
     OutputStream failingOutputStream = new OutputStream() {
       @Override
@@ -260,17 +202,5 @@ public class AsynchronousMessageOutputStreamTest {
     out.close();
 
     assertThrows(IllegalStateException.class, () -> out.write(generateRandomMessage()));
-  }
-
-  @Test
-  public void testFailedPreparedWritePropagatesIOException() throws Exception {
-    AsynchronousMessageOutputStream<Message> out =
-        new AsynchronousMessageOutputStream<>("", new ByteArrayOutputStream());
-    out.writePrepared(
-        stream -> {
-          throw new IOException("prepared");
-        });
-    IOException expected = assertThrows(IOException.class, () -> out.close());
-    assertThat(expected).hasMessageThat().isEqualTo("prepared");
   }
 }

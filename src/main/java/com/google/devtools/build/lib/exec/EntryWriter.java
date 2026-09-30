@@ -14,22 +14,30 @@
 package com.google.devtools.build.lib.exec;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
-import com.google.devtools.build.lib.util.io.AsynchronousMessageOutputStream;
-import com.google.devtools.build.lib.util.io.AsynchronousMessageOutputStream.PreparedMessage;
 import com.google.protobuf.CodedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import javax.annotation.concurrent.GuardedBy;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import javax.annotation.Nullable;
 
 /**
- * Writes {@link CompactSpawnLogContext} entries, assigning IDs that are consecutive in the order
- * entries appear in the log, as {@link SpawnLogReconstructor} requires.
+ * Writes {@link CompactSpawnLogContext} entries on a dedicated thread, assigning IDs that are
+ * consecutive in the order entries appear in the log, as {@link SpawnLogReconstructor} requires.
  *
- * <p>Safe to call from many threads at once. Assigning an ID and handing the entry to the output
- * stream must happen atomically, so they share a lock; everything else, including serialization,
- * happens outside it, so that the lock stays cheap to hold even for very large entries.
+ * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
+ * lock-free linked list that the writer thread consumes in order. An entry's ID is derived from
+ * its position in that list: each node records how many IDs precede it, and a node is appended by
+ * a single compare-and-swap on its predecessor, which fixes both its place in the log and its ID at
+ * once. So IDs are consecutive in log order, and an ID only exists once its entry is in the log,
+ * which ensures that an entry is written after every entry it references.
  */
 final class EntryWriter {
 
@@ -39,24 +47,67 @@ final class EntryWriter {
    */
   static final int NO_ID = 0;
 
-  private final AsynchronousMessageOutputStream<ExecLogEntry> out;
+  /** An entry in the log, serialized without its ID. */
+  private static final class Node {
+    // Written before the node is published by the compare-and-swap that appends it.
+    private byte[] bodyWithoutId;
+    private int id;
+    // The number of IDs assigned up to and including this node.
+    private int idCount;
 
-  @GuardedBy("this")
-  private int nextId = 1;
+    private volatile Node next;
 
-  EntryWriter(AsynchronousMessageOutputStream<ExecLogEntry> out) {
+    private Node(byte[] bodyWithoutId) {
+      this.bodyWithoutId = bodyWithoutId;
+    }
+  }
+
+  private static final VarHandle NEXT;
+  private static final VarHandle TAIL;
+
+  static {
+    try {
+      MethodHandles.Lookup lookup = MethodHandles.lookup();
+      NEXT = lookup.findVarHandle(Node.class, "next", Node.class);
+      TAIL = lookup.findVarHandle(EntryWriter.class, "tail", Node.class);
+    } catch (ReflectiveOperationException e) {
+      throw new ExceptionInInitializerError(e);
+    }
+  }
+
+  // How long the writer thread waits before checking for new entries again once it has caught up.
+  // Waiting with a timeout means appending never needs to wake it up.
+  private static final long MIN_IDLE_WAIT_NANOS = TimeUnit.MICROSECONDS.toNanos(50);
+  private static final long MAX_IDLE_WAIT_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
+
+  // The last node appended, or one of its recent predecessors (appenders help it catch up). Only
+  // the writer thread knows the start of the list, so that written nodes can be garbage collected.
+  @SuppressWarnings("unused") // accessed through TAIL
+  private volatile Node tail;
+
+  private volatile boolean closed = false;
+  private final AtomicReference<Throwable> failure = new AtomicReference<>();
+  private final OutputStream out;
+  private final Thread writerThread;
+
+  /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
+  EntryWriter(String name, OutputStream out) {
     this.out = out;
+    Node start = new Node(/* bodyWithoutId= */ null);
+    this.tail = start;
+    this.writerThread = new Thread(() -> writeAll(start), "exec-log-writer:" + name);
+    writerThread.start();
   }
 
   /**
    * Writes an entry that other entries won't reference.
    *
-   * <p>Doesn't take the lock: such an entry doesn't affect ID assignment, and callers only write it
-   * after every entry it references.
+   * <p>Callers must only write it after every entry it references, which holds as long as it's
+   * written after the calls that returned their IDs.
    */
   void writeWithoutId(ExecLogEntry.Builder entry) {
     checkArgument(entry.getId() == NO_ID, "entry already has an ID: %s", entry);
-    out.write(entry.build());
+    append(entry.build().toByteArray(), /* withId= */ false);
   }
 
   /**
@@ -66,37 +117,108 @@ final class EntryWriter {
    */
   int writeWithId(ExecLogEntry.Builder entry) {
     checkArgument(entry.getId() == NO_ID, "entry already has an ID: %s", entry);
-    // Serialize the (possibly very large) entry outside the lock.
-    byte[] bodyWithoutId = entry.build().toByteArray();
-    synchronized (this) {
-      int id = nextId++;
-      out.writePrepared(new EntryWithId(id, bodyWithoutId));
-      return id;
+    return append(entry.build().toByteArray(), /* withId= */ true);
+  }
+
+  private int append(byte[] bodyWithoutId, boolean withId) {
+    checkState(!closed, "writing to a closed exec log");
+    Node node = new Node(bodyWithoutId);
+    while (true) {
+      Node last = (Node) TAIL.getAcquire(this);
+      Node next = last.next;
+      if (next != null) {
+        // Another thread appended a node but hasn't advanced the tail yet; help it.
+        TAIL.compareAndSet(this, last, next);
+        continue;
+      }
+      // The node isn't visible to other threads until the compare-and-swap below succeeds, so it
+      // can be updated freely on every attempt.
+      node.idCount = last.idCount + (withId ? 1 : 0);
+      node.id = withId ? node.idCount : NO_ID;
+      if (NEXT.compareAndSet(last, null, node)) {
+        TAIL.compareAndSet(this, last, node);
+        return node.id;
+      }
+    }
+  }
+
+  /** Runs on the writer thread: writes nodes in list order until closed and caught up. */
+  private void writeAll(Node start) {
+    Node written = start;
+    long idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+    try {
+      while (true) {
+        Node next = written.next;
+        if (next == null) {
+          if (closed) {
+            // Appends happen before close, so anything appended is visible by now.
+            next = written.next;
+            if (next == null) {
+              break;
+            }
+          } else {
+            LockSupport.parkNanos(this, idleWaitNanos);
+            idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
+            continue;
+          }
+        }
+        idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+        if (failure.get() == null) {
+          try {
+            writeDelimited(next);
+          } catch (IOException | RuntimeException e) {
+            // Like AsynchronousMessageOutputStream: drop later writes, report the failure on close.
+            failure.compareAndSet(null, e);
+          }
+        }
+        next.bodyWithoutId = null;
+        written = next;
+      }
+    } finally {
+      try {
+        out.close();
+      } catch (IOException | RuntimeException e) {
+        failure.compareAndSet(null, e);
+      }
     }
   }
 
   /**
-   * An entry serialized without its ID, which is added when it's written.
+   * Writes a node in the same format as {@link ExecLogEntry#writeDelimitedTo}.
    *
    * <p>This relies on serialized protocol buffer messages merging when written back to back: the
    * entry is written as a message holding only the ID followed by the rest of the entry. The two
    * set disjoint fields, so the result is exactly as long as serializing the entry with its ID.
    */
-  private record EntryWithId(int id, byte[] bodyWithoutId)
-      implements PreparedMessage<ExecLogEntry> {
-    @Override
-    public void writeDelimitedTo(OutputStream out) throws IOException {
-      byte[] idPart = ExecLogEntry.newBuilder().setId(id).build().toByteArray();
-      CodedOutputStream cos = CodedOutputStream.newInstance(out, /* bufferSize= */ 16);
-      cos.writeUInt32NoTag(idPart.length + bodyWithoutId.length);
-      cos.writeRawBytes(idPart);
-      cos.flush();
-      out.write(bodyWithoutId);
-    }
+  private void writeDelimited(Node node) throws IOException {
+    byte[] idPart =
+        node.id == NO_ID
+            ? new byte[0]
+            : ExecLogEntry.newBuilder().setId(node.id).build().toByteArray();
+    CodedOutputStream cos = CodedOutputStream.newInstance(out, /* bufferSize= */ 16);
+    cos.writeUInt32NoTag(idPart.length + node.bodyWithoutId.length);
+    cos.writeRawBytes(idPart);
+    cos.flush();
+    out.write(node.bodyWithoutId);
   }
 
-  /** Closes the output stream once all pending writes have completed. */
+  /**
+   * Waits for all entries to be written, then closes the output stream.
+   *
+   * <p>Must only be called once all writes have returned.
+   *
+   * @throws IOException if writing or closing failed
+   */
   void close() throws IOException {
-    out.close();
+    closed = true;
+    LockSupport.unpark(writerThread);
+    Uninterruptibles.joinUninterruptibly(writerThread);
+    @Nullable Throwable t = failure.get();
+    if (t instanceof IOException e) {
+      throw e;
+    }
+    if (t instanceof RuntimeException e) {
+      throw e;
+    }
   }
 }
