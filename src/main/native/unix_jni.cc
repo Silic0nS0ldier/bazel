@@ -266,6 +266,56 @@ Java_com_google_devtools_build_lib_unix_NativePosixFiles_readlink(JNIEnv *env,
   return NewStringLatin1(env, target);
 }
 
+// Opens a file for reading without creating a java.io.FileDescriptor, which would register a
+// cleanup action with the JDK's shared Cleaner (and take its lock) on open and close.
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_devtools_build_lib_unix_NativePosixFiles_openRead(JNIEnv *env,
+                                                     jclass clazz,
+                                                     jstring path) {
+  JStringLatin1Holder path_chars(env, path);
+  if (env->ExceptionOccurred()) {
+    return -1;
+  }
+  int fd;
+  RESTARTABLE(open(path_chars, O_RDONLY | O_CLOEXEC), fd);
+  if (fd == -1) {
+    POST_EXCEPTION_FROM_ERRNO(env, errno, path_chars);
+  }
+  return fd;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_google_devtools_build_lib_unix_NativePosixFiles_read(JNIEnv *env,
+                                                 jclass clazz,
+                                                 jint fd,
+                                                 jbyteArray buffer,
+                                                 jint offset,
+                                                 jint length) {
+  // Read into a native buffer rather than pinning the Java array across a blocking syscall.
+  char chunk[64 * 1024];
+  size_t to_read = static_cast<size_t>(length) < sizeof(chunk)
+                       ? static_cast<size_t>(length) : sizeof(chunk);
+  ssize_t n;
+  RESTARTABLE(read(fd, chunk, to_read), n);
+  if (n == -1) {
+    POST_EXCEPTION_FROM_ERRNO(env, errno, "read");
+    return -1;
+  }
+  env->SetByteArrayRegion(buffer, offset, static_cast<jsize>(n),
+                          reinterpret_cast<const jbyte*>(chunk));
+  return static_cast<jint>(n);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_google_devtools_build_lib_unix_NativePosixFiles_close(JNIEnv *env,
+                                                  jclass clazz,
+                                                  jint fd) {
+  // Don't retry on EINTR: on Linux the descriptor is released even then.
+  if (close(fd) == -1 && errno != EINTR) {
+    POST_EXCEPTION_FROM_ERRNO(env, errno, "close");
+  }
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_google_devtools_build_lib_unix_NativePosixFiles_chmod(JNIEnv *env,
                                                   jclass clazz,

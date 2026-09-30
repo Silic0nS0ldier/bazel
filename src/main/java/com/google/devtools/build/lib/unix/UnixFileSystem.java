@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.unix;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.hash.Hasher;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
@@ -401,11 +402,45 @@ public class UnixFileSystem extends DiskBackedFileSystem {
     String name = path.toString();
     long startTime = Profiler.nanoTimeMaybe();
     try {
-      return super.getDigest(path);
+      return digestWithoutFileDescriptor(name);
     } finally {
       profiler.logSimpleTask(startTime, ProfilerTask.VFS_MD5, name);
     }
   }
+
+  /**
+   * Digests a file's contents through a raw file descriptor.
+   *
+   * <p>Opening a {@link java.io.FileInputStream} registers a cleanup action with the JDK's shared
+   * {@link java.lang.ref.Cleaner}, and closing it removes the action again, both under a single
+   * JVM-wide lock. Digests are computed for many files at once (for example, every source file on a
+   * cold server), so that lock would otherwise convoy.
+   */
+  private byte[] digestWithoutFileDescriptor(String name) throws IOException {
+    Hasher hasher = getDigestFunction().getHashFunction().newHasher();
+    byte[] buffer = new byte[DIGEST_BUFFER_SIZE];
+    var comp = Blocker.begin();
+    try {
+      int fd = NativePosixFiles.openRead(name);
+      try {
+        while (true) {
+          int n = NativePosixFiles.read(fd, buffer, 0, buffer.length);
+          if (n <= 0) {
+            break;
+          }
+          hasher.putBytes(buffer, 0, n);
+        }
+      } finally {
+        NativePosixFiles.close(fd);
+      }
+    } finally {
+      Blocker.end(comp);
+    }
+    return hasher.hash().asBytes();
+  }
+
+  // Matches the buffer Guava's ByteSource uses when digesting through an InputStream.
+  private static final int DIGEST_BUFFER_SIZE = 8192;
 
   @Override
   public void createFSDependentHardLink(PathFragment linkPath, PathFragment originalPath)

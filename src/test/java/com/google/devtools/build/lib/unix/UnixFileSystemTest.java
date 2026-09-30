@@ -17,6 +17,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assume.assumeTrue;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
@@ -28,6 +29,7 @@ import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.SymlinkAwareFileSystemTest;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,6 +52,43 @@ public class UnixFileSystemTest extends SymlinkAwareFileSystemTest {
   }
 
   // Most tests are just inherited from FileSystemTest.
+
+  @Test
+  public void testGetDigestMatchesInputStreamAtBufferBoundaries() throws Exception {
+    for (int size : new int[] {1, 8191, 8192, 8193, 65536, 100001}) {
+      byte[] content = new byte[size];
+      for (int i = 0; i < size; i++) {
+        content[i] = (byte) (i * 31);
+      }
+      FileSystemUtils.writeContent(xFile, content);
+
+      byte[] expected;
+      try (InputStream in = xFile.getInputStream()) {
+        expected = digestHashFunction.getHashFunction().hashBytes(in.readAllBytes()).asBytes();
+      }
+      assertWithMessage("size %s", size).that(xFile.getDigest()).isEqualTo(expected);
+    }
+  }
+
+  @Test
+  public void testGetDigestOfMissingFileThrowsFileNotFoundException() {
+    Path missing = absolutize("missing-file");
+    assertThrows(FileNotFoundException.class, missing::getDigest);
+  }
+
+  @Test
+  public void testGetDigestOfUnreadableFileThrowsFileAccessException() throws Exception {
+    // Root can read regardless of permissions.
+    assumeTrue(!"root".equals(System.getProperty("user.name")));
+    FileSystemUtils.writeContent(xFile, new byte[] {1, 2, 3});
+    xFile.setReadable(false);
+    assertThrows(FileAccessException.class, xFile::getDigest);
+  }
+
+  @Test
+  public void testGetDigestOfDirectoryThrowsIOException() {
+    assertThrows(IOException.class, xEmptyDirectory::getDigest);
+  }
 
   @Test
   public void testPermissions() throws Exception {
