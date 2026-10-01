@@ -313,6 +313,7 @@ java_library(
         "//third_party/java/guava:collect",
         "//third_party/java/guava:hash",
         "//third_party/java/jsr305_annotations",
+        "//third_party/java/protobuf:protobuf_lite",
         "//third_party/java/protobuf/util:time",
         "@remoteapis//:build_bazel_remote_execution_v2_remote_execution_java_proto",
     ],
