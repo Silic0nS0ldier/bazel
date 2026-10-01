@@ -29,7 +29,7 @@ import javax.annotation.concurrent.GuardedBy;
 
 /**
  * A concurrent map from keys to the IDs of {@link CompactSpawnLogContext} entries, which ensures
- * that each entry is computed at most once.
+ * that requests for the same key share one entry rather than each writing their own.
  *
  * <p>Computing an entry can be expensive (digesting param files, traversing directories, recursing
  * into nested sets), so no lock is held while it runs: other requests for the same key wait for it
