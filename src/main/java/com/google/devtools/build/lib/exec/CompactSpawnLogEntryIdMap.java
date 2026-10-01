@@ -190,10 +190,9 @@ final class CompactSpawnLogEntryIdMap {
         return compute(key, computer, shard, inFlight);
       }
       if (inFlight.owner == Thread.currentThread()) {
-        // This thread is already computing the entry further up the stack, so waiting would
-        // deadlock. This isn't expected to happen, but keys are shared between entry types (a file
-        // and a runfiles tree could have the same path), so compute a separate entry as the
-        // previous single-lock implementation would have.
+        // Waiting on this thread's own computation would deadlock. It's unlikely, but keys are
+        // shared between entry types (a file and a runfiles tree could have the same path), so
+        // compute a separate entry, as a single reentrant lock would.
         return computer.compute();
       }
       id = await(inFlight);
