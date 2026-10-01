@@ -43,7 +43,7 @@ import javax.annotation.concurrent.GuardedBy;
  * java.util.concurrent.ConcurrentHashMap}, because the map may hold millions of entries and the
  * latter would use several times more memory per entry.
  */
-final class EntryIdMap {
+final class CompactSpawnLogEntryIdMap {
 
   /** Computes an entry, writes it to the log and returns its ID. */
   @FunctionalInterface
@@ -81,7 +81,8 @@ final class EntryIdMap {
     private final HashMap<Object, InFlightEntry> inFlight = new HashMap<>();
 
     /**
-     * Returns the ID recorded for {@code key}, or {@link EntryWriter#NO_ID} if there is none yet.
+     * Returns the ID recorded for {@code key}, or {@link CompactSpawnLogEntryWriter#NO_ID} if there
+     * is none yet.
      *
      * <p>Doesn't lock. Without the shard's lock, it may miss an ID that is being recorded
      * concurrently.
@@ -92,7 +93,7 @@ final class EntryIdMap {
       for (int i = hash(key) & mask; ; i = (i + 1) & mask) {
         Object k = t.keys.getAcquire(i);
         if (k == null) {
-          return EntryWriter.NO_ID;
+          return CompactSpawnLogEntryWriter.NO_ID;
         }
         if (k.equals(key)) {
           return t.ids[i];
@@ -143,7 +144,7 @@ final class EntryIdMap {
 
   private final Shard[] shards = new Shard[1 << SHARD_BITS];
 
-  EntryIdMap() {
+  CompactSpawnLogEntryIdMap() {
     for (int i = 0; i < shards.length; i++) {
       shards[i] = new Shard();
     }
@@ -165,7 +166,7 @@ final class EntryIdMap {
     Shard shard = getShard(key);
     // Nearly every request finds an ID recorded earlier, so look for one without locking first.
     int recorded = shard.get(key);
-    if (recorded != EntryWriter.NO_ID) {
+    if (recorded != CompactSpawnLogEntryWriter.NO_ID) {
       return recorded;
     }
     while (true) {
@@ -173,7 +174,7 @@ final class EntryIdMap {
       boolean isOwner = false;
       synchronized (shard) {
         int id = shard.get(key);
-        if (id != EntryWriter.NO_ID) {
+        if (id != CompactSpawnLogEntryWriter.NO_ID) {
           return id;
         }
         inFlight = shard.inFlight.get(key);
@@ -217,7 +218,7 @@ final class EntryIdMap {
     int id;
     try {
       id = computer.compute();
-      checkState(id != EntryWriter.NO_ID, "invalid ID for %s", key);
+      checkState(id != CompactSpawnLogEntryWriter.NO_ID, "invalid ID for %s", key);
     } catch (Throwable t) {
       synchronized (shard) {
         shard.inFlight.remove(key);

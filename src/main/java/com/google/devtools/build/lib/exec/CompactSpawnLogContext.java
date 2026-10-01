@@ -160,10 +160,10 @@ public class CompactSpawnLogContext extends SpawnLogContext {
   // Each key is either a NestedSet.Node or the String path of a file, directory, symlink or
   // runfiles tree.
   // Only entries that are likely to be referenced by future entries are stored.
-  private final EntryIdMap entryMap = new EntryIdMap();
+  private final CompactSpawnLogEntryIdMap entryMap = new CompactSpawnLogEntryIdMap();
 
   // Writes entries to the log, assigning their IDs.
-  private final EntryWriter entryWriter;
+  private final CompactSpawnLogEntryWriter entryWriter;
 
   public CompactSpawnLogContext(
       BufferedOutputStream out,
@@ -187,7 +187,8 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     this.compressionService = compressionService;
     this.invocationId = invocationId;
     this.reporter = reporter;
-    this.entryWriter = new EntryWriter(displayName, compressionService.newZstdOutputStream(out));
+    this.entryWriter =
+        new CompactSpawnLogEntryWriter(displayName, compressionService.newZstdOutputStream(out));
 
     logInvocation();
   }

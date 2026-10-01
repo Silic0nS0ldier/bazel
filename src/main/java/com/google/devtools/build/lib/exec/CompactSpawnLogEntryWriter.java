@@ -41,7 +41,7 @@ import javax.annotation.Nullable;
  * ID only exists once its entry is in the log, which ensures that an entry is written after every
  * entry it references.
  */
-final class EntryWriter {
+final class CompactSpawnLogEntryWriter {
 
   /**
    * The ID of no entry. In the log, an entry with this ID can't be referenced and a reference with
@@ -71,7 +71,7 @@ final class EntryWriter {
     try {
       MethodHandles.Lookup lookup = MethodHandles.lookup();
       NEXT = lookup.findVarHandle(Node.class, "next", Node.class);
-      TAIL = lookup.findVarHandle(EntryWriter.class, "tail", Node.class);
+      TAIL = lookup.findVarHandle(CompactSpawnLogEntryWriter.class, "tail", Node.class);
     } catch (ReflectiveOperationException e) {
       throw new ExceptionInInitializerError(e);
     }
@@ -108,7 +108,7 @@ final class EntryWriter {
   private Node written;
 
   /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
-  EntryWriter(String name, OutputStream out) {
+  CompactSpawnLogEntryWriter(String name, OutputStream out) {
     this.out = out;
     this.coded = CodedOutputStream.newInstance(out, /* bufferSize= */ 64 * 1024);
     Node start = new Node(/* bodyWithoutId= */ null);

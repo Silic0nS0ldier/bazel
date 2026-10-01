@@ -35,10 +35,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** Tests for {@link EntryIdMap}. */
+/** Tests for {@link CompactSpawnLogEntryIdMap}. */
 @RunWith(JUnit4.class)
-public final class EntryIdMapTest {
-  private final EntryIdMap map = new EntryIdMap();
+public final class CompactSpawnLogEntryIdMapTest {
+  private final CompactSpawnLogEntryIdMap map = new CompactSpawnLogEntryIdMap();
   private final AtomicInteger nextId = new AtomicInteger(1);
   private final ExecutorService executor = Executors.newCachedThreadPool();
 
@@ -50,7 +50,7 @@ public final class EntryIdMapTest {
   @Test
   public void computesOncePerKey() throws Exception {
     AtomicInteger calls = new AtomicInteger();
-    EntryIdMap.IdComputer computer =
+    CompactSpawnLogEntryIdMap.IdComputer computer =
         () -> {
           calls.incrementAndGet();
           return nextId.getAndIncrement();
@@ -70,7 +70,7 @@ public final class EntryIdMapTest {
     CountDownLatch ownerStarted = new CountDownLatch(1);
     CountDownLatch releaseOwner = new CountDownLatch(1);
     AtomicInteger calls = new AtomicInteger();
-    EntryIdMap.IdComputer computer =
+    CompactSpawnLogEntryIdMap.IdComputer computer =
         () -> {
           calls.incrementAndGet();
           ownerStarted.countDown();
