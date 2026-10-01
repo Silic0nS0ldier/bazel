@@ -32,10 +32,10 @@ import javax.annotation.concurrent.GuardedBy;
  * that each entry is computed at most once.
  *
  * <p>Computing an entry can be expensive (digesting param files, traversing directories, recursing
- * into nested sets), so it happens without holding any lock. Requests for a key whose entry is
- * being computed by another thread wait for that computation, while requests for other keys
- * proceed in parallel. A failed computation isn't remembered: the next request for the key,
- * including one that was waiting on the failed computation, computes it again.
+ * into nested sets), so no lock is held while it runs: other requests for the same key wait for it
+ * to finish, while requests for other keys proceed in parallel. A failed computation isn't
+ * remembered: the next request for the key, including one that was waiting on the failed
+ * computation, computes it again.
  *
  * <p>Nearly every lookup finds an existing entry, so those lookups don't lock. Only recording an
  * ID and tracking entries being computed lock, and the map is sharded so that those rarely contend.
