@@ -649,7 +649,21 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     return files;
   }
 
-  /** Expands a directory by traversing it on the filesystem. */
+  /**
+   * Expands a directory by traversing it on the filesystem.
+   *
+   * <p>Used for every directory that can't be expanded from Skyframe metadata: source directories,
+   * filesets, tree artifact inputs without metadata, and directory outputs. Skyframe walks a
+   * tracked source directory too, but keeps only a fingerprint of its files rather than the files
+   * themselves. Outputs are logged as soon as the spawn finishes, before Skyframe has built their
+   * {@link TreeArtifactValue}, so their metadata isn't available yet.
+   *
+   * <p>Every file found is digested from disk rather than from metadata. {@code DigestUtils}'s
+   * cache may avoid rehashing a file that Bazel digests elsewhere, but the walk itself isn't
+   * shared: Skyframe walks a source directory before the spawn runs and a directory output after
+   * it, independently of this. Each directory is walked once per log, since its entry is recorded
+   * by exec path.
+   */
   private List<ExecLogEntry.File> expandDirectoryFromFileSystem(
       Path root, @Nullable InputMetadataProvider inputMetadataProvider)
       throws IOException, InterruptedException {
