@@ -58,6 +58,12 @@ final class EntryIdMap {
 
     @GuardedBy("this")
     private final HashMap<Object, InFlightEntry> inFlight = new HashMap<>();
+
+    Shard() {
+      // NO_ID is never stored, so getInt returning it means the key is absent, which takes a single
+      // unboxed lookup.
+      ids.defaultReturnValue(EntryWriter.NO_ID);
+    }
   }
 
   /** An entry that is being computed by {@link #owner}. */
@@ -97,7 +103,7 @@ final class EntryIdMap {
       InFlightEntry inFlight;
       boolean isOwner = false;
       synchronized (shard) {
-        int id = shard.ids.getOrDefault(key, EntryWriter.NO_ID);
+        int id = shard.ids.getInt(key);
         if (id != EntryWriter.NO_ID) {
           return id;
         }
