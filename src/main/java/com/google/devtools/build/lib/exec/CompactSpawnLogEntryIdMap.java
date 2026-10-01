@@ -169,13 +169,14 @@ final class CompactSpawnLogEntryIdMap {
     if (recorded != CompactSpawnLogEntryWriter.NO_ID) {
       return recorded;
     }
-    while (true) {
+    Integer id;
+    do {
       InFlightEntry inFlight;
       boolean isOwner = false;
       synchronized (shard) {
-        int id = shard.get(key);
-        if (id != CompactSpawnLogEntryWriter.NO_ID) {
-          return id;
+        int recordedUnderLock = shard.get(key);
+        if (recordedUnderLock != CompactSpawnLogEntryWriter.NO_ID) {
+          return recordedUnderLock;
         }
         inFlight = shard.inFlight.get(key);
         if (inFlight == null) {
@@ -195,12 +196,11 @@ final class CompactSpawnLogEntryIdMap {
         // previous single-lock implementation would have.
         return computer.compute();
       }
-      Integer id = await(inFlight);
-      if (id != null) {
-        return id;
-      }
-      // The owner failed to compute the entry. Retry, possibly becoming the owner.
-    }
+      id = await(inFlight);
+      // A null ID means the owner failed, and it has already stopped tracking the entry, so the
+      // next attempt finds a recorded ID, another owner, or becomes the owner itself.
+    } while (id == null);
+    return id;
   }
 
   private static int hash(Object key) {
