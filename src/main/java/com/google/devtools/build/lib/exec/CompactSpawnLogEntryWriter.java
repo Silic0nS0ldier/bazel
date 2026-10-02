@@ -33,13 +33,11 @@ import javax.annotation.Nullable;
  * consecutive in the order entries appear in the log, as {@link SpawnLogReconstructor} requires.
  *
  * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
- * lock-free linked list that the writer thread consumes in order. An entry's ID is derived from
- * its position in that list: each node records how many IDs precede it, and a node is appended by
- * a compare-and-set of its predecessor's {@code next} field from null to the node, which fixes both
- * its place in the log and its ID at once. {@code tail} only records a recent node to start from,
- * so moving it is best effort and any thread may do it. So IDs are consecutive in log order, and an
- * ID only exists once its entry is in the log, which ensures that an entry is written after every
- * entry it references.
+ * lock-free linked list that the writer thread writes in order. Appending is a compare-and-swap of
+ * the last node's {@code next} field from null, which fixes both the entry's place in the log and
+ * its ID, if it has one: the number of IDs assigned up to and including it. So IDs are consecutive
+ * in log order, and an ID only exists once its entry is appended, so entries that reference it are
+ * written after it.
  */
 final class CompactSpawnLogEntryWriter {
 
