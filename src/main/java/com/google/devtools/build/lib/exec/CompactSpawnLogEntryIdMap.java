@@ -193,7 +193,9 @@ final class CompactSpawnLogEntryIdMap {
         // Waiting on this thread's own computation would deadlock. It's unlikely, but keys are
         // shared between entry types (a file and a runfiles tree could have the same path), so
         // compute a separate entry, as a single reentrant lock would.
-        return computer.compute();
+        try (SilentCloseable c = Profiler.instance().profile(SPAWN_LOG, "logEntry/reentrant")) {
+          return computer.compute();
+        }
       }
       id = await(inFlight);
       // A null ID means the owner failed, and it has already stopped tracking the entry, so the
@@ -214,6 +216,7 @@ final class CompactSpawnLogEntryIdMap {
 
   private static int compute(Object key, IdComputer computer, Shard shard, InFlightEntry inFlight)
       throws IOException, InterruptedException {
+    long startTimeNanos = Profiler.instance().nanoTimeMaybe();
     int id;
     try {
       id = computer.compute();
@@ -223,6 +226,10 @@ final class CompactSpawnLogEntryIdMap {
         shard.inFlight.remove(key);
       }
       inFlight.id.completeExceptionally(t);
+      // The entry will be computed again by the next request for it, whether it's waiting now or
+      // comes later, so make the wasted work visible in the profile: waiters discard this failure,
+      // and the owner's caller may not report it (e.g. an interrupt).
+      Profiler.instance().logSimpleTask(startTimeNanos, SPAWN_LOG, "logEntry/failed");
       throw t;
     }
     // Record the ID before forgetting the in-flight entry, atomically, so that no concurrent
