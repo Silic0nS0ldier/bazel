@@ -158,10 +158,10 @@ public class CompactSpawnLogContext extends SpawnLogContext {
   // Each key is either a NestedSet.Node or the String path of a file, directory, symlink or
   // runfiles tree.
   // Only entries that are likely to be referenced by future entries are stored.
-  private final EntryIdMap entryMap = new EntryIdMap();
+  private final CompactSpawnLogEntryIdMap entryMap = new CompactSpawnLogEntryIdMap();
 
   // Writes entries to the log, assigning their IDs.
-  private final EntryWriter entryWriter;
+  private final CompactSpawnLogEntryWriter entryWriter;
 
   public CompactSpawnLogContext(
       Path outputPath,
@@ -183,7 +183,7 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     this.invocationId = invocationId;
     this.reporter = reporter;
     this.entryWriter =
-        new EntryWriter(
+        new CompactSpawnLogEntryWriter(
             outputPath.toString(),
             new ZstdOutputStream(new BufferedOutputStream(outputPath.getOutputStream())));
 
@@ -703,10 +703,8 @@ public class CompactSpawnLogContext extends SpawnLogContext {
 
       checkState(key instanceof NestedSet.Node || key instanceof String);
 
-      // The following order of operations is crucial to ensure that this entry is preceded by any
-      // entries it references, which in turn ensures the log can be parsed in a single pass: the
-      // supplier only returns once every entry it references has been written, and the entry map
-      // only makes the ID of this entry visible to other threads once it has been written.
+      // The supplier writes every entry this one references before it returns, and other threads
+      // only see this entry's ID once it's written, so the log can be parsed in a single pass.
       return entryMap.getOrCompute(key, () -> entryWriter.writeWithId(supplier.get()));
     }
   }

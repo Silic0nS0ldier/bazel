@@ -39,11 +39,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** Tests for {@link EntryWriter}. */
+/** Tests for {@link CompactSpawnLogEntryWriter}. */
 @RunWith(JUnit4.class)
-public final class EntryWriterTest {
+public final class CompactSpawnLogEntryWriterTest {
   private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-  private final EntryWriter writer = new EntryWriter("test", bytes);
+  private final CompactSpawnLogEntryWriter writer = new CompactSpawnLogEntryWriter("test", bytes);
 
   @After
   public void closeWriter() throws Exception {
@@ -101,7 +101,8 @@ public final class EntryWriterTest {
     assertThat(writer.writeWithId(entryOfSize(10))).isEqualTo(2);
 
     ImmutableList<ExecLogEntry> read = closeAndRead();
-    assertThat(read.stream().map(ExecLogEntry::getId)).containsExactly(1, EntryWriter.NO_ID, 2)
+    assertThat(read.stream().map(ExecLogEntry::getId))
+        .containsExactly(1, CompactSpawnLogEntryWriter.NO_ID, 2)
         .inOrder();
     assertThat(read.get(1)).isEqualTo(spawn.build());
   }
@@ -162,7 +163,7 @@ public final class EntryWriterTest {
     assertThat(read).hasSize(numThreads * perThread);
     int expectedId = 1;
     for (ExecLogEntry entry : read) {
-      if (entry.getId() != EntryWriter.NO_ID) {
+      if (entry.getId() != CompactSpawnLogEntryWriter.NO_ID) {
         assertThat(entry.getId()).isEqualTo(expectedId++);
       }
     }
@@ -187,9 +188,23 @@ public final class EntryWriterTest {
   }
 
   @Test
+  public void appendWakesSleepingWriter() throws Exception {
+    while (!writer.isSleepingForTesting()) {
+      Thread.sleep(1);
+    }
+
+    writer.writeWithId(entryOfSize(10));
+    // close() wakes the writer too, so wait for the entry without it: if the append didn't wake
+    // the writer, this never finishes.
+    while (bytes.size() == 0) {
+      Thread.sleep(1);
+    }
+  }
+
+  @Test
   public void writeFailureIsReportedOnClose() throws Exception {
-    EntryWriter failing =
-        new EntryWriter(
+    CompactSpawnLogEntryWriter failing =
+        new CompactSpawnLogEntryWriter(
             "failing",
             new OutputStream() {
               @Override
@@ -216,8 +231,8 @@ public final class EntryWriterTest {
     // The writer thread blocks on its first write until released, so it's still writing when the
     // interrupted close() starts.
     CountDownLatch released = new CountDownLatch(1);
-    EntryWriter blocked =
-        new EntryWriter(
+    CompactSpawnLogEntryWriter blocked =
+        new CompactSpawnLogEntryWriter(
             "blocked",
             new OutputStream() {
               @Override

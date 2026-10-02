@@ -33,15 +33,13 @@ import javax.annotation.Nullable;
  * consecutive in the order entries appear in the log, as {@link SpawnLogReconstructor} requires.
  *
  * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
- * lock-free linked list that the writer thread consumes in order. An entry's ID is derived from
- * its position in that list: each node records how many IDs precede it, and a node is appended by
- * a compare-and-set of its predecessor's {@code next} field from null to the node, which fixes both
- * its place in the log and its ID at once. {@code tail} only records a recent node to start from,
- * so moving it is best effort and any thread may do it. So IDs are consecutive in log order, and an
- * ID only exists once its entry is in the log, which ensures that an entry is written after every
- * entry it references.
+ * lock-free linked list that the writer thread writes in order. Appending is a compare-and-swap of
+ * the last node's {@code next} field from null, which fixes both the entry's place in the log and
+ * its ID, if it has one: the number of IDs assigned up to and including it. So IDs are consecutive
+ * in log order, and an ID only exists once its entry is appended, so entries that reference it are
+ * written after it.
  */
-final class EntryWriter {
+final class CompactSpawnLogEntryWriter {
 
   /**
    * The ID of no entry. In the log, an entry with this ID can't be referenced and a reference with
@@ -66,21 +64,27 @@ final class EntryWriter {
 
   private static final VarHandle NEXT;
   private static final VarHandle TAIL;
+  private static final VarHandle SLEEPING;
 
   static {
     try {
       MethodHandles.Lookup lookup = MethodHandles.lookup();
       NEXT = lookup.findVarHandle(Node.class, "next", Node.class);
-      TAIL = lookup.findVarHandle(EntryWriter.class, "tail", Node.class);
+      TAIL = lookup.findVarHandle(CompactSpawnLogEntryWriter.class, "tail", Node.class);
+      SLEEPING = lookup.findVarHandle(CompactSpawnLogEntryWriter.class, "sleeping", boolean.class);
     } catch (ReflectiveOperationException e) {
       throw new ExceptionInInitializerError(e);
     }
   }
 
   // How long the writer thread waits before checking for new entries again once it has caught up.
-  // Waiting with a timeout means appending never needs to wake it up.
+  // Waiting with a timeout means appending doesn't need to wake it up while entries keep coming.
   private static final long MIN_IDLE_WAIT_NANOS = TimeUnit.MICROSECONDS.toNanos(50);
   private static final long MAX_IDLE_WAIT_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
+  // How long the writer thread waits with a timeout before sleeping until an append wakes it, so
+  // that an idle log doesn't wake it every MAX_IDLE_WAIT_NANOS. Long enough that appenders rarely
+  // need to wake it while entries keep coming.
+  private static final long SLEEP_AFTER_IDLE_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
 
   // The last node appended, or one of its recent predecessors (appenders help it catch up). Only
   // the writer thread knows the start of the list, so that written nodes can be garbage collected.
@@ -89,6 +93,10 @@ final class EntryWriter {
   // read asks for more). Error Prone can't see VarHandle accesses, so it reports it as unused.
   @SuppressWarnings("unused")
   private volatile Node tail;
+
+  // Whether the writer thread is sleeping, or about to, until an append wakes it. It changes
+  // rarely, so reading it after each append is cheap.
+  private volatile boolean sleeping = false;
 
   private volatile boolean closed = false;
   // The first IOException or RuntimeException from writing or closing the log, with later ones
@@ -108,7 +116,7 @@ final class EntryWriter {
   private Node written;
 
   /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
-  EntryWriter(String name, OutputStream out) {
+  CompactSpawnLogEntryWriter(String name, OutputStream out) {
     this.out = out;
     this.coded = CodedOutputStream.newInstance(out, /* bufferSize= */ 64 * 1024);
     Node start = new Node(/* bodyWithoutId= */ null);
@@ -157,6 +165,12 @@ final class EntryWriter {
       // Linking the node appends it; advancing the tail afterwards is only an optimization.
       if (NEXT.compareAndSet(last, null, node)) {
         TAIL.compareAndSet(this, last, node);
+        // The writer thread sets sleeping before checking for a node, and this checks sleeping
+        // after appending one, so either it sees this node or this sees it sleeping. Only the
+        // append that clears sleeping needs to wake it.
+        if (sleeping && SLEEPING.compareAndSet(this, true, false)) {
+          LockSupport.unpark(writerThread);
+        }
         return node.id;
       }
     }
@@ -165,6 +179,7 @@ final class EntryWriter {
   /** Runs on the writer thread: writes nodes in list order until closed and caught up. */
   private void writeAll() {
     long idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+    long idleNanos = 0;
     try {
       while (true) {
         Node next = written.next;
@@ -179,14 +194,27 @@ final class EntryWriter {
             // Caught up, so there's time to spare: don't leave written entries in the buffer.
             flush();
             // Every entry must be written before close() returns, so interrupts are ignored. The
-            // flag is cleared because parkNanos returns immediately while it's set.
+            // flag is cleared because parking returns immediately while it's set.
             Thread.interrupted();
-            LockSupport.parkNanos(this, idleWaitNanos);
-            idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
+            if (idleNanos < SLEEP_AFTER_IDLE_NANOS) {
+              LockSupport.parkNanos(this, idleWaitNanos);
+              idleNanos += idleWaitNanos;
+              idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
+            } else {
+              sleeping = true;
+              // Check again now that appenders can see it's sleeping (see append). close() wakes
+              // it too.
+              if (written.next == null) {
+                LockSupport.park(this);
+              }
+              // Already cleared if an append woke it, but not if close() or a spurious wakeup did.
+              sleeping = false;
+            }
             continue;
           }
         }
         idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+        idleNanos = 0;
         if (failure == null) {
           try {
             writeDelimited(next);
@@ -252,6 +280,11 @@ final class EntryWriter {
   @VisibleForTesting
   Object tailForTesting() {
     return tail;
+  }
+
+  @VisibleForTesting
+  boolean isSleepingForTesting() {
+    return sleeping;
   }
 
   /**
