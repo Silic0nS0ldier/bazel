@@ -188,6 +188,20 @@ public final class CompactSpawnLogEntryWriterTest {
   }
 
   @Test
+  public void appendWakesSleepingWriter() throws Exception {
+    while (!writer.isSleepingForTesting()) {
+      Thread.sleep(1);
+    }
+
+    writer.writeWithId(entryOfSize(10));
+    // close() wakes the writer too, so wait for the entry without it: if the append didn't wake
+    // the writer, this never finishes.
+    while (bytes.size() == 0) {
+      Thread.sleep(1);
+    }
+  }
+
+  @Test
   public void writeFailureIsReportedOnClose() throws Exception {
     CompactSpawnLogEntryWriter failing =
         new CompactSpawnLogEntryWriter(
