@@ -51,8 +51,6 @@ import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.remote.options.RemoteOptions;
 import com.google.devtools.build.lib.skyframe.TreeArtifactValue;
 import com.google.devtools.build.lib.util.StringEncoding;
-import com.google.devtools.build.lib.util.io.AsynchronousMessageOutputStream;
-import com.google.devtools.build.lib.util.io.MessageOutputStream;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.Dirent;
 import com.google.devtools.build.lib.vfs.FileSystem;
@@ -61,10 +59,8 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.lib.vfs.XattrProvider;
 import com.google.errorprone.annotations.CheckReturnValue;
-import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -77,7 +73,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
-import javax.annotation.concurrent.GuardedBy;
 
 /** A {@link SpawnLogContext} implementation that produces a log in compact format. */
 public class CompactSpawnLogContext extends SpawnLogContext {
@@ -165,16 +160,10 @@ public class CompactSpawnLogContext extends SpawnLogContext {
   // Each key is either a NestedSet.Node or the String path of a file, directory, symlink or
   // runfiles tree.
   // Only entries that are likely to be referenced by future entries are stored.
-  // Use a specialized map for minimal memory footprint.
-  @GuardedBy("this")
-  private final Object2IntOpenHashMap<Object> entryMap = new Object2IntOpenHashMap<>();
+  private final CompactSpawnLogEntryIdMap entryMap = new CompactSpawnLogEntryIdMap();
 
-  // The next available entry ID.
-  @GuardedBy("this")
-  int nextEntryId = 1;
-
-  // Output stream to write to.
-  private final MessageOutputStream<ExecLogEntry> outputStream;
+  // Writes entries to the log, assigning their IDs.
+  private final CompactSpawnLogEntryWriter entryWriter;
 
   public CompactSpawnLogContext(
       BufferedOutputStream out,
@@ -198,16 +187,10 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     this.compressionService = compressionService;
     this.invocationId = invocationId;
     this.reporter = reporter;
-    this.outputStream = getOutputStream(out, displayName);
+    this.entryWriter =
+        new CompactSpawnLogEntryWriter(displayName, compressionService.newZstdOutputStream(out));
 
     logInvocation();
-  }
-
-  private MessageOutputStream<ExecLogEntry> getOutputStream(OutputStream out, String name)
-      throws IOException {
-    // Use an AsynchronousMessageOutputStream so that compression and I/O occur in a separate
-    // thread. This ensures concurrent writes don't tear and avoids blocking execution.
-    return new AsynchronousMessageOutputStream<>(name, compressionService.newZstdOutputStream(out));
   }
 
   private void logInvocation() throws IOException, InterruptedException {
@@ -666,7 +649,21 @@ public class CompactSpawnLogContext extends SpawnLogContext {
     return files;
   }
 
-  /** Expands a directory by traversing it on the filesystem. */
+  /**
+   * Expands a directory by traversing it on the filesystem.
+   *
+   * <p>Used for every directory that can't be expanded from Skyframe metadata: source directories,
+   * filesets, tree artifact inputs without metadata, and directory outputs. Skyframe walks a
+   * tracked source directory too, but keeps only a fingerprint of its files rather than the files
+   * themselves. Outputs are logged as soon as the spawn finishes, before Skyframe has built their
+   * {@link TreeArtifactValue}, so their metadata isn't available yet.
+   *
+   * <p>Every file found is digested from disk rather than from metadata. {@code DigestUtils}'s
+   * cache may avoid rehashing a file that Bazel digests elsewhere, but the walk itself isn't
+   * shared: Skyframe walks a source directory before the spawn runs and a directory output after
+   * it, independently of this. Each directory is walked once per log, since its entry is recorded
+   * by exec path.
+   */
   private List<ExecLogEntry.File> expandDirectoryFromFileSystem(
       Path root, @Nullable InputMetadataProvider inputMetadataProvider)
       throws IOException, InterruptedException {
@@ -743,15 +740,7 @@ public class CompactSpawnLogContext extends SpawnLogContext {
   private void logEntryWithoutId(ExecLogEntrySupplier supplier)
       throws IOException, InterruptedException {
     try (SilentCloseable c = Profiler.instance().profile(SPAWN_LOG, "logEntryWithoutId")) {
-      logEntryWithoutIdSynchronized(supplier);
-    }
-  }
-
-  private synchronized void logEntryWithoutIdSynchronized(ExecLogEntrySupplier supplier)
-      throws IOException, InterruptedException {
-    try (SilentCloseable c =
-        Profiler.instance().profile(SPAWN_LOG, "logEntryWithoutId/synchronized")) {
-      outputStream.write(supplier.get().build());
+      entryWriter.writeWithoutId(supplier.get());
     }
   }
 
@@ -769,37 +758,16 @@ public class CompactSpawnLogContext extends SpawnLogContext {
   private int logEntry(@Nullable Object key, ExecLogEntrySupplier supplier)
       throws IOException, InterruptedException {
     try (SilentCloseable c = Profiler.instance().profile(SPAWN_LOG, "logEntry")) {
-      return logEntrySynchronized(key, supplier);
-    }
-  }
-
-  private synchronized int logEntrySynchronized(@Nullable Object key, ExecLogEntrySupplier supplier)
-      throws IOException, InterruptedException {
-    try (SilentCloseable c = Profiler.instance().profile(SPAWN_LOG, "logEntry/synchronized")) {
       if (key == null) {
         // No need to check for a previously added entry.
-        ExecLogEntry.Builder entry = supplier.get();
-        int id = nextEntryId++;
-        outputStream.write(entry.setId(id).build());
-        return id;
+        return entryWriter.writeWithId(supplier.get());
       }
 
       checkState(key instanceof NestedSet.Node || key instanceof String);
 
-      // Check for a previously added entry.
-      int id = entryMap.getOrDefault(key, 0);
-      if (id != 0) {
-        return id;
-      }
-
-      // Compute a fresh entry and log it.
-      // The following order of operations is crucial to ensure that this entry is preceded by any
-      // entries it references, which in turn ensures the log can be parsed in a single pass.
-      ExecLogEntry.Builder entry = supplier.get();
-      id = nextEntryId++;
-      entryMap.put(key, id);
-      outputStream.write(entry.setId(id).build());
-      return id;
+      // The supplier writes every entry this one references before it returns, and other threads
+      // only see this entry's ID once it's written, so the log can be parsed in a single pass.
+      return entryMap.getOrCompute(key, () -> entryWriter.writeWithId(supplier.get()));
     }
   }
 
@@ -811,6 +779,6 @@ public class CompactSpawnLogContext extends SpawnLogContext {
               "The compact execution log is incomplete because some outputs could not be read."
                   + " Refer to the server log file for details."));
     }
-    outputStream.close();
+    entryWriter.close();
   }
 }

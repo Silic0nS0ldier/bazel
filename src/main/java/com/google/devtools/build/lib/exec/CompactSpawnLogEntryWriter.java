@@ -1,0 +1,308 @@
+// Copyright 2026 The Bazel Authors. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+package com.google.devtools.build.lib.exec;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.google.devtools.build.lib.exec.Protos.ExecLogEntry;
+import com.google.protobuf.CodedOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
+import javax.annotation.Nullable;
+
+/**
+ * Writes {@link CompactSpawnLogContext} entries on a dedicated thread, assigning IDs that are
+ * consecutive in the order entries appear in the log, as {@link SpawnLogReconstructor} requires.
+ *
+ * <p>Safe to call from many threads at once, and never blocks them. Entries are appended to a
+ * lock-free linked list that the writer thread writes in order. Appending is a compare-and-swap of
+ * the last node's {@code next} field from null, which fixes both the entry's place in the log and
+ * its ID, if it has one: the number of IDs assigned up to and including it. So IDs are consecutive
+ * in log order, and an ID only exists once its entry is appended, so entries that reference it are
+ * written after it.
+ */
+final class CompactSpawnLogEntryWriter {
+
+  /**
+   * The ID of no entry. In the log, an entry with this ID can't be referenced and a reference with
+   * it means "none" (e.g. an empty input set).
+   */
+  static final int NO_ID = 0;
+
+  /** An entry in the log, serialized without its ID. */
+  private static final class Node {
+    // Written before the node is published by the compare-and-swap that appends it.
+    private byte[] bodyWithoutId;
+    private int id;
+    // The number of IDs assigned up to and including this node.
+    private int idCount;
+
+    private volatile Node next;
+
+    private Node(byte[] bodyWithoutId) {
+      this.bodyWithoutId = bodyWithoutId;
+    }
+  }
+
+  private static final VarHandle NEXT;
+  private static final VarHandle TAIL;
+  private static final VarHandle SLEEPING;
+
+  static {
+    try {
+      MethodHandles.Lookup lookup = MethodHandles.lookup();
+      NEXT = lookup.findVarHandle(Node.class, "next", Node.class);
+      TAIL = lookup.findVarHandle(CompactSpawnLogEntryWriter.class, "tail", Node.class);
+      SLEEPING = lookup.findVarHandle(CompactSpawnLogEntryWriter.class, "sleeping", boolean.class);
+    } catch (ReflectiveOperationException e) {
+      throw new ExceptionInInitializerError(e);
+    }
+  }
+
+  // How long the writer thread waits before checking for new entries again once it has caught up.
+  // Waiting with a timeout means appending doesn't need to wake it up while entries keep coming.
+  private static final long MIN_IDLE_WAIT_NANOS = TimeUnit.MICROSECONDS.toNanos(50);
+  private static final long MAX_IDLE_WAIT_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
+  // How long the writer thread waits with a timeout before sleeping until an append wakes it, so
+  // that an idle log doesn't wake it every MAX_IDLE_WAIT_NANOS. Long enough that appenders rarely
+  // need to wake it while entries keep coming.
+  private static final long SLEEP_AFTER_IDLE_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
+
+  // The last node appended, or one of its recent predecessors (appenders help it catch up). Only
+  // the writer thread knows the start of the list, so that written nodes can be garbage collected.
+  //
+  // Read through TAIL.getAcquire, since appending only needs acquire ordering (a plain volatile
+  // read asks for more). Error Prone can't see VarHandle accesses, so it reports it as unused.
+  @SuppressWarnings("unused")
+  private volatile Node tail;
+
+  // Whether the writer thread is sleeping, or about to, until an append wakes it. It changes
+  // rarely, so reading it after each append is cheap.
+  private volatile boolean sleeping = false;
+
+  private volatile boolean closed = false;
+  // The first IOException or RuntimeException from writing or closing the log, with later ones
+  // suppressed. Errors aren't recorded: they reach the writer thread's uncaught exception handler.
+  // Only used by the writer thread, and by close() once that thread has finished.
+  @Nullable private Exception failure;
+  private final OutputStream out;
+  // Buffers writes to out: entries are written in several small pieces, and each write to a
+  // compressor is a native call. Only used by the writer thread.
+  private final CodedOutputStream coded;
+  private final Thread writerThread;
+
+  // The last node the writer thread has written, and the only reference to where it is in the list,
+  // so that nodes before it can be garbage collected. A local variable or the thread's Runnable
+  // would keep the start of the list reachable for as long as the thread runs. Only used by the
+  // writer thread, after its initial value.
+  private Node written;
+
+  /** Creates a writer that writes to {@code out} and closes it when {@link #close} is called. */
+  CompactSpawnLogEntryWriter(String name, OutputStream out) {
+    this.out = out;
+    this.coded = CodedOutputStream.newInstance(out, /* bufferSize= */ 64 * 1024);
+    Node start = new Node(/* bodyWithoutId= */ null);
+    this.tail = start;
+    this.written = start;
+    this.writerThread = new Thread(this::writeAll, "exec-log-writer:" + name);
+    writerThread.start();
+  }
+
+  /**
+   * Writes an entry that other entries won't reference.
+   *
+   * <p>Callers must only write it after every entry it references, which holds as long as it's
+   * written after the calls that returned their IDs.
+   */
+  void writeWithoutId(ExecLogEntry.Builder entry) {
+    checkArgument(entry.getId() == NO_ID, "entry already has an ID: %s", entry);
+    append(entry.build().toByteArray(), /* withId= */ false);
+  }
+
+  /**
+   * Assigns the next ID to an entry and writes it.
+   *
+   * @return the ID, which is never {@link #NO_ID}
+   */
+  int writeWithId(ExecLogEntry.Builder entry) {
+    checkArgument(entry.getId() == NO_ID, "entry already has an ID: %s", entry);
+    return append(entry.build().toByteArray(), /* withId= */ true);
+  }
+
+  private int append(byte[] bodyWithoutId, boolean withId) {
+    checkState(!closed, "writing to a closed exec log");
+    Node node = new Node(bodyWithoutId);
+    while (true) {
+      Node last = (Node) TAIL.getAcquire(this);
+      Node next = last.next;
+      if (next != null) {
+        // Another thread appended a node but hasn't advanced the tail yet; help it.
+        TAIL.compareAndSet(this, last, next);
+        continue;
+      }
+      // The node isn't visible to other threads until the compare-and-swap below succeeds, so it
+      // can be updated freely on every attempt.
+      node.idCount = last.idCount + (withId ? 1 : 0);
+      node.id = withId ? node.idCount : NO_ID;
+      // Linking the node appends it; advancing the tail afterwards is only an optimization.
+      if (NEXT.compareAndSet(last, null, node)) {
+        TAIL.compareAndSet(this, last, node);
+        // The writer thread sets sleeping before checking for a node, and this checks sleeping
+        // after appending one, so either it sees this node or this sees it sleeping. Only the
+        // append that clears sleeping needs to wake it.
+        if (sleeping && SLEEPING.compareAndSet(this, true, false)) {
+          LockSupport.unpark(writerThread);
+        }
+        return node.id;
+      }
+    }
+  }
+
+  /** Runs on the writer thread: writes nodes in list order until closed and caught up. */
+  private void writeAll() {
+    long idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+    long idleNanos = 0;
+    try {
+      while (true) {
+        Node next = written.next;
+        if (next == null) {
+          if (closed) {
+            // Appends happen before close, so anything appended is visible by now.
+            next = written.next;
+            if (next == null) {
+              break;
+            }
+          } else {
+            // Caught up, so there's time to spare: don't leave written entries in the buffer.
+            flush();
+            // Every entry must be written before close() returns, so interrupts are ignored. The
+            // flag is cleared because parking returns immediately while it's set.
+            Thread.interrupted();
+            if (idleNanos < SLEEP_AFTER_IDLE_NANOS) {
+              LockSupport.parkNanos(this, idleWaitNanos);
+              idleNanos += idleWaitNanos;
+              idleWaitNanos = Math.min(idleWaitNanos * 2, MAX_IDLE_WAIT_NANOS);
+            } else {
+              sleeping = true;
+              // Check again now that appenders can see it's sleeping (see append). close() wakes
+              // it too.
+              if (written.next == null) {
+                LockSupport.park(this);
+              }
+              // Already cleared if an append woke it, but not if close() or a spurious wakeup did.
+              sleeping = false;
+            }
+            continue;
+          }
+        }
+        idleWaitNanos = MIN_IDLE_WAIT_NANOS;
+        idleNanos = 0;
+        if (failure == null) {
+          try {
+            writeDelimited(next);
+          } catch (IOException | RuntimeException e) {
+            // The log may now end in a partial entry, so later entries are dropped rather than
+            // written after it. close() reports the failure.
+            recordFailure(e);
+          }
+        }
+        next.bodyWithoutId = null;
+        written = next;
+      }
+    } finally {
+      flush();
+      try {
+        out.close();
+      } catch (IOException | RuntimeException e) {
+        recordFailure(e);
+      }
+    }
+  }
+
+  /**
+   * Writes a node in the same format as {@link ExecLogEntry#writeDelimitedTo}.
+   *
+   * <p>The entry is written as its ID field followed by the rest of the entry. The ID is field 1,
+   * which a full serialization writes first, so this produces exactly the bytes of {@link
+   * ExecLogEntry#writeDelimitedTo} for the entry with its ID.
+   */
+  private void writeDelimited(Node node) throws IOException {
+    boolean hasId = node.id != NO_ID;
+    int idSize =
+        hasId ? CodedOutputStream.computeUInt32Size(ExecLogEntry.ID_FIELD_NUMBER, node.id) : 0;
+    coded.writeUInt32NoTag(idSize + node.bodyWithoutId.length);
+    if (hasId) {
+      coded.writeUInt32(ExecLogEntry.ID_FIELD_NUMBER, node.id);
+    }
+    coded.writeRawBytes(node.bodyWithoutId);
+  }
+
+  /**
+   * Writes buffered entries to the output stream without flushing it, unless a failure means
+   * they're dropped.
+   */
+  private void flush() {
+    if (failure == null) {
+      try {
+        coded.flush();
+      } catch (IOException | RuntimeException e) {
+        recordFailure(e);
+      }
+    }
+  }
+
+  private void recordFailure(Exception e) {
+    if (failure == null) {
+      failure = e;
+    } else {
+      failure.addSuppressed(e);
+    }
+  }
+
+  @VisibleForTesting
+  Object tailForTesting() {
+    return tail;
+  }
+
+  @VisibleForTesting
+  boolean isSleepingForTesting() {
+    return sleeping;
+  }
+
+  /**
+   * Waits for all entries to be written, then closes the output stream.
+   *
+   * <p>Must only be called once all writes have returned.
+   *
+   * @throws IOException if writing or closing failed
+   */
+  void close() throws IOException {
+    closed = true;
+    LockSupport.unpark(writerThread);
+    Uninterruptibles.joinUninterruptibly(writerThread);
+    if (failure instanceof IOException e) {
+      throw e;
+    }
+    if (failure instanceof RuntimeException e) {
+      throw e;
+    }
+  }
+}
