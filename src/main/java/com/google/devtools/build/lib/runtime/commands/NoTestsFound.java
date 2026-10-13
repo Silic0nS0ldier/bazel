@@ -23,6 +23,6 @@ import com.google.devtools.build.lib.util.ExitCode;
 public class NoTestsFound extends BuildCompletingEvent {
 
   public NoTestsFound(ExitCode exitCode, long finishTimeMillis) {
-    super(exitCode, finishTimeMillis, ImmutableList.of(new BuildEventIdRepr.BuildMetricsId()));
+    super(exitCode, finishTimeMillis, ImmutableList.of(BuildEventIdRepr.BUILD_METRICS));
   }
 }

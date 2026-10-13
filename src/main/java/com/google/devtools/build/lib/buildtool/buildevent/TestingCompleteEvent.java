@@ -37,6 +37,6 @@ public class TestingCompleteEvent extends BuildCompletingEvent {
     super(
         exitCode,
         finishTimeMillis,
-        ImmutableList.of(new BuildEventIdRepr.BuildToolLogsId(), new BuildEventIdRepr.BuildMetricsId()));
+        ImmutableList.of(BuildEventIdRepr.BUILD_TOOL_LOGS, BuildEventIdRepr.BUILD_METRICS));
   }
 }

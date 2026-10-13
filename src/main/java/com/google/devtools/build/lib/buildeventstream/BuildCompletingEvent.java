@@ -62,7 +62,7 @@ public abstract class BuildCompletingEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildFinishedId();
+    return BuildEventIdRepr.BUILD_FINISHED;
   }
 
   @Override

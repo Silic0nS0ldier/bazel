@@ -93,22 +93,24 @@ public abstract class BuildStartingEvent implements BuildEvent {
 
   @Override
   public final BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildStartedId();
+    return BuildEventIdRepr.BUILD_STARTED;
   }
 
   @Override
   public final ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     return ImmutableList.of(
         ProgressEvent.INITIAL_PROGRESS_UPDATE,
-        new BuildEventIdRepr.UnstructuredCommandLineId(),
-        new BuildEventIdRepr.StructuredCommandLineId(CommandLineEvent.OriginalCommandLineEvent.LABEL),
-        new BuildEventIdRepr.StructuredCommandLineId(CommandLineEvent.CanonicalCommandLineEvent.LABEL),
+        BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE,
+        new BuildEventIdRepr.StructuredCommandLineId(
+            CommandLineEvent.OriginalCommandLineEvent.LABEL),
+        new BuildEventIdRepr.StructuredCommandLineId(
+            CommandLineEvent.CanonicalCommandLineEvent.LABEL),
         new BuildEventIdRepr.StructuredCommandLineId(CommandLineEvent.ToolCommandLineEvent.LABEL),
-        new BuildEventIdRepr.BuildMetadataId(),
-        new BuildEventIdRepr.OptionsParsedId(),
-        new BuildEventIdRepr.WorkspaceStatusId(),
+        BuildEventIdRepr.BUILD_METADATA,
+        BuildEventIdRepr.OPTIONS_PARSED,
+        BuildEventIdRepr.WORKSPACE_STATUS,
         new BuildEventIdRepr.PatternExpandedId(request().getTargets()),
-        new BuildEventIdRepr.BuildFinishedId());
+        BuildEventIdRepr.BUILD_FINISHED);
   }
 
   @Override

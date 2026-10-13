@@ -274,10 +274,10 @@ public class RunCommand implements BlazeCommand {
     }
     ImmutableList.Builder<BuildEventIdRepr> runCompleteChildrenEvents =
         ImmutableList.<BuildEventIdRepr>builder()
-            .add(new BuildEventIdRepr.BuildToolLogsId())
-            .add(new BuildEventIdRepr.BuildMetricsId());
+            .add(BuildEventIdRepr.BUILD_TOOL_LOGS)
+            .add(BuildEventIdRepr.BUILD_METRICS);
     if (runOptions.getScriptPath() == null) {
-      runCompleteChildrenEvents.add(new BuildEventIdRepr.ExecRequestId());
+      runCompleteChildrenEvents.add(BuildEventIdRepr.EXEC_REQUEST);
     }
     env.getReporter()
         .post(

@@ -56,7 +56,7 @@ public final class NoBuildEvent implements BuildEvent {
   public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
     if (separateFinishedEvent) {
       return ImmutableList.of(
-          ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventIdRepr.BuildFinishedId());
+          ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdRepr.BUILD_FINISHED);
     } else {
       return ImmutableList.of(ProgressEvent.INITIAL_PROGRESS_UPDATE);
     }
@@ -64,7 +64,7 @@ public final class NoBuildEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildStartedId();
+    return BuildEventIdRepr.BUILD_STARTED;
   }
 
   @Override

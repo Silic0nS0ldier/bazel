@@ -193,6 +193,22 @@ public final class TargetCompleteEventTest extends BuildIntegrationTestCase {
   }
 
   @Test
+  public void sourceFile_usesNullConfigurationId() throws Exception {
+    write("foo/BUILD", "exports_files(['src.txt'])");
+    write("foo/src.txt", "Hello");
+
+    File bep = buildTargetAndCaptureBEP("//foo:src.txt");
+
+    BuildEvent completed =
+        parseBuildEventsFromBEPStream(bep).stream()
+            .filter(e -> e.getId().getIdCase() == IdCase.TARGET_COMPLETED)
+            .collect(MoreCollectors.onlyElement());
+    assertThat(completed.hasAborted()).isFalse();
+    assertThat(completed.getId().getTargetCompleted().getConfiguration().getId())
+        .isEqualTo("none");
+  }
+
+  @Test
   public void outputDirectory() throws Exception {
     write(
         "foo/defs.bzl",

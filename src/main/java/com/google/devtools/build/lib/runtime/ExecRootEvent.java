@@ -45,7 +45,7 @@ public class ExecRootEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.WorkspaceConfigId();
+    return BuildEventIdRepr.WORKSPACE_CONFIG;
   }
 
   @Override

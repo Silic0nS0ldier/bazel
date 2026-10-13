@@ -68,7 +68,8 @@ public final class TestProgress implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TestProgressId(label, configChecksum, run, shard, attempt, opaqueCount);
+    return new BuildEventIdRepr.TestProgressId(
+        label, configChecksum, run, shard, attempt, opaqueCount);
   }
 
   @Override

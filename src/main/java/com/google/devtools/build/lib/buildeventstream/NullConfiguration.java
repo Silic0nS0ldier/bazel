@@ -26,7 +26,7 @@ public final class NullConfiguration implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.ConfigurationId("none");
+    return BuildEventIdRepr.ConfigurationId.NULL;
   }
 
   @Override

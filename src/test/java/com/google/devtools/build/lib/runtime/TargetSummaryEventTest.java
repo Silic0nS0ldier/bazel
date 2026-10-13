@@ -55,7 +55,9 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, false, null);
     assertThat(event.getEventId())
-        .isEqualTo(new BuildEventIdRepr.TargetSummaryId(Label.create(PATH, TARGET_NAME), "none"));
+        .isEqualTo(
+            new BuildEventIdRepr.TargetSummaryId(
+                Label.create(PATH, TARGET_NAME), BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM));
   }
 
   @Test
@@ -63,7 +65,8 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), false, false, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), CHECKSUM, null));
+            new BuildEventIdRepr.TargetCompletedId(
+                Label.create(PATH, TARGET_NAME), CHECKSUM, /* aspect= */ null));
   }
 
   @Test
@@ -81,8 +84,12 @@ public final class TargetSummaryEventTest {
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, true, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), "none", null),
-            new BuildEventIdRepr.TestSummaryId(Label.create(PATH, TARGET_NAME), "none"));
+            new BuildEventIdRepr.TargetCompletedId(
+                Label.create(PATH, TARGET_NAME),
+                BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM,
+                /* aspect= */ null),
+            new BuildEventIdRepr.TestSummaryId(
+                Label.create(PATH, TARGET_NAME), BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM));
   }
 
   @Test

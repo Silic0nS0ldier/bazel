@@ -92,9 +92,7 @@ public class FakeOwner implements ActionExecutionMetadata {
         ownerRuleKind,
         mnemonic,
         /* configurationChecksum= */ "configurationChecksum",
-        new BuildConfigurationEvent(
-            BuildEventStreamProtos.BuildEventId.getDefaultInstance(),
-            BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
+        new BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
         /* isToolConfiguration= */ isBuiltForToolConfiguration,
         /* executionPlatform= */ PlatformInfo.EMPTY_PLATFORM_INFO,
         /* aspectDescriptors= */ ImmutableList.of(),

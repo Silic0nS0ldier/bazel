@@ -36,7 +36,7 @@ public class BuildMetricsEvent implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildMetricsId();
+    return BuildEventIdRepr.BUILD_METRICS;
   }
 
   @Override
@@ -55,6 +55,6 @@ public class BuildMetricsEvent implements BuildEventWithOrderConstraint {
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildFinishedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_FINISHED);
   }
 }

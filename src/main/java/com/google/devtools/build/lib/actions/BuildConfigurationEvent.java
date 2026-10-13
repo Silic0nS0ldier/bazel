@@ -19,7 +19,6 @@ import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
 import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import java.util.Collection;
 import java.util.Objects;
 
@@ -29,12 +28,9 @@ import java.util.Objects;
  */
 public final class BuildConfigurationEvent implements BuildEvent {
 
-  private final BuildEventId eventId;
   private final BuildEventStreamProtos.BuildEvent eventProto;
 
-  public BuildConfigurationEvent(
-      BuildEventId eventId, BuildEventStreamProtos.BuildEvent eventProto) {
-    this.eventId = eventId;
+  public BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent eventProto) {
     this.eventProto = eventProto;
   }
 
@@ -45,7 +41,7 @@ public final class BuildConfigurationEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.ConfigurationId(eventId.getConfiguration().getId());
+    return new BuildEventIdRepr.ConfigurationId(eventProto.getId().getConfiguration().getId());
   }
 
   @Override
@@ -58,11 +54,11 @@ public final class BuildConfigurationEvent implements BuildEvent {
     if (!(other instanceof BuildConfigurationEvent that)) {
       return false;
     }
-    return Objects.equals(eventId, that.eventId) && Objects.equals(eventProto, that.eventProto);
+    return Objects.equals(eventProto, that.eventProto);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(eventId, eventProto);
+    return eventProto.hashCode();
   }
 }

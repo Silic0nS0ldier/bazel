@@ -134,9 +134,7 @@ public final class CompactSpawnLogContextTest extends SpawnLogContextTestBase {
             "some_rule",
             "configurationMnemonic",
             /* configurationChecksum= */ "configurationChecksum",
-            new BuildConfigurationEvent(
-                BuildEventStreamProtos.BuildEventId.getDefaultInstance(),
-                BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
+            new BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
             /* isToolConfiguration= */ false,
             /* executionPlatform= */ null,
             /* aspectDescriptors= */ ImmutableList.of(),

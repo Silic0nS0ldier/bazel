@@ -28,7 +28,6 @@ import com.google.devtools.build.lib.skyframe.ConfiguredValueCreationException;
 import com.google.devtools.build.lib.skyframe.DetailedException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.StringUtil;
-import javax.annotation.Nullable;
 
 /** Base class for exceptions that happen during toolchain resolution. */
 public abstract class ToolchainException extends Exception implements DetailedException {
@@ -69,7 +68,8 @@ public abstract class ToolchainException extends Exception implements DetailedEx
     Cause cause =
         new AnalysisFailedCause(
             targetAndConfiguration.getLabel(),
-            BuildConfigurationValue.configurationChecksum(targetAndConfiguration.getConfiguration()),
+            BuildConfigurationValue.configurationChecksum(
+                targetAndConfiguration.getConfiguration()),
             createDetailedExitCode(
                 StringUtil.formatNested(
                     String.format(

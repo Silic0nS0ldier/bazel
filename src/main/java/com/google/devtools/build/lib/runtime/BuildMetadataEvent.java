@@ -42,7 +42,7 @@ public class BuildMetadataEvent implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildMetadataId();
+    return BuildEventIdRepr.BUILD_METADATA;
   }
 
   @Override
@@ -62,6 +62,6 @@ public class BuildMetadataEvent implements BuildEventWithOrderConstraint {
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildStartedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
   }
 }

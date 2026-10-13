@@ -63,7 +63,7 @@ public class ExecRequestEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.ExecRequestId();
+    return BuildEventIdRepr.EXEC_REQUEST;
   }
 
   @Override

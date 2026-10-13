@@ -51,7 +51,7 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.BuildToolLogsId();
+    return BuildEventIdRepr.BUILD_TOOL_LOGS;
   }
 
   @Override
@@ -110,7 +110,7 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildFinishedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_FINISHED);
   }
 
   /** A local log file. */

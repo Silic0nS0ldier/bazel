@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.ActionConflictException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil.NullAction;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.analysis.config.ExecutionTransitionFactory;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
@@ -926,11 +927,10 @@ public class AspectTest extends AnalysisTestCase {
     AspectConfiguredEvent configuredEvent = getOnlyElement(collector.events);
     BuildEventIdRepr targetCompletedId = getOnlyElement(configuredEvent.getChildrenEvents());
     AspectKey key = getOnlyElement(analysisResult.getAspectsMap().keySet());
-    String configId = key.getConfigurationKey() == null
-        ? "none"
-        : key.getConfigurationKey().getOptions().checksum();
+    String configId = BuildConfigurationValue.configurationChecksum(key.getConfigurationKey());
     assertThat(targetCompletedId)
-        .isEqualTo(new BuildEventIdRepr.TargetCompletedId(label, configId, "AspectApplyingToFiles"));
+        .isEqualTo(
+            new BuildEventIdRepr.TargetCompletedId(label, configId, "AspectApplyingToFiles"));
   }
 
   @Test

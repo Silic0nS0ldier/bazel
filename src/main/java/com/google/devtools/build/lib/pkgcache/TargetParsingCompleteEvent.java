@@ -157,7 +157,7 @@ public final class TargetParsingCompleteEvent implements BuildEventWithOrderCons
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildStartedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
   }
 
   @Override

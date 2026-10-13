@@ -46,7 +46,7 @@ public final class BuildInfoEvent
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.WorkspaceStatusId();
+    return BuildEventIdRepr.WORKSPACE_STATUS;
   }
 
   @Override
@@ -56,7 +56,7 @@ public final class BuildInfoEvent
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildStartedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
   }
 
   @Override

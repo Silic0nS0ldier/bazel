@@ -65,7 +65,7 @@ public class GotOptionsEvent implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.OptionsParsedId();
+    return BuildEventIdRepr.OPTIONS_PARSED;
   }
 
   @Override
@@ -104,6 +104,6 @@ public class GotOptionsEvent implements BuildEventWithOrderConstraint {
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
     return ImmutableList.of(
-        new BuildEventIdRepr.BuildStartedId(), new BuildEventIdRepr.UnstructuredCommandLineId());
+        BuildEventIdRepr.BUILD_STARTED, BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE);
   }
 }

@@ -44,6 +44,7 @@ import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.buildeventstream.AbortedEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
 import com.google.devtools.build.lib.buildeventstream.BuildEventTransport;
@@ -82,7 +83,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import javax.annotation.Nullable;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 
 /**
  * Streamer in charge of listening to {@link BuildEvent} and post them to each of the {@link
@@ -131,7 +131,8 @@ public class BuildEventStreamer {
   // This is important in case of Skymeld, so that the TestAttempt events are resolved in the
   // correct order.
   @GuardedBy("this")
-  private final SetMultimap<BuildEventIdRepr, BuildEvent> pendingEvents = LinkedHashMultimap.create();
+  private final SetMultimap<BuildEventIdRepr, BuildEvent> pendingEvents =
+      LinkedHashMultimap.create();
 
   @GuardedBy("this")
   private int progressCount;
@@ -407,17 +408,17 @@ public class BuildEventStreamer {
    * {@link BuildCompletingEvent} that caused the early end of the stream.
    */
   private synchronized void clearMissingStartEvent(BuildEventIdRepr id) {
-    if (pendingEvents.containsKey(new BuildEventIdRepr.BuildStartedId())) {
+    if (pendingEvents.containsKey(BuildEventIdRepr.BUILD_STARTED)) {
       ImmutableSet.Builder<BuildEventIdRepr> children = ImmutableSet.builder();
       children.add(ProgressEvent.INITIAL_PROGRESS_UPDATE);
       children.add(id);
       children.addAll(
-          pendingEvents.get(new BuildEventIdRepr.BuildStartedId()).stream()
+          pendingEvents.get(BuildEventIdRepr.BUILD_STARTED).stream()
               .map(BuildEvent::getEventId)
               .collect(ImmutableSet.toImmutableSet()));
       buildEvent(
           new AbortedEvent(
-              new BuildEventIdRepr.BuildStartedId(),
+              BuildEventIdRepr.BUILD_STARTED,
               children.build(),
               getLastAbortReason(),
               getAbortReasonDetails()));
@@ -619,7 +620,8 @@ public class BuildEventStreamer {
    *     is useful when builds abort, as they can become children of the AbortedEvent.
    */
   @Subscribe
-  public Collection<BuildEventIdRepr> releaseReplaceableBuildEvent(ReleaseReplaceableBuildEvent event) {
+  public Collection<BuildEventIdRepr> releaseReplaceableBuildEvent(
+      ReleaseReplaceableBuildEvent event) {
     ImmutableList.Builder<BuildEventIdRepr> bufferedEventIDs = ImmutableList.builder();
     BuildEvent replaceable = null;
     synchronized (this) {
@@ -710,7 +712,7 @@ public class BuildEventStreamer {
     }
 
     if (event instanceof BuildCompletingEvent
-        && !event.getEventId().equals(new BuildEventIdRepr.BuildStartedId())) {
+        && !event.getEventId().equals(BuildEventIdRepr.BUILD_STARTED)) {
       clearMissingStartEvent(event.getEventId());
     }
 

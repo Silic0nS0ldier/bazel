@@ -1327,8 +1327,7 @@ public class BuildTool {
               new BuildCompleteEvent(
                   result,
                   ImmutableList.of(
-                      new BuildEventIdRepr.BuildToolLogsId(),
-                      new BuildEventIdRepr.BuildMetricsId())));
+                      BuildEventIdRepr.BUILD_TOOL_LOGS, BuildEventIdRepr.BUILD_METRICS)));
     }
     // Post the build tool logs event; the corresponding local files may be contributed from
     // modules, and this has to happen after posting the BuildCompleteEvent because that's when

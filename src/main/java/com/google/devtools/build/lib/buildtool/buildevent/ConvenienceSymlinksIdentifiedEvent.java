@@ -39,7 +39,7 @@ public final class ConvenienceSymlinksIdentifiedEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.ConvenienceSymlinksIdentifiedId();
+    return BuildEventIdRepr.CONVENIENCE_SYMLINKS_IDENTIFIED;
   }
 
   @Override

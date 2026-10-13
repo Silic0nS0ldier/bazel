@@ -1714,7 +1714,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(aborted0.getAborted().getReason()).isEqualTo(AbortReason.TIME_OUT);
     assertThat(aborted0.getAborted().getDescription()).isEmpty();
 
-    BuildEventStreamProtos.BuildEvent aborted1 = getBepEvent(new BuildEventIdRepr.BuildFinishedId());
+    BuildEventStreamProtos.BuildEvent aborted1 = getBepEvent(BuildEventIdRepr.BUILD_FINISHED);
     assertThat(aborted1).isNotNull();
     assertThat(aborted1.hasAborted()).isTrue();
     assertThat(aborted1.getAborted().getReason()).isEqualTo(AbortReason.TIME_OUT);

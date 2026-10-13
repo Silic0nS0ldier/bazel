@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 
+import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -115,6 +116,8 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
   private static AnalysisFailedCause createRootCause(
       Label label, String configuration, DetailedExitCode detailedExitCode) {
     return new AnalysisFailedCause(
-        label, configuration == null ? "none" : configuration, detailedExitCode);
+        label,
+        configuration == null ? BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM : configuration,
+        detailedExitCode);
   }
 }

@@ -134,7 +134,7 @@ class ProtoOutputFormatterCallback extends CqueryThreadsafeCallback {
         configBuilder.addFragmentOptions(fragmentOptions.build());
       }
 
-      String checksum = configurationValue.getEventId().getConfiguration().getId();
+      String checksum = configurationValue.checksum();
       BuildEventStreamProtos.Configuration configProto =
           configurationValue
               .toBuildEvent()

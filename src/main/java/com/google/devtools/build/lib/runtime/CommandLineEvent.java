@@ -61,7 +61,7 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildStartedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
   }
 
   /** A CommandLineEvent that stores functions and values common to both Bazel command lines. */

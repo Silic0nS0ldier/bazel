@@ -68,7 +68,8 @@ public class TestProgressTest {
                         .setTestProgress(
                             TestProgressId.newBuilder()
                                 .setLabel(LABEL.toString())
-                                .setConfiguration(ConfigurationId.newBuilder().setId(CONFIG_CHECKSUM))
+                                .setConfiguration(
+                                    ConfigurationId.newBuilder().setId(CONFIG_CHECKSUM))
                                 .setRun(1)
                                 .setShard(2)
                                 .setAttempt(3)

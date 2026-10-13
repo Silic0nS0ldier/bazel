@@ -35,7 +35,7 @@ public class OriginalUnstructuredCommandLineEvent implements BuildEventWithOrder
 
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.UnstructuredCommandLineId();
+    return BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE;
   }
 
   @Override
@@ -45,7 +45,7 @@ public class OriginalUnstructuredCommandLineEvent implements BuildEventWithOrder
 
   @Override
   public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(new BuildEventIdRepr.BuildStartedId());
+    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
   }
 
   @Override

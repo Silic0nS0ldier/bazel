@@ -111,7 +111,6 @@ public final class TargetCompleteEvent
   private static final BaseEncoding LOWERCASE_HEX_ENCODING = BaseEncoding.base16().lowerCase();
 
   private final Label label;
-  // TODO according to heap dump analysis, many other fields can be derived from this.
   private final ConfiguredTargetKey configuredTargetKey;
   private final NestedSet<Cause> rootCauses;
   private final CompletionContext completionContext;
@@ -123,8 +122,7 @@ public final class TargetCompleteEvent
   @Nullable private final Long testTimeoutSeconds;
   @Nullable private final TestProvider.TestParams testParams;
   private final BuildEvent configurationEvent;
-  @Nullable
-  private final BuildConfigurationValue configuration;
+  private final String configChecksum;
   private final Iterable<String> tags;
   private final ExecutableTargetData executableTargetData;
   @Nullable private final DetailedExitCode detailedExitCode;
@@ -155,7 +153,8 @@ public final class TargetCompleteEvent
     this.isTest = isTest;
     this.announceTargetSummary = announceTargetSummary;
     this.testTimeoutSeconds = isTest ? getTestTimeoutSeconds(targetAndData) : null;
-    this.configuration = targetAndData.getConfiguration();
+    BuildConfigurationValue configuration = targetAndData.getConfiguration();
+    this.configChecksum = BuildConfigurationValue.configurationChecksum(configuration);
     this.configurationEvent = configuration != null ? configuration.toBuildEvent() : null;
     this.testParams =
         isTest
@@ -246,13 +245,11 @@ public final class TargetCompleteEvent
 
   @Override
   public BuildEventIdRepr getEventId() {
-    String configChecksum = configuration != null ? configuration.checksum() : null;
     return new BuildEventIdRepr.TargetCompletedId(originalLabel, configChecksum, null);
   }
 
   @Override
   public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
-    String configChecksum = configuration != null ? configuration.checksum() : null;
     ImmutableList.Builder<BuildEventIdRepr> childrenBuilder = ImmutableList.builder();
     for (Cause cause : rootCauses.toList()) {
       childrenBuilder.add(cause.getId());
@@ -263,7 +260,8 @@ public final class TargetCompleteEvent
       // it will be announced with the action that made the new attempt necessary.
       for (int run = 0; run < Math.max(testParams.getRuns(), 1); run++) {
         for (int shard = 0; shard < Math.max(testParams.getShards(), 1); shard++) {
-          childrenBuilder.add(new BuildEventIdRepr.TestResultId(label, configChecksum, run + 1, shard + 1, 1));
+          childrenBuilder.add(
+              new BuildEventIdRepr.TestResultId(label, configChecksum, run + 1, shard + 1, 1));
         }
       }
       childrenBuilder.add(new BuildEventIdRepr.TestSummaryId(label, configChecksum));
