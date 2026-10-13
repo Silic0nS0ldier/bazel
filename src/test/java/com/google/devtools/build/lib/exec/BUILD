@@ -110,6 +110,7 @@ java_library(
         "//third_party/java/guava:collect",
         "//third_party/java/guava:concurrent",
         "//third_party/java/guava:io",
+        "//third_party/java/guava:testing",
         "//third_party/java/jsr305_annotations",
         "//third_party/java/junit",
         "//third_party/java/mockito",
