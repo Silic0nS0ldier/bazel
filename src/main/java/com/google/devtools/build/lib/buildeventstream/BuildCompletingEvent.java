@@ -32,10 +32,10 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   private final ExitCode exitCode;
   private final long finishTimeMillis;
 
-  private final Collection<BuildEventIdRepr> children;
+  private final Collection<BuildEventId> children;
 
   public BuildCompletingEvent(
-      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventIdRepr> children) {
+      ExitCode exitCode, long finishTimeMillis, Collection<BuildEventId> children) {
     this.detailedExitCode = null;
     this.exitCode = exitCode;
     this.finishTimeMillis = finishTimeMillis;
@@ -43,9 +43,7 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   }
 
   public BuildCompletingEvent(
-      DetailedExitCode detailedExitCode,
-      long finishTimeMillis,
-      Collection<BuildEventIdRepr> children) {
+      DetailedExitCode detailedExitCode, long finishTimeMillis, Collection<BuildEventId> children) {
     this.detailedExitCode = detailedExitCode;
     this.exitCode = detailedExitCode.getExitCode();
     this.finishTimeMillis = finishTimeMillis;
@@ -61,12 +59,12 @@ public abstract class BuildCompletingEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.BUILD_FINISHED;
+  public BuildEventId getEventId() {
+    return BuildEventId.BUILD_FINISHED;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return children;
   }
 

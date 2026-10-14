@@ -50,12 +50,12 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.BUILD_TOOL_LOGS;
+  public BuildEventId getEventId() {
+    return BuildEventId.BUILD_TOOL_LOGS;
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -109,8 +109,8 @@ public class BuildToolLogs implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(BuildEventIdRepr.BUILD_FINISHED);
+  public Collection<BuildEventId> postedAfter() {
+    return ImmutableList.of(BuildEventId.BUILD_FINISHED);
   }
 
   /** A local log file. */

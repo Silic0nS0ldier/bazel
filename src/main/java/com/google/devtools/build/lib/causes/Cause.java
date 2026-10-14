@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.causes;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 
@@ -23,8 +23,8 @@ public interface Cause {
   /** Return the label associated with the failure. */
   Label getLabel();
 
-  /** Return the event id for the cause as a {@link BuildEventIdRepr}. */
-  BuildEventIdRepr getId();
+  /** Return the event id for the cause as a {@link BuildEventId}. */
+  BuildEventId getId();
 
   /** Return details describing the failure. */
   DetailedExitCode getDetailedExitCode();

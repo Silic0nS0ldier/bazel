@@ -44,7 +44,7 @@ import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.buildeventstream.AbortedEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
 import com.google.devtools.build.lib.buildeventstream.BuildEventTransport;
@@ -112,17 +112,17 @@ public class BuildEventStreamer {
    * first and next (unposted) progress event is tracked.
    */
   @GuardedBy("this")
-  private Set<BuildEventIdRepr> frontierEvents;
+  private Set<BuildEventId> frontierEvents;
 
   /**
    * Tracks all events that have been posted. Notable exceptions: - Only the first progress event is
    * tracked.
    */
   @GuardedBy("this")
-  private final Set<BuildEventIdRepr> postedEvents = CompactHashSet.create();
+  private final Set<BuildEventId> postedEvents = CompactHashSet.create();
 
   @GuardedBy("this")
-  private final Set<BuildEventIdRepr> configurationsPosted = new HashSet<>();
+  private final Set<BuildEventId> configurationsPosted = new HashSet<>();
 
   @GuardedBy("this")
   private List<Pair<String, String>> bufferedStdoutStderrPairs = new ArrayList<>();
@@ -131,8 +131,7 @@ public class BuildEventStreamer {
   // This is important in case of Skymeld, so that the TestAttempt events are resolved in the
   // correct order.
   @GuardedBy("this")
-  private final SetMultimap<BuildEventIdRepr, BuildEvent> pendingEvents =
-      LinkedHashMultimap.create();
+  private final SetMultimap<BuildEventId, BuildEvent> pendingEvents = LinkedHashMultimap.create();
 
   @GuardedBy("this")
   private int progressCount;
@@ -153,7 +152,7 @@ public class BuildEventStreamer {
   // #buildComplete is called.
   // Thread-safety note: in the final, sequential phase of the build, we ignore any events that are
   // announced by events posted after #buildComplete is called.
-  private Set<BuildEventIdRepr> finalEventsToCome = null;
+  private Set<BuildEventId> finalEventsToCome = null;
 
   // True, if we already closed the stream.
   @GuardedBy("this")
@@ -273,7 +272,7 @@ public class BuildEventStreamer {
   }
 
   // This exists to nop out the announcement of new events after #buildComplete
-  private synchronized void maybeRegisterAnnouncedEvent(BuildEventIdRepr id) {
+  private synchronized void maybeRegisterAnnouncedEvent(BuildEventId id) {
     if (finalEventsToCome != null) {
       return;
     }
@@ -285,12 +284,12 @@ public class BuildEventStreamer {
   }
 
   // This exists to nop out the announcement of new events after #buildComplete
-  private synchronized void maybeRegisterAnnouncedEvents(Collection<BuildEventIdRepr> ids) {
+  private synchronized void maybeRegisterAnnouncedEvents(Collection<BuildEventId> ids) {
     if (finalEventsToCome != null) {
       return;
     }
 
-    for (BuildEventIdRepr id : ids) {
+    for (BuildEventId id : ids) {
       if (!postedEvents.contains(id)) {
         frontierEvents.add(id);
       }
@@ -309,7 +308,7 @@ public class BuildEventStreamer {
   @SuppressWarnings("GuardedBy")
   private synchronized void post(BuildEvent event) {
     List<BuildEvent> linkEvents = null;
-    BuildEventIdRepr id = event.getEventId();
+    BuildEventId id = event.getEventId();
     List<BuildEvent> flushEvents = null;
     boolean lastEvent = false;
 
@@ -407,18 +406,18 @@ public class BuildEventStreamer {
    * moreover, make that artificial start event announce all events blocked on it, as well as the
    * {@link BuildCompletingEvent} that caused the early end of the stream.
    */
-  private synchronized void clearMissingStartEvent(BuildEventIdRepr id) {
-    if (pendingEvents.containsKey(BuildEventIdRepr.BUILD_STARTED)) {
-      ImmutableSet.Builder<BuildEventIdRepr> children = ImmutableSet.builder();
+  private synchronized void clearMissingStartEvent(BuildEventId id) {
+    if (pendingEvents.containsKey(BuildEventId.BUILD_STARTED)) {
+      ImmutableSet.Builder<BuildEventId> children = ImmutableSet.builder();
       children.add(ProgressEvent.INITIAL_PROGRESS_UPDATE);
       children.add(id);
       children.addAll(
-          pendingEvents.get(BuildEventIdRepr.BUILD_STARTED).stream()
+          pendingEvents.get(BuildEventId.BUILD_STARTED).stream()
               .map(BuildEvent::getEventId)
               .collect(ImmutableSet.toImmutableSet()));
       buildEvent(
           new AbortedEvent(
-              BuildEventIdRepr.BUILD_STARTED,
+              BuildEventId.BUILD_STARTED,
               children.build(),
               getLastAbortReason(),
               getAbortReasonDetails()));
@@ -428,16 +427,16 @@ public class BuildEventStreamer {
   /** Clear pending events by generating aborted events for all their requests. */
   private synchronized void clearPendingEvents() {
     while (!pendingEvents.isEmpty()) {
-      BuildEventIdRepr id = pendingEvents.keySet().iterator().next();
-      Collection<BuildEventIdRepr> bufferedEventsPendingOnThisType =
+      BuildEventId id = pendingEvents.keySet().iterator().next();
+      Collection<BuildEventId> bufferedEventsPendingOnThisType =
           releaseReplaceableBuildEvent(new ReleaseReplaceableBuildEvent(id));
       if (!bufferedEventsPendingOnThisType.isEmpty()) {
         // Replaceable (BUFERED_FOR_REPLACEMENT) events finally trigger on build abort, so
         // we don't need a distinct AbortedEvent to acknowledge them. Normal buffered events
         // don't trigger because their trigger event never happened, so they need an
         // AbortedEvent.
-        ImmutableList.Builder<BuildEventIdRepr> children = ImmutableList.builder();
-        for (BuildEventIdRepr bufferedId : bufferedEventsPendingOnThisType) {
+        ImmutableList.Builder<BuildEventId> children = ImmutableList.builder();
+        for (BuildEventId bufferedId : bufferedEventsPendingOnThisType) {
           if (frontierEvents == null
               || (!frontierEvents.contains(bufferedId) && !postedEvents.contains(bufferedId))) {
             children.add(bufferedId);
@@ -453,15 +452,15 @@ public class BuildEventStreamer {
    * Clear all events that are announced but not posted; events not naturally closed by the expected
    * event normally only occur if the build is aborted.
    */
-  private synchronized void clearFrontierEvents(Collection<BuildEventIdRepr> dontclear) {
+  private synchronized void clearFrontierEvents(Collection<BuildEventId> dontclear) {
     if (frontierEvents != null) {
       // create a copy of the identifiers to clear, as the post method
       // will change the frontier (announced but not posted) set.
-      Set<BuildEventIdRepr> ids;
+      Set<BuildEventId> ids;
       synchronized (this) {
         ids = Sets.newHashSet(frontierEvents);
       }
-      for (BuildEventIdRepr id : ids) {
+      for (BuildEventId id : ids) {
         if (!dontclear.contains(id)) {
           post(new AbortedEvent(id, getLastAbortReason(), getAbortReasonDetails()));
         }
@@ -538,8 +537,8 @@ public class BuildEventStreamer {
   }
 
   /**
-   * Releases retained {@link BuildEventIdRepr} data structures when the build event stream has
-   * closed or completed, freeing memory occupied by announced and posted event graphs.
+   * Releases retained {@link BuildEventId} data structures when the build event stream has closed
+   * or completed, freeing memory occupied by announced and posted event graphs.
    */
   @VisibleForTesting
   synchronized void clearRetainedEventState() {
@@ -585,7 +584,7 @@ public class BuildEventStreamer {
 
   private void maybeReportConfiguration(@Nullable BuildEvent configuration) {
     BuildEvent event = configuration == null ? NullConfiguration.INSTANCE : configuration;
-    BuildEventIdRepr id = event.getEventId();
+    BuildEventId id = event.getEventId();
     synchronized (this) {
       if (configurationsPosted.add(id)) {
         post(event);
@@ -620,9 +619,8 @@ public class BuildEventStreamer {
    *     is useful when builds abort, as they can become children of the AbortedEvent.
    */
   @Subscribe
-  public Collection<BuildEventIdRepr> releaseReplaceableBuildEvent(
-      ReleaseReplaceableBuildEvent event) {
-    ImmutableList.Builder<BuildEventIdRepr> bufferedEventIDs = ImmutableList.builder();
+  public Collection<BuildEventId> releaseReplaceableBuildEvent(ReleaseReplaceableBuildEvent event) {
+    ImmutableList.Builder<BuildEventId> bufferedEventIDs = ImmutableList.builder();
     BuildEvent replaceable = null;
     synchronized (this) {
       var pendingEventsThisType = pendingEvents.get(event.getEventId()).iterator();
@@ -651,7 +649,7 @@ public class BuildEventStreamer {
   public void buildEvent(BuildEvent event) {
     if (finalEventsToCome != null) {
       synchronized (this) {
-        BuildEventIdRepr id = event.getEventId();
+        BuildEventId id = event.getEventId();
         if (finalEventsToCome.contains(id)) {
           finalEventsToCome.remove(id);
         } else {
@@ -712,7 +710,7 @@ public class BuildEventStreamer {
     }
 
     if (event instanceof BuildCompletingEvent
-        && !event.getEventId().equals(BuildEventIdRepr.BUILD_STARTED)) {
+        && !event.getEventId().equals(BuildEventId.BUILD_STARTED)) {
       clearMissingStartEvent(event.getEventId());
     }
 
@@ -791,7 +789,7 @@ public class BuildEventStreamer {
       // Technically it seems we should do this with all events we're dropping but that would be
       // a lot of extra locking e.g. for every ActionExecutedEvent and it's only necessary to
       // check for this where events are configured to "post after" events that may be discarded.
-      BuildEventIdRepr eventId = event.getEventId();
+      BuildEventId eventId = event.getEventId();
       Set<BuildEvent> blockedEventsFifo;
       synchronized (this) {
         blockedEventsFifo = pendingEvents.removeAll(eventId);
@@ -1049,7 +1047,7 @@ public class BuildEventStreamer {
       return false;
     }
     // Check if all prerequisite events are posted already.
-    for (BuildEventIdRepr prerequisiteId : buildEventWithOrderConstraint.postedAfter()) {
+    for (BuildEventId prerequisiteId : buildEventWithOrderConstraint.postedAfter()) {
       if (!postedEvents.contains(prerequisiteId)) {
         pendingEvents.put(prerequisiteId, event);
         return true;

@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.runtime;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -64,12 +64,12 @@ public class GotOptionsEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.OPTIONS_PARSED;
+  public BuildEventId getEventId() {
+    return BuildEventId.OPTIONS_PARSED;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -102,8 +102,7 @@ public class GotOptionsEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(
-        BuildEventIdRepr.BUILD_STARTED, BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE);
+  public Collection<BuildEventId> postedAfter() {
+    return ImmutableList.of(BuildEventId.BUILD_STARTED, BuildEventId.UNSTRUCTURED_COMMAND_LINE);
   }
 }

@@ -21,7 +21,7 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.BlazeVersionInfo;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.JavaVersionInfo;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -92,25 +92,23 @@ public abstract class BuildStartingEvent implements BuildEvent {
   }
 
   @Override
-  public final BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.BUILD_STARTED;
+  public final BuildEventId getEventId() {
+    return BuildEventId.BUILD_STARTED;
   }
 
   @Override
-  public final ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public final ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of(
         ProgressEvent.INITIAL_PROGRESS_UPDATE,
-        BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE,
-        new BuildEventIdRepr.StructuredCommandLineId(
-            CommandLineEvent.OriginalCommandLineEvent.LABEL),
-        new BuildEventIdRepr.StructuredCommandLineId(
-            CommandLineEvent.CanonicalCommandLineEvent.LABEL),
-        new BuildEventIdRepr.StructuredCommandLineId(CommandLineEvent.ToolCommandLineEvent.LABEL),
-        BuildEventIdRepr.BUILD_METADATA,
-        BuildEventIdRepr.OPTIONS_PARSED,
-        BuildEventIdRepr.WORKSPACE_STATUS,
-        new BuildEventIdRepr.PatternExpandedId(request().getTargets()),
-        BuildEventIdRepr.BUILD_FINISHED);
+        BuildEventId.UNSTRUCTURED_COMMAND_LINE,
+        new BuildEventId.StructuredCommandLineId(CommandLineEvent.OriginalCommandLineEvent.LABEL),
+        new BuildEventId.StructuredCommandLineId(CommandLineEvent.CanonicalCommandLineEvent.LABEL),
+        new BuildEventId.StructuredCommandLineId(CommandLineEvent.ToolCommandLineEvent.LABEL),
+        BuildEventId.BUILD_METADATA,
+        BuildEventId.OPTIONS_PARSED,
+        BuildEventId.WORKSPACE_STATUS,
+        new BuildEventId.PatternExpandedId(request().getTargets()),
+        BuildEventId.BUILD_FINISHED);
   }
 
   @Override

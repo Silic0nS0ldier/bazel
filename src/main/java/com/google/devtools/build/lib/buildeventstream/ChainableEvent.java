@@ -34,7 +34,7 @@ public interface ChainableEvent {
    * <p>Event identifiers have to be unique within the set of events belonging to the same build
    * invocation.
    */
-  BuildEventIdRepr getEventId();
+  BuildEventId getEventId();
 
   /**
    * Provide the children of the event.
@@ -46,5 +46,5 @@ public interface ChainableEvent {
    *
    * <p>A build-event stream is finished if and only if all announced children have occurred.
    */
-  Collection<BuildEventIdRepr> getChildrenEvents();
+  Collection<BuildEventId> getChildrenEvents();
 }

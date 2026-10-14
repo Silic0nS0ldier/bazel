@@ -29,7 +29,7 @@ import com.google.devtools.build.lib.buildeventstream.ArtifactGroupNamer;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.buildeventstream.PathConverter;
@@ -59,12 +59,12 @@ class NamedArtifactGroup implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.NamedSetOfFilesId(name);
+  public BuildEventId getEventId() {
+    return new BuildEventId.NamedSetOfFilesId(name);
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableSet.of();
   }
 

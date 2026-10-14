@@ -18,7 +18,7 @@ import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -67,13 +67,12 @@ public final class TestProgress implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TestProgressId(
-        label, configChecksum, run, shard, attempt, opaqueCount);
+  public BuildEventId getEventId() {
+    return new BuildEventId.TestProgressId(label, configChecksum, run, shard, attempt, opaqueCount);
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

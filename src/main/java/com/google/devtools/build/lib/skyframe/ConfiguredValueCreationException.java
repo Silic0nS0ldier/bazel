@@ -13,8 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.skyframe;
 
-
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -117,7 +116,7 @@ public final class ConfiguredValueCreationException extends AbstractSaneAnalysis
       Label label, String configuration, DetailedExitCode detailedExitCode) {
     return new AnalysisFailedCause(
         label,
-        configuration == null ? BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM : configuration,
+        configuration == null ? BuildEventId.ConfigurationId.NULL_CHECKSUM : configuration,
         detailedExitCode);
   }
 }

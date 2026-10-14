@@ -17,7 +17,7 @@ package com.google.devtools.build.lib.analysis;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.buildeventstream.ProgressEvent;
@@ -53,18 +53,17 @@ public final class NoBuildEvent implements BuildEvent {
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     if (separateFinishedEvent) {
-      return ImmutableList.of(
-          ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdRepr.BUILD_FINISHED);
+      return ImmutableList.of(ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventId.BUILD_FINISHED);
     } else {
       return ImmutableList.of(ProgressEvent.INITIAL_PROGRESS_UPDATE);
     }
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.BUILD_STARTED;
+  public BuildEventId getEventId() {
+    return BuildEventId.BUILD_STARTED;
   }
 
   @Override

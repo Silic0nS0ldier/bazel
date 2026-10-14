@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TestStatus;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -47,7 +47,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event =
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, CONFIGURATION_KEY), false, false, null);
     assertThat(event.getEventId())
-        .isEqualTo(new BuildEventIdRepr.TargetSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
+        .isEqualTo(new BuildEventId.TargetSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
   }
 
   @Test
@@ -56,8 +56,8 @@ public final class TargetSummaryEventTest {
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, false, null);
     assertThat(event.getEventId())
         .isEqualTo(
-            new BuildEventIdRepr.TargetSummaryId(
-                Label.create(PATH, TARGET_NAME), BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM));
+            new BuildEventId.TargetSummaryId(
+                Label.create(PATH, TARGET_NAME), BuildEventId.ConfigurationId.NULL_CHECKSUM));
   }
 
   @Test
@@ -65,7 +65,7 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), false, false, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            new BuildEventIdRepr.TargetCompletedId(
+            new BuildEventId.TargetCompletedId(
                 Label.create(PATH, TARGET_NAME), CHECKSUM, /* aspect= */ null));
   }
 
@@ -74,8 +74,8 @@ public final class TargetSummaryEventTest {
     TargetSummaryEvent event = TargetSummaryEvent.create(stubTarget(), false, true, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            new BuildEventIdRepr.TargetCompletedId(Label.create(PATH, TARGET_NAME), CHECKSUM, null),
-            new BuildEventIdRepr.TestSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
+            new BuildEventId.TargetCompletedId(Label.create(PATH, TARGET_NAME), CHECKSUM, null),
+            new BuildEventId.TestSummaryId(Label.create(PATH, TARGET_NAME), CHECKSUM));
   }
 
   @Test
@@ -84,12 +84,12 @@ public final class TargetSummaryEventTest {
         TargetSummaryEvent.create(target(PATH, TARGET_NAME, null), false, true, null);
     assertThat(event.postedAfter())
         .containsExactly(
-            new BuildEventIdRepr.TargetCompletedId(
+            new BuildEventId.TargetCompletedId(
                 Label.create(PATH, TARGET_NAME),
-                BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM,
+                BuildEventId.ConfigurationId.NULL_CHECKSUM,
                 /* aspect= */ null),
-            new BuildEventIdRepr.TestSummaryId(
-                Label.create(PATH, TARGET_NAME), BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM));
+            new BuildEventId.TestSummaryId(
+                Label.create(PATH, TARGET_NAME), BuildEventId.ConfigurationId.NULL_CHECKSUM));
   }
 
   @Test

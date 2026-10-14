@@ -18,7 +18,7 @@ import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
@@ -55,13 +55,13 @@ import javax.annotation.Nullable;
 public abstract class CommandLineEvent implements BuildEventWithOrderConstraint {
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
+  public Collection<BuildEventId> postedAfter() {
+    return ImmutableList.of(BuildEventId.BUILD_STARTED);
   }
 
   /** A CommandLineEvent that stores functions and values common to both Bazel command lines. */
@@ -285,8 +285,8 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
     }
 
     @Override
-    public BuildEventIdRepr getEventId() {
-      return new BuildEventIdRepr.StructuredCommandLineId(LABEL);
+    public BuildEventId getEventId() {
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     /**
@@ -391,8 +391,8 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
     }
 
     @Override
-    public BuildEventIdRepr getEventId() {
-      return new BuildEventIdRepr.StructuredCommandLineId(LABEL);
+    public BuildEventId getEventId() {
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     @Override
@@ -525,8 +525,8 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
      * more descriptive.
      */
     @Override
-    public BuildEventIdRepr getEventId() {
-      return new BuildEventIdRepr.StructuredCommandLineId(LABEL);
+    public BuildEventId getEventId() {
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     /**

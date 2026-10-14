@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.runtime;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -41,12 +41,12 @@ public class BuildMetadataEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.BUILD_METADATA;
+  public BuildEventId getEventId() {
+    return BuildEventId.BUILD_METADATA;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -61,7 +61,7 @@ public class BuildMetadataEvent implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
+  public Collection<BuildEventId> postedAfter() {
+    return ImmutableList.of(BuildEventId.BUILD_STARTED);
   }
 }

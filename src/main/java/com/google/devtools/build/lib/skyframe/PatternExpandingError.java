@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.skyframe;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import java.util.Collection;
@@ -54,16 +54,16 @@ public final class PatternExpandingError implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     if (skipped) {
-      return new BuildEventIdRepr.PatternSkippedId(pattern);
+      return new BuildEventId.PatternSkippedId(pattern);
     } else {
-      return new BuildEventIdRepr.PatternExpandedId(pattern);
+      return new BuildEventId.PatternExpandedId(pattern);
     }
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

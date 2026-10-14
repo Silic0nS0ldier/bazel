@@ -17,7 +17,7 @@ package com.google.devtools.build.lib.actions;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import java.util.Collection;
 import java.util.Objects;
@@ -28,12 +28,11 @@ import java.util.Objects;
  */
 public final class BuildConfigurationEvent implements BuildEvent {
 
-  private final BuildEventIdRepr.ConfigurationId eventId;
+  private final BuildEventId.ConfigurationId eventId;
   private final BuildEventStreamProtos.BuildEvent eventProto;
 
   public BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent eventProto) {
-    this.eventId =
-        new BuildEventIdRepr.ConfigurationId(eventProto.getId().getConfiguration().getId());
+    this.eventId = new BuildEventId.ConfigurationId(eventProto.getId().getConfiguration().getId());
     this.eventProto = eventProto;
   }
 
@@ -43,12 +42,12 @@ public final class BuildConfigurationEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr.ConfigurationId getEventId() {
+  public BuildEventId.ConfigurationId getEventId() {
     return eventId;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

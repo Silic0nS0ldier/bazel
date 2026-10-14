@@ -24,7 +24,7 @@ import com.google.devtools.build.lib.actions.CompletionContext;
 import com.google.devtools.build.lib.actions.EventReportingArtifacts;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactHelper.ArtifactsInOutputGroup;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
@@ -133,19 +133,19 @@ public final class AspectCompleteEvent
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TargetCompletedId(
+  public BuildEventId getEventId() {
+    return new BuildEventId.TargetCompletedId(
         aspectKey.getLabel(),
         configurationChecksum(aspectKey.getConfigurationKey()),
         aspectKey.getAspectDescriptor().getDescription());
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
+  public Collection<BuildEventId> postedAfter() {
     if (rootCauses.isEmpty()) {
       return ImmutableList.of();
     }
-    ImmutableList.Builder<BuildEventIdRepr> postedAfter = ImmutableList.builder();
+    ImmutableList.Builder<BuildEventId> postedAfter = ImmutableList.builder();
     for (Cause cause : rootCauses.toList()) {
       postedAfter.add(cause.getId());
     }
@@ -153,7 +153,7 @@ public final class AspectCompleteEvent
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

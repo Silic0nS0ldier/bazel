@@ -25,12 +25,12 @@ public final class NullConfiguration implements BuildEvent {
   public static final NullConfiguration INSTANCE = new NullConfiguration();
 
   @Override
-  public BuildEventIdRepr.ConfigurationId getEventId() {
-    return BuildEventIdRepr.ConfigurationId.NULL;
+  public BuildEventId.ConfigurationId getEventId() {
+    return BuildEventId.ConfigurationId.NULL;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

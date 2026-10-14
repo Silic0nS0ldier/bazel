@@ -16,7 +16,7 @@ package com.google.devtools.build.lib.runtime;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -34,18 +34,18 @@ public class OriginalUnstructuredCommandLineEvent implements BuildEventWithOrder
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return BuildEventIdRepr.UNSTRUCTURED_COMMAND_LINE;
+  public BuildEventId getEventId() {
+    return BuildEventId.UNSTRUCTURED_COMMAND_LINE;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
-    return ImmutableList.of(BuildEventIdRepr.BUILD_STARTED);
+  public Collection<BuildEventId> postedAfter() {
+    return ImmutableList.of(BuildEventId.BUILD_STARTED);
   }
 
   @Override

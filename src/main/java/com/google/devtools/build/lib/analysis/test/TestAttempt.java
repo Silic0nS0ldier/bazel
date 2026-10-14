@@ -22,7 +22,7 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TestStatus;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
@@ -189,8 +189,8 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TestResultId(
+  public BuildEventId getEventId() {
+    return new BuildEventId.TestResultId(
         testAction.getOwner().getLabel(),
         configurationChecksum(testAction.getConfiguration()),
         testAction.getRunNumber() + 1,
@@ -199,21 +199,21 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
   }
 
   @Override
-  public Collection<BuildEventIdRepr> postedAfter() {
+  public Collection<BuildEventId> postedAfter() {
     return ImmutableList.of(
-        new BuildEventIdRepr.TargetCompletedId(
+        new BuildEventId.TargetCompletedId(
             testAction.getOwner().getLabel(),
             configurationChecksum(testAction.getConfiguration()),
             null));
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     if (lastAttempt) {
       return ImmutableList.of();
     } else {
       return ImmutableList.of(
-          new BuildEventIdRepr.TestResultId(
+          new BuildEventId.TestResultId(
               testAction.getOwner().getLabel(),
               configurationChecksum(testAction.getConfiguration()),
               testAction.getRunNumber() + 1,

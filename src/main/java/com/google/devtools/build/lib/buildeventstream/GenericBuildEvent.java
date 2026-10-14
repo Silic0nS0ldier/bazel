@@ -23,21 +23,21 @@ import java.util.Collection;
  * the common infrastructure for the infrastructural events.
  */
 public class GenericBuildEvent implements BuildEvent {
-  private final BuildEventIdRepr id;
-  private final Collection<BuildEventIdRepr> children;
+  private final BuildEventId id;
+  private final Collection<BuildEventId> children;
 
-  public GenericBuildEvent(BuildEventIdRepr id, Collection<BuildEventIdRepr> children) {
+  public GenericBuildEvent(BuildEventId id, Collection<BuildEventId> children) {
     this.id = id;
     this.children = children;
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     return id;
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return children;
   }
 
@@ -45,7 +45,7 @@ public class GenericBuildEvent implements BuildEvent {
     BuildEventStreamProtos.BuildEvent.Builder builder =
         BuildEventStreamProtos.BuildEvent.newBuilder();
     builder.setId(event.getEventId().toProto());
-    for (BuildEventIdRepr childId : event.getChildrenEvents()) {
+    for (BuildEventId childId : event.getChildrenEvents()) {
       builder.addChildren(childId.toProto());
     }
     return builder;

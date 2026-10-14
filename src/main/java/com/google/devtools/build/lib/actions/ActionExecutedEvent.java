@@ -22,7 +22,7 @@ import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -123,19 +123,17 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     if (action.getOwner() == null) {
-      return new BuildEventIdRepr.ActionCompletedId(actionId, null, null);
+      return new BuildEventId.ActionCompletedId(actionId, null, null);
     } else {
-      return new BuildEventIdRepr.ActionCompletedId(
-          actionId,
-          action.getOwner().getLabel(),
-          action.getOwner().getConfigurationChecksum());
+      return new BuildEventId.ActionCompletedId(
+          actionId, action.getOwner().getLabel(), action.getOwner().getConfigurationChecksum());
     }
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 
@@ -218,10 +216,8 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
     }
     if (action.getOwner() != null) {
       BuildConfigurationEvent configuration = action.getOwner().getBuildConfigurationEvent();
-      BuildEventIdRepr.ConfigurationId configurationId =
-          configuration == null
-              ? BuildEventIdRepr.ConfigurationId.NULL
-              : configuration.getEventId();
+      BuildEventId.ConfigurationId configurationId =
+          configuration == null ? BuildEventId.ConfigurationId.NULL : configuration.getEventId();
       actionBuilder.setConfiguration(configurationId.toConfigurationIdProto());
     }
     if (exception == null) {

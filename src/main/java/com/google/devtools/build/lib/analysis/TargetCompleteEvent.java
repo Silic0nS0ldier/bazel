@@ -39,7 +39,7 @@ import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext.OutputGroupFileMode;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.File;
@@ -244,13 +244,13 @@ public final class TargetCompleteEvent
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TargetCompletedId(originalLabel, configChecksum, null);
+  public BuildEventId getEventId() {
+    return new BuildEventId.TargetCompletedId(originalLabel, configChecksum, null);
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
-    ImmutableList.Builder<BuildEventIdRepr> childrenBuilder = ImmutableList.builder();
+  public ImmutableList<BuildEventId> getChildrenEvents() {
+    ImmutableList.Builder<BuildEventId> childrenBuilder = ImmutableList.builder();
     for (Cause cause : rootCauses.toList()) {
       childrenBuilder.add(cause.getId());
     }
@@ -261,13 +261,13 @@ public final class TargetCompleteEvent
       for (int run = 0; run < Math.max(testParams.getRuns(), 1); run++) {
         for (int shard = 0; shard < Math.max(testParams.getShards(), 1); shard++) {
           childrenBuilder.add(
-              new BuildEventIdRepr.TestResultId(label, configChecksum, run + 1, shard + 1, 1));
+              new BuildEventId.TestResultId(label, configChecksum, run + 1, shard + 1, 1));
         }
       }
-      childrenBuilder.add(new BuildEventIdRepr.TestSummaryId(label, configChecksum));
+      childrenBuilder.add(new BuildEventId.TestSummaryId(label, configChecksum));
     }
     if (announceTargetSummary) {
-      childrenBuilder.add(new BuildEventIdRepr.TargetSummaryId(originalLabel, configChecksum));
+      childrenBuilder.add(new BuildEventId.TargetSummaryId(originalLabel, configChecksum));
     }
     return childrenBuilder.build();
   }
@@ -463,12 +463,12 @@ public final class TargetCompleteEvent
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> postedAfter() {
-    var targetConfiguredEventId = new BuildEventIdRepr.TargetConfiguredId(originalLabel, null);
+  public ImmutableList<BuildEventId> postedAfter() {
+    var targetConfiguredEventId = new BuildEventId.TargetConfiguredId(originalLabel, null);
     if (rootCauses.isEmpty()) {
       return ImmutableList.of(targetConfiguredEventId);
     }
-    ImmutableList.Builder<BuildEventIdRepr> postedAfter = ImmutableList.builder();
+    ImmutableList.Builder<BuildEventId> postedAfter = ImmutableList.builder();
     postedAfter.add(targetConfiguredEventId);
     for (Cause cause : rootCauses.toList()) {
       postedAfter.add(cause.getId());

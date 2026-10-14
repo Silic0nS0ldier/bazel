@@ -43,7 +43,7 @@ import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.buildeventstream.AbortedEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
 import com.google.devtools.build.lib.buildtool.buildevent.NoAnalyzeEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.TestFilteringCompleteEvent;
@@ -334,7 +334,7 @@ public final class AnalysisPhaseRunner {
       env.getEventBus()
           .post(
               new AbortedEvent(
-                  new BuildEventIdRepr.TargetCompletedId(
+                  new BuildEventId.TargetCompletedId(
                       label, BuildConfigurationValue.configurationChecksum(config), null),
                   AbortReason.SKIPPED,
                   String.format("Target %s build was skipped.", label),

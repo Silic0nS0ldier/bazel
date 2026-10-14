@@ -28,26 +28,23 @@ public final class AbortedEvent extends GenericBuildEvent {
   private final String description;
   @Nullable private final Label label;
 
-  public AbortedEvent(BuildEventIdRepr id, AbortReason reason, String description) {
+  public AbortedEvent(BuildEventId id, AbortReason reason, String description) {
     this(id, reason, description, /*label=*/ null);
   }
 
   public AbortedEvent(
-      BuildEventIdRepr id, AbortReason reason, String description, @Nullable Label label) {
+      BuildEventId id, AbortReason reason, String description, @Nullable Label label) {
     this(id, /*children=*/ ImmutableList.of(), reason, description, label);
   }
 
   public AbortedEvent(
-      BuildEventIdRepr id,
-      Collection<BuildEventIdRepr> children,
-      AbortReason reason,
-      String description) {
+      BuildEventId id, Collection<BuildEventId> children, AbortReason reason, String description) {
     this(id, children, reason, description, /*label=*/ null);
   }
 
   private AbortedEvent(
-      BuildEventIdRepr id,
-      Collection<BuildEventIdRepr> children,
+      BuildEventId id,
+      Collection<BuildEventId> children,
       AbortReason reason,
       String description,
       @Nullable Label label) {

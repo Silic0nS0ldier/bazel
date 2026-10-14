@@ -18,7 +18,6 @@ import static com.google.common.truth.Truth.assertThat;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
@@ -42,12 +41,12 @@ public class LastBuildEventTest {
         new LastBuildEvent(
             new BuildEvent() {
               @Override
-              public BuildEventIdRepr getEventId() {
+              public BuildEventId getEventId() {
                 return null;
               }
 
               @Override
-              public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+              public ImmutableList<BuildEventId> getChildrenEvents() {
                 return ImmutableList.of();
               }
 

@@ -21,7 +21,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -87,13 +87,13 @@ public final class AnalysisRootCauseEvent implements BuildEventWithConfiguration
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     // This needs to match AnalysisFailedCause.getId.
-    return new BuildEventIdRepr.ConfiguredLabelId(label, configurationId);
+    return new BuildEventId.ConfiguredLabelId(label, configurationId);
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

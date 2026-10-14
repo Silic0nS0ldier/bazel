@@ -30,7 +30,7 @@ import com.google.devtools.build.lib.analysis.configuredtargets.InputFileConfigu
 import com.google.devtools.build.lib.analysis.configuredtargets.OutputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestBase;
 import com.google.devtools.build.lib.analysis.util.MockRule;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.causes.AnalysisFailedCause;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -431,7 +431,7 @@ public class BuildViewTest extends BuildViewTestBase {
     assertThat(recorder.events).hasSize(1);
     AnalysisFailureEvent event = recorder.events.get(0);
     assertThat(event.getConfigurationChecksum())
-        .isNotEqualTo(BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM);
+        .isNotEqualTo(BuildEventId.ConfigurationId.NULL_CHECKSUM);
   }
 
   @Test

@@ -204,8 +204,7 @@ public final class TargetCompleteEventTest extends BuildIntegrationTestCase {
             .filter(e -> e.getId().getIdCase() == IdCase.TARGET_COMPLETED)
             .collect(MoreCollectors.onlyElement());
     assertThat(completed.hasAborted()).isFalse();
-    assertThat(completed.getId().getTargetCompleted().getConfiguration().getId())
-        .isEqualTo("none");
+    assertThat(completed.getId().getTargetCompleted().getConfiguration().getId()).isEqualTo("none");
   }
 
   @Test

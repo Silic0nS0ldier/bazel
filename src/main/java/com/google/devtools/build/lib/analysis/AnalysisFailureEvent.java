@@ -23,7 +23,7 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionLookupKey;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.causes.Cause;
@@ -128,25 +128,24 @@ public class AnalysisFailureEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     Label label = failedTarget.getLabel();
     if (!isConfigured) {
-      return new BuildEventIdRepr.TargetConfiguredId(label, null);
+      return new BuildEventId.TargetConfiguredId(label, null);
     }
     if (failedAspect == null) {
-      return new BuildEventIdRepr.TargetCompletedId(
+      return new BuildEventId.TargetCompletedId(
           label, configurationChecksum(failedTarget.getConfigurationKey()), null);
     }
-    return new BuildEventIdRepr.TargetCompletedId(
+    return new BuildEventId.TargetCompletedId(
         label,
         configurationChecksum(failedAspect.getConfigurationKey()),
         failedAspect.getAspectName());
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
-    return ImmutableList.copyOf(
-        Iterables.transform(rootCauses.toList(), cause -> cause.getId()));
+  public Collection<BuildEventId> getChildrenEvents() {
+    return ImmutableList.copyOf(Iterables.transform(rootCauses.toList(), cause -> cause.getId()));
   }
 
   @Override

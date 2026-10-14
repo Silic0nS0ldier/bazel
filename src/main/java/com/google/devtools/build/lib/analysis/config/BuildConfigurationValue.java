@@ -32,7 +32,7 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration.TestOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.NullConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -966,7 +966,7 @@ public class BuildConfigurationValue
     BuildEventStreamProtos.BuildEvent.Builder builder =
         BuildEventStreamProtos.BuildEvent.newBuilder();
     builder
-        .setId(new BuildEventIdRepr.ConfigurationId(checksum()).toProto())
+        .setId(new BuildEventId.ConfigurationId(checksum()).toProto())
         .setConfiguration(
             BuildEventStreamProtos.Configuration.newBuilder()
                 .setMnemonic(getMnemonic())
@@ -980,14 +980,12 @@ public class BuildConfigurationValue
 
   /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code config}. */
   public static String configurationChecksum(@Nullable BuildConfigurationValue config) {
-    return config == null ? BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM : config.checksum();
+    return config == null ? BuildEventId.ConfigurationId.NULL_CHECKSUM : config.checksum();
   }
 
   /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code key}. */
   public static String configurationChecksum(@Nullable BuildConfigurationKey key) {
-    return key == null
-        ? BuildEventIdRepr.ConfigurationId.NULL_CHECKSUM
-        : key.getOptions().checksum();
+    return key == null ? BuildEventId.ConfigurationId.NULL_CHECKSUM : key.getOptions().checksum();
   }
 
   public static BuildEvent buildEvent(@Nullable BuildConfigurationValue configuration) {

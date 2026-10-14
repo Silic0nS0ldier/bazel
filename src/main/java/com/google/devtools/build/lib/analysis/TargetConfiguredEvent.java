@@ -18,7 +18,7 @@ import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -51,17 +51,15 @@ public class TargetConfiguredEvent implements BuildEventWithConfiguration {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TargetConfiguredId(target.getLabel(), null);
+  public BuildEventId getEventId() {
+    return new BuildEventId.TargetConfiguredId(target.getLabel(), null);
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of(
-        new BuildEventIdRepr.TargetCompletedId(
-            target.getLabel(),
-            BuildConfigurationValue.configurationChecksum(configuration),
-            null));
+        new BuildEventId.TargetCompletedId(
+            target.getLabel(), BuildConfigurationValue.configurationChecksum(configuration), null));
   }
 
   private static BuildEventStreamProtos.TestSize bepTestSize(String targetName, TestSize size) {

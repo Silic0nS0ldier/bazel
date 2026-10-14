@@ -26,12 +26,12 @@ public class LastBuildEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventId getEventId() {
     return event.getEventId();
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return event.getChildrenEvents();
   }
 

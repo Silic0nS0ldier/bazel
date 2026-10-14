@@ -30,12 +30,12 @@ public record FetchEvent(String url, Downloader downloader, boolean success)
     implements BuildEvent, ExtendedEventHandler.Postable {
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.FetchId(url, downloader);
+  public BuildEventId getEventId() {
+    return new BuildEventId.FetchId(url, downloader);
   }
 
   @Override
-  public Collection<BuildEventIdRepr> getChildrenEvents() {
+  public Collection<BuildEventId> getChildrenEvents() {
     return ImmutableList.of();
   }
 

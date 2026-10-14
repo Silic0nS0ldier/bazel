@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.causes;
 
 import com.google.common.base.MoreObjects;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import java.util.Objects;
@@ -55,9 +55,9 @@ public class AnalysisFailedCause implements Cause {
   }
 
   @Override
-  public BuildEventIdRepr getId() {
+  public BuildEventId getId() {
     // This needs to match AnalysisRootCauseEvent.getEventId.
-    return new BuildEventIdRepr.ConfiguredLabelId(label, configurationId);
+    return new BuildEventId.ConfiguredLabelId(label, configurationId);
   }
 
   @Override

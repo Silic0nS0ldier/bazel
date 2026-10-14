@@ -32,7 +32,7 @@ import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventArtifactUploader;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildStarted;
@@ -404,7 +404,7 @@ public class BinaryFormatFileTransportTest {
     @Override
     public BuildEventStreamProtos.BuildEvent asStreamProto(BuildEventContext context) {
       return BuildEventStreamProtos.BuildEvent.newBuilder()
-          .setId(new BuildEventIdRepr.ProgressId(id).toProto())
+          .setId(new BuildEventId.ProgressId(id).toProto())
           .setProgress(
               BuildEventStreamProtos.Progress.newBuilder()
                   .setStdout(
@@ -417,13 +417,13 @@ public class BinaryFormatFileTransportTest {
     }
 
     @Override
-    public BuildEventIdRepr getEventId() {
-      return new BuildEventIdRepr.ProgressId(id);
+    public BuildEventId getEventId() {
+      return new BuildEventId.ProgressId(id);
     }
 
     @Override
-    public Collection<BuildEventIdRepr> getChildrenEvents() {
-      return ImmutableList.of(new BuildEventIdRepr.ProgressId(id + 1));
+    public Collection<BuildEventId> getChildrenEvents() {
+      return ImmutableList.of(new BuildEventId.ProgressId(id + 1));
     }
   }
 

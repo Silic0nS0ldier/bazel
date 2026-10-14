@@ -20,7 +20,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -51,14 +51,14 @@ public class AspectConfiguredEvent implements BuildEventWithConfiguration {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.TargetConfiguredId(target, aspectClassName);
+  public BuildEventId getEventId() {
+    return new BuildEventId.TargetConfiguredId(target, aspectClassName);
   }
 
   @Override
-  public ImmutableList<BuildEventIdRepr> getChildrenEvents() {
+  public ImmutableList<BuildEventId> getChildrenEvents() {
     return ImmutableList.of(
-        new BuildEventIdRepr.TargetCompletedId(
+        new BuildEventId.TargetCompletedId(
             target, configurationChecksum(configuration), aspectDescription));
   }
 

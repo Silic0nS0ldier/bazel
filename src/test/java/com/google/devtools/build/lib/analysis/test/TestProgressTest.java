@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.analysis.test;
 
 import static com.google.common.truth.extensions.proto.ProtoTruth.assertThat;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdRepr;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
@@ -33,10 +32,9 @@ public class TestProgressTest {
 
   @Test
   public void testTestProgress_convertsToEventId() {
-    TestProgress progress =
-        new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
+    TestProgress progress = new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
 
-    BuildEventIdRepr id = progress.getEventId();
+    var id = progress.getEventId();
 
     // Compare via proto since the expected value is most naturally expressed as proto.
     assertThat(id.toProto())
@@ -55,8 +53,7 @@ public class TestProgressTest {
 
   @Test
   public void testTestProgress_convertsToEvent() {
-    TestProgress progress =
-        new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
+    TestProgress progress = new TestProgress(LABEL, CONFIG_CHECKSUM, 1, 2, 3, 4, "auri");
 
     BuildEvent event = progress.asStreamProto(null);
 
