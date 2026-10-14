@@ -2630,6 +2630,47 @@ public final class TypeCheckerTest {
   }
 
   @Test
+  public void load_statement_valueUsedInFunction() throws Exception {
+    loader = importName -> TestUtils.LoadableModule.of("x", Types.union(Types.INT, Types.STR));
+    assertInvalid(
+        ":4:5: cannot assign type 'int | str' to 'y' of type 'int'",
+        """
+        load("//x:x.bzl", "x")
+        def f():
+            y: int = 0
+            y = x
+        """);
+    assertInvalid(
+        ":5:9: cannot assign type 'int | str' to 'y' of type 'int'",
+        """
+        load("//x:x.bzl", "x")
+        def f():
+            def g():
+                y: int = 0
+                y = x
+        """);
+  }
+
+  @Test
+  public void capturedLocal_keepsTypeInNestedFunction() throws Exception {
+    assertInvalid(
+        ":4:16: g() declares return type 'int' but may return 'str'",
+        """
+        def f():
+            s: str = "abc"
+            def g() -> int:
+                return s
+        """);
+    assertInvalid(
+        ":3:5: cannot assign type '<def () -> str>' to 'h' of type 'Callable[[], int]'",
+        """
+        def f():
+            s: str = "abc"
+            h: Callable[[], int] = lambda: s
+        """);
+  }
+
+  @Test
   public void typeAlias_bidirectionallyAssignableToFullyWrittenType() throws Exception {
     assertValid(
         """

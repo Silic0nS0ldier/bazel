@@ -141,7 +141,8 @@ public final class TypeTagger extends NodeVisitor {
   private TypeConstructor resolveTypeConstructor(Identifier id) {
     String name = id.getName();
 
-    var binding = id.getBinding();
+    // A file-level local referenced from within a function is a FREE binding of that function.
+    var binding = id.getBinding().getOrigin();
     var scope = binding.getScope();
     @Nullable TypeConstructor constructor = null;
     if (!(scope == Scope.UNIVERSAL || scope == Scope.PREDECLARED || scope == Scope.GLOBAL)) {
