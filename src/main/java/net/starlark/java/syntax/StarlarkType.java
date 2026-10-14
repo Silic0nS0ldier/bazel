@@ -249,6 +249,39 @@ public abstract non-sealed class StarlarkType implements TypeConstructor.Term {
   }
 
   /**
+   * The result of {@link #inferIndex}.
+   *
+   * @param type the type of the index expression, or null if it cannot be determined, in which case
+   *     the whole expression is treated as {@code Any}
+   * @param error an error message to report, omitting the leading "'x' of type 'T'"; or null
+   */
+  public record IndexResult(@Nullable StarlarkType type, @Nullable String error) {
+    public static IndexResult of(StarlarkType type) {
+      return new IndexResult(type, null);
+    }
+  }
+
+  /**
+   * Infers the result of indexing a value of this type, or returns null if this type does not
+   * support indexing. Intended for use by {@link TypeChecker}.
+   *
+   * <p>See also {@link PositionallyTyped} for indexing by a statically known int.
+   */
+  @Nullable
+  public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+    return null;
+  }
+
+  /** A type whose element type depends on the position, such as a fixed-length tuple. */
+  public interface PositionallyTyped {
+    /**
+     * Infers the result of indexing with the given int literal (possibly negative). Takes
+     * precedence over {@link StarlarkType#inferIndex} when the key is an int literal.
+     */
+    IndexResult inferIndexAt(int index);
+  }
+
+  /**
    * Returns true if an index expression on a value of this type can be used as the LHS of an
    * assignment.
    */

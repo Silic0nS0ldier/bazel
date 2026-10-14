@@ -655,6 +655,64 @@ public final class TypeCheckerTest {
         """);
   }
 
+  /** A dummy indexable type with a given result type, which rejects float keys. */
+  private static final class IndexableType extends StarlarkType {
+    private final StarlarkType resultType;
+
+    IndexableType(StarlarkType resultType) {
+      this.resultType = resultType;
+    }
+
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return keyType.equals(Types.FLOAT)
+          ? new IndexResult(resultType, "cannot be indexed by a float")
+          : IndexResult.of(resultType);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      return obj instanceof IndexableType that && resultType.equals(that.resultType);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(IndexableType.class, resultType);
+    }
+
+    @Override
+    public String typeRepr() {
+      return String.format("Indexable[%s]", resultType.typeRepr());
+    }
+  }
+
+  @Test
+  public void infer_index_customIndexableType() throws Exception {
+    module =
+        TestUtils.Module.withUniversalTypesAnd(
+            "Indexable", Types.wrapTypeConstructor("Indexable", t -> new IndexableType(t)));
+
+    assertTypeGivenDecls("x['abc']", Types.INT, "x: Indexable[int]");
+    assertTypeGivenDecls("x[123]", Types.INT, "x: Indexable[int]");
+    assertTypeGivenDecls(
+        "x[0]", Types.union(Types.INT, Types.STR), "x: Indexable[int] | list[str]");
+
+    assertInvalid(
+        ":2:2: 'x' of type 'Indexable[int]' cannot be indexed by a float",
+        """
+        x: Indexable[int]
+        x[1.5]
+        """);
+
+    // Indexability doesn't imply item assignability.
+    assertInvalid(
+        ":2:1: x of type 'Indexable[int]' does not support item assignment",
+        """
+        x: Indexable[int]
+        x["abc"] = 123
+        """);
+  }
+
   @Test
   public void assignment_index_nonIndexable() throws Exception {
     assertInvalid(

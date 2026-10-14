@@ -136,17 +136,6 @@ public final class TypeChecker extends NodeVisitor {
     return type != null ? type : Types.ANY;
   }
 
-  private void errorIfKeyNotInt(IndexExpression index, StarlarkType objType, StarlarkType keyType) {
-    if (!StarlarkType.assignableFrom(Types.INT, keyType, typeContext)) {
-      errorf(
-          index.getLbracketLocation(),
-          "'%s' of type '%s' must be indexed by an integer, but got '%s'",
-          index.getObject(),
-          objType.typeRepr(),
-          keyType.typeRepr());
-    }
-  }
-
   /**
    * Infers the type of an expression from a bottom-up traversal, relying on type information stored
    * in identifier bindings by the {@link TypeTagger}.
@@ -341,78 +330,38 @@ public final class TypeChecker extends NodeVisitor {
   private ImmutableList<StarlarkType> inferIndexUnfolded(
       IndexExpression index, StarlarkType objType, StarlarkType keyType) {
     Expression obj = index.getObject();
-    Expression key = index.getKey();
 
-    if (objType.equals(Types.NEVER)) {
-      return ImmutableList.of(Types.NEVER);
-    } else if (objType.equals(Types.ANY)) {
+    if (objType.equals(Types.ANY)) {
       return ImmutableList.of(Types.ANY);
     }
 
+    @Nullable Integer constantIntKey = getIntValueExact(index.getKey());
     ImmutableCollection<StarlarkType> objElemTypes = Types.unfoldUnion(objType);
     ImmutableList.Builder<StarlarkType> resultTypes =
         ImmutableList.builderWithExpectedSize(objElemTypes.size());
     for (StarlarkType objElemType : objElemTypes) {
-      if (objElemType.equals(Types.ANY)) {
-        resultTypes.add(Types.ANY);
-
-      } else if (objElemType instanceof Types.FixedLengthTupleType tupleType) {
-        errorIfKeyNotInt(index, objElemType, keyType);
-        var elementTypes = tupleType.getElementTypes();
-        StarlarkType resultType = null;
-        // Project out the type of the specific component if we can statically determine the index.
-        Integer intKey = getIntValueExact(key);
-        if (intKey != null) {
-          int i = intKey;
-          if (i < 0) {
-            // Same logic as for EvalUtils#getSequenceIndex.
-            i += elementTypes.size();
-          }
-          if (0 <= i && i < elementTypes.size()) {
-            resultType = elementTypes.get(i);
-          } else {
-            errorf(
-                index.getLbracketLocation(),
-                "'%s' of type '%s' is indexed by integer %s, which is out-of-range",
-                obj,
-                objType.typeRepr(),
-                intKey);
-            // Don't complain about uses of the result type when we don't even know what result type
-            // the user wanted.
-            return ImmutableList.of(Types.ANY);
-          }
-        }
-        if (resultType == null) {
-          resultType = tupleType.toHomogeneous().getElementType();
-        }
-        resultTypes.add(resultType);
-
-      } else if (objElemType instanceof Types.AbstractSequenceType sequenceType) {
-        errorIfKeyNotInt(index, objType, keyType); // fall through on error
-        resultTypes.add(sequenceType.getElementType());
-
-      } else if (objElemType instanceof Types.AbstractMappingType mappingType) {
-        if (!StarlarkType.assignableFrom(mappingType.getKeyType(), keyType, typeContext)) {
-          errorf(
-              index.getLbracketLocation(),
-              "'%s' of type '%s' requires key type '%s', but got '%s'",
-              obj,
-              objType.typeRepr(),
-              mappingType.getKeyType(),
-              keyType.typeRepr());
-          // Fall through to returning the value type.
-        }
-        resultTypes.add(mappingType.getValueType());
-
-      } else if (objElemType.equals(Types.STR)) {
-        errorIfKeyNotInt(index, objType, keyType); // fall through on error
-        resultTypes.add(Types.STR);
-
-      } else {
+      StarlarkType.IndexResult result =
+          constantIntKey != null
+                  && objElemType instanceof StarlarkType.PositionallyTyped positional
+              ? positional.inferIndexAt(constantIntKey)
+              : objElemType.inferIndex(keyType, typeContext);
+      if (result == null) {
         errorf(
             index.getLbracketLocation(), "cannot index '%s' of type '%s'", obj, objType.typeRepr());
         return ImmutableList.of(Types.ANY);
       }
+      if (result.error() != null) {
+        errorf(
+            index.getLbracketLocation(),
+            "'%s' of type '%s' %s",
+            obj,
+            objType.typeRepr(),
+            result.error());
+      }
+      if (result.type() == null) {
+        return ImmutableList.of(Types.ANY);
+      }
+      resultTypes.add(result.type());
     }
     return resultTypes.build();
   }
