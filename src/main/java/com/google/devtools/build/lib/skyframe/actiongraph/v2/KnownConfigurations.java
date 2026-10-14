@@ -27,10 +27,10 @@ public class KnownConfigurations extends BaseCache<BuildEvent, Configuration> {
 
   @Override
   Configuration createProto(BuildEvent config, int id) throws InterruptedException {
-    BuildEventStreamProtos.Configuration configProto =
-        config.asStreamProto(/*context=*/ null).getConfiguration();
+    BuildEventStreamProtos.BuildEvent eventProto = config.asStreamProto(/*context=*/ null);
+    BuildEventStreamProtos.Configuration configProto = eventProto.getConfiguration();
     return Configuration.newBuilder()
-        .setChecksum(config.getEventId().toProto().getConfiguration().getId())
+        .setChecksum(eventProto.getId().getConfiguration().getId())
         .setMnemonic(configProto.getMnemonic())
         .setPlatformName(configProto.getPlatformName())
         .setIsTool(configProto.getIsTool())

@@ -150,9 +150,13 @@ public sealed interface BuildEventIdRepr {
       requireNonNull(id);
     }
 
+    public BuildEventId.ConfigurationId toConfigurationIdProto() {
+      return configurationIdProto(id);
+    }
+
     @Override
     public BuildEventId toProto() {
-      return BuildEventId.newBuilder().setConfiguration(configurationIdProto(id)).build();
+      return BuildEventId.newBuilder().setConfiguration(toConfigurationIdProto()).build();
     }
   }
 

@@ -217,11 +217,12 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
       actionBuilder.setLabel(action.getOwner().getLabel().toString());
     }
     if (action.getOwner() != null) {
-      BuildEvent configuration = action.getOwner().getBuildConfigurationEvent();
-      if (configuration == null) {
-        configuration = NullConfiguration.INSTANCE;
-      }
-      actionBuilder.setConfiguration(configuration.getEventId().toProto().getConfiguration());
+      BuildConfigurationEvent configuration = action.getOwner().getBuildConfigurationEvent();
+      BuildEventIdRepr.ConfigurationId configurationId =
+          configuration == null
+              ? BuildEventIdRepr.ConfigurationId.NULL
+              : configuration.getEventId();
+      actionBuilder.setConfiguration(configurationId.toConfigurationIdProto());
     }
     if (exception == null) {
       String uri = pathConverter.apply(primaryOutput);

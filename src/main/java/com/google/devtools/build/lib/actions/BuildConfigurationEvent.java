@@ -40,7 +40,7 @@ public final class BuildConfigurationEvent implements BuildEvent {
   }
 
   @Override
-  public BuildEventIdRepr getEventId() {
+  public BuildEventIdRepr.ConfigurationId getEventId() {
     return new BuildEventIdRepr.ConfigurationId(eventProto.getId().getConfiguration().getId());
   }
 
