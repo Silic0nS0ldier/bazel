@@ -28,9 +28,12 @@ import java.util.Objects;
  */
 public final class BuildConfigurationEvent implements BuildEvent {
 
+  private final BuildEventIdRepr.ConfigurationId eventId;
   private final BuildEventStreamProtos.BuildEvent eventProto;
 
   public BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent eventProto) {
+    this.eventId =
+        new BuildEventIdRepr.ConfigurationId(eventProto.getId().getConfiguration().getId());
     this.eventProto = eventProto;
   }
 
@@ -41,7 +44,7 @@ public final class BuildConfigurationEvent implements BuildEvent {
 
   @Override
   public BuildEventIdRepr.ConfigurationId getEventId() {
-    return new BuildEventIdRepr.ConfigurationId(eventProto.getId().getConfiguration().getId());
+    return eventId;
   }
 
   @Override
