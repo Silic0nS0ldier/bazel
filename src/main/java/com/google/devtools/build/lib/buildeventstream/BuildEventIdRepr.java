@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.buildeventstream;
 
+import static com.google.common.base.Strings.emptyToNull;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
@@ -156,6 +157,11 @@ public sealed interface BuildEventIdRepr {
   }
 
   record TargetConfiguredId(Label label, @Nullable String aspect) implements BuildEventIdRepr {
+    public TargetConfiguredId {
+      requireNonNull(label);
+      aspect = emptyToNull(aspect);
+    }
+
     @Override
     public BuildEventId toProto() {
       BuildEventId.TargetConfiguredId.Builder configuredId =
@@ -205,7 +211,9 @@ public sealed interface BuildEventIdRepr {
   record TargetCompletedId(Label label, String configurationId, @Nullable String aspect)
       implements BuildEventIdRepr {
     public TargetCompletedId {
+      requireNonNull(label);
       requireNonNull(configurationId);
+      aspect = emptyToNull(aspect);
     }
 
     @Override
@@ -224,6 +232,11 @@ public sealed interface BuildEventIdRepr {
   record ActionCompletedId(
       String primaryOutput, @Nullable Label label, @Nullable String configurationId)
       implements BuildEventIdRepr {
+    public ActionCompletedId {
+      requireNonNull(primaryOutput);
+      configurationId = emptyToNull(configurationId);
+    }
+
     @Override
     public BuildEventId toProto() {
       BuildEventId.ActionCompletedId.Builder actionId =

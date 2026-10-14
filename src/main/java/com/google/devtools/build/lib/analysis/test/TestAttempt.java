@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.test;
 
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -190,7 +192,7 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
   public BuildEventIdRepr getEventId() {
     return new BuildEventIdRepr.TestResultId(
         testAction.getOwner().getLabel(),
-        testAction.getConfiguration().checksum(),
+        configurationChecksum(testAction.getConfiguration()),
         testAction.getRunNumber() + 1,
         testAction.getShardNum() + 1,
         attempt);
@@ -200,7 +202,9 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
   public Collection<BuildEventIdRepr> postedAfter() {
     return ImmutableList.of(
         new BuildEventIdRepr.TargetCompletedId(
-            testAction.getOwner().getLabel(), testAction.getConfiguration().checksum(), null));
+            testAction.getOwner().getLabel(),
+            configurationChecksum(testAction.getConfiguration()),
+            null));
   }
 
   @Override
@@ -211,7 +215,7 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
       return ImmutableList.of(
           new BuildEventIdRepr.TestResultId(
               testAction.getOwner().getLabel(),
-              testAction.getConfiguration().checksum(),
+              configurationChecksum(testAction.getConfiguration()),
               testAction.getRunNumber() + 1,
               testAction.getShardNum() + 1,
               attempt + 1));
