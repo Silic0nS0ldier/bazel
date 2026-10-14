@@ -261,7 +261,7 @@ public final class TargetCompleteEvent
       for (int run = 0; run < Math.max(testParams.getRuns(), 1); run++) {
         for (int shard = 0; shard < Math.max(testParams.getShards(), 1); shard++) {
           childrenBuilder.add(
-              new BuildEventId.TestResultId(label, configChecksum, run + 1, shard + 1, 1));
+              BuildEventId.TestResultId.fromIndexes(label, configChecksum, run, shard, 1));
         }
       }
       childrenBuilder.add(new BuildEventId.TestSummaryId(label, configChecksum));

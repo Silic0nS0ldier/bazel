@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.buildeventstream;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.emptyToNull;
 import static java.util.Objects.requireNonNull;
 
@@ -306,10 +307,23 @@ public sealed interface BuildEventId {
     }
   }
 
+  /** {@code run}, {@code shard} and {@code attempt} are 1-based, as in the proto. */
   record TestResultId(Label label, String configurationId, int run, int shard, int attempt)
       implements BuildEventId {
     public TestResultId {
       requireNonNull(configurationId);
+      checkArgument(
+          run >= 1 && shard >= 1 && attempt >= 1,
+          "Expected 1-based run=%s shard=%s attempt=%s",
+          run,
+          shard,
+          attempt);
+    }
+
+    /** Creates an id from the 0-based run and shard numbers used by test actions. */
+    public static TestResultId fromIndexes(
+        Label label, String configurationId, int runIndex, int shardIndex, int attempt) {
+      return new TestResultId(label, configurationId, runIndex + 1, shardIndex + 1, attempt);
     }
 
     @Override

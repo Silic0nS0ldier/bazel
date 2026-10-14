@@ -190,11 +190,11 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventId getEventId() {
-    return new BuildEventId.TestResultId(
+    return BuildEventId.TestResultId.fromIndexes(
         testAction.getOwner().getLabel(),
         configurationChecksum(testAction.getConfiguration()),
-        testAction.getRunNumber() + 1,
-        testAction.getShardNum() + 1,
+        testAction.getRunNumber(),
+        testAction.getShardNum(),
         attempt);
   }
 
@@ -213,11 +213,11 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
       return ImmutableList.of();
     } else {
       return ImmutableList.of(
-          new BuildEventId.TestResultId(
+          BuildEventId.TestResultId.fromIndexes(
               testAction.getOwner().getLabel(),
               configurationChecksum(testAction.getConfiguration()),
-              testAction.getRunNumber() + 1,
-              testAction.getShardNum() + 1,
+              testAction.getRunNumber(),
+              testAction.getShardNum(),
               attempt + 1));
     }
   }
