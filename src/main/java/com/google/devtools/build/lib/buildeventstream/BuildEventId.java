@@ -262,7 +262,6 @@ public sealed interface BuildEventId {
       implements BuildEventId {
     public ActionCompletedId {
       requireNonNull(primaryOutput);
-      configurationId = emptyToNull(configurationId);
     }
 
     @Override
