@@ -175,6 +175,11 @@ public final class Types {
       return ANY;
     }
 
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return IndexResult.of(ANY);
+    }
+
     // TODO: #27370 - we may want to infer a more precise type when one of the operands is non-Any.
     // (For example, we could infer that int % Any is int | float; on the other hand, Any % int
     // could also be a string, since % is also a string substitution operator.) Requires a registry
@@ -268,6 +273,11 @@ public final class Types {
     @Override
     public StarlarkType getField(String name, TypeContext context) {
       return NEVER;
+    }
+
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return IndexResult.of(NEVER);
     }
 
     @Override
@@ -421,6 +431,11 @@ public final class Types {
     @Override
     public boolean equals(Object obj) {
       return obj instanceof StrType;
+    }
+
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return inferIntIndex(STR, keyType, context);
     }
 
     @Override
@@ -1334,12 +1349,26 @@ public final class Types {
 
   /** Tuple type of a fixed length. */
   @AutoValue
-  public abstract static non-sealed class FixedLengthTupleType extends TupleType {
+  public abstract static non-sealed class FixedLengthTupleType extends TupleType
+      implements StarlarkType.PositionallyTyped {
     public abstract ImmutableList<StarlarkType> getElementTypes();
 
     @Override
     public StarlarkType getElementType() {
       return union(getElementTypes());
+    }
+
+    @Override
+    public IndexResult inferIndexAt(int index) {
+      int size = getElementTypes().size();
+      // Same logic as for EvalUtils#getSequenceIndex.
+      int i = index < 0 ? index + size : index;
+      if (0 <= i && i < size) {
+        return IndexResult.of(getElementTypes().get(i));
+      }
+      // Unknown result type, to avoid complaining about uses of a result the user didn't intend.
+      return new IndexResult(
+          null, String.format("is indexed by integer %s, which is out-of-range", index));
     }
 
     @Override
@@ -1585,6 +1614,17 @@ public final class Types {
     return new AutoValue_Types_SequenceType(elementType);
   }
 
+  /** Infers the result of indexing a type that requires int keys. */
+  private static StarlarkType.IndexResult inferIntIndex(
+      StarlarkType resultType, StarlarkType keyType, TypeContext context) {
+    if (!StarlarkType.assignableFrom(INT, keyType, context)) {
+      return new StarlarkType.IndexResult(
+          resultType,
+          String.format("must be indexed by an integer, but got '%s'", keyType.typeRepr()));
+    }
+    return StarlarkType.IndexResult.of(resultType);
+  }
+
   /** Abstract sequence type for common sequence functionality. Exists to be subclassed. */
   public abstract static class AbstractSequenceType extends AbstractCollectionType {
     @Override
@@ -1593,6 +1633,11 @@ public final class Types {
     @Override
     public List<StarlarkType> getSupertypes(TypeContext context) {
       return ImmutableList.of(collection(getElementType()));
+    }
+
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return inferIntIndex(getElementType(), keyType, context);
     }
   }
 
@@ -1662,6 +1707,18 @@ public final class Types {
     @Override
     public StarlarkType getElementType() {
       return getKeyType();
+    }
+
+    @Override
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      if (!StarlarkType.assignableFrom(getKeyType(), keyType, context)) {
+        return new IndexResult(
+            getValueType(),
+            String.format(
+                "requires key type '%s', but got '%s'",
+                getKeyType().typeRepr(), keyType.typeRepr()));
+      }
+      return IndexResult.of(getValueType());
     }
 
     @Override

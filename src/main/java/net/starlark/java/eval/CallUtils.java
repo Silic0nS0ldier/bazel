@@ -190,6 +190,16 @@ public final class CallUtils {
       return context.getStarlarkBuiltinFieldType(clazz, name);
     }
 
+    // TODO: #28325 - Allow builtins to declare more precise key and result types.
+    @Override
+    @Nullable
+    public IndexResult inferIndex(StarlarkType keyType, TypeContext context) {
+      return StarlarkIndexable.class.isAssignableFrom(clazz)
+              || StarlarkIndexable.Threaded.class.isAssignableFrom(clazz)
+          ? IndexResult.of(Types.ANY)
+          : null;
+    }
+
     @Override
     public String typeRepr() {
       return typeRepr;
