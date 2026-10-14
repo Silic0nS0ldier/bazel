@@ -995,14 +995,17 @@ public class TestRunnerAction extends AbstractAction
   }
 
   /**
-   * Returns the shard number for this action. If getTotalShards() > 0, must be >= 0 and <
-   * getTotalShards(). Otherwise, must be 0.
+   * Returns the 0-based shard number for this action. If getTotalShards() > 0, must be >= 0 and <
+   * getTotalShards(). Otherwise, must be 0. The BEP {@code TestResultId.shard} is this plus 1.
    */
   public int getShardNum() {
     return shardNum;
   }
 
-  /** Returns run number. */
+  /**
+   * Returns the 0-based run number, in [0, runs_per_test). The BEP {@code TestResultId.run} and
+   * {@code TEST_RUN_NUMBER} are this plus 1.
+   */
   public int getRunNumber() {
     return runNumber;
   }

@@ -307,8 +307,11 @@ message BuildEventId {
   message TestResultId {
     string label = 1;
     ConfigurationId configuration = 5;
+    // 1-based, in [1, runs_per_test].
     int32 run = 2;
+    // 1-based, in [1, shard_count]; 1 if the test is not sharded.
     int32 shard = 3;
+    // 1-based; greater than 1 only for retries (e.g. --flaky_test_attempts).
     int32 attempt = 4;
   }
 
