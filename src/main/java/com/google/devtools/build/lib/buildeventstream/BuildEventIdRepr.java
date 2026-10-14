@@ -21,6 +21,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteOrder;
+import java.util.HexFormat;
 import java.util.List;
 import javax.annotation.Nullable;
 
@@ -448,11 +452,21 @@ public sealed interface BuildEventIdRepr {
     }
   }
 
-  record SkyValueUploadedId(String key) implements BuildEventIdRepr {
+  /** Holds the two halves of a {@code PackedFingerprint}, hex-encoded only in {@link #toProto}. */
+  record SkyValueUploadedId(long lo, long hi) implements BuildEventIdRepr {
+    // Must match PackedFingerprint.toHex().
+    private static final VarHandle LONG_ARRAY_HANDLE =
+        MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.nativeOrder());
+    private static final HexFormat HEX_FORMAT = HexFormat.of().withLowerCase();
+
     @Override
     public BuildEventId toProto() {
+      byte[] bytes = new byte[16];
+      LONG_ARRAY_HANDLE.set(bytes, 0, lo);
+      LONG_ARRAY_HANDLE.set(bytes, 8, hi);
       return BuildEventId.newBuilder()
-          .setSkyvalueUploaded(BuildEventId.SkyValueUploadedId.newBuilder().setKey(key))
+          .setSkyvalueUploaded(
+              BuildEventId.SkyValueUploadedId.newBuilder().setKey(HEX_FORMAT.formatHex(bytes)))
           .build();
     }
   }

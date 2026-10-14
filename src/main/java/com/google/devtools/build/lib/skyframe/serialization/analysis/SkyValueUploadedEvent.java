@@ -48,7 +48,7 @@ final class SkyValueUploadedEvent implements BuildEvent {
   }
   @Override
   public BuildEventIdRepr getEventId() {
-    return new BuildEventIdRepr.SkyValueUploadedId(fingerprint.toHex());
+    return new BuildEventIdRepr.SkyValueUploadedId(fingerprint.lo(), fingerprint.hi());
   }
 
   @Override

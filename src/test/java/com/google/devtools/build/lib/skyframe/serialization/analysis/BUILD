@@ -122,6 +122,19 @@ java_test(
 )
 
 java_test(
+    name = "SkyValueUploadedEventTest",
+    srcs = ["SkyValueUploadedEventTest.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/buildeventstream",
+        "//src/main/java/com/google/devtools/build/lib/buildeventstream/proto:build_event_stream_java_proto",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/analysis:frontier_serializer",
+        "//third_party/java/junit",
+        "//third_party/java/truth",
+    ],
+)
+
+java_test(
     name = "ValueOrFutureMapTest",
     srcs = ["ValueOrFutureMapTest.java"],
     deps = [
