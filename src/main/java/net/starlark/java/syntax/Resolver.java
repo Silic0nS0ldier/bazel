@@ -107,19 +107,36 @@ public final class Resolver extends NodeVisitor {
     // Otherwise, the first occurrence of this symbol (which must be non-binding).
     private final Identifier first;
 
+    // For a FREE binding, the binding in the enclosing function that supplies its value.
+    @Nullable private final Binding enclosing;
+
     private Binding(
         Scope scope,
         int index,
         int bindingId,
         boolean isSyntactic,
         boolean isToplevelLocal,
-        Identifier first) {
+        Identifier first,
+        @Nullable Binding enclosing) {
       this.scope = scope;
       this.index = index;
       this.bindingId = bindingId;
       this.isSyntactic = isSyntactic;
       this.isToplevelLocal = isToplevelLocal;
       this.first = first;
+      this.enclosing = enclosing;
+    }
+
+    /**
+     * Returns the non-FREE binding which this binding ultimately refers to; for a non-FREE binding,
+     * this is the binding itself.
+     */
+    Binding getOrigin() {
+      Binding b = this;
+      while (b.enclosing != null) {
+        b = b.enclosing;
+      }
+      return b;
     }
 
     /**
@@ -181,7 +198,13 @@ public final class Resolver extends NodeVisitor {
 
   private Binding newBinding(Scope scope, int index, boolean isSyntactic, Identifier first) {
     return new Binding(
-        scope, index, nextBindingId++, isSyntactic, /* isToplevelLocal= */ false, first);
+        scope,
+        index,
+        nextBindingId++,
+        isSyntactic,
+        /* isToplevelLocal= */ false,
+        first,
+        /* enclosing= */ null);
   }
 
   private Binding newToplevelLocalBinding(int index, Identifier first) {
@@ -191,7 +214,19 @@ public final class Resolver extends NodeVisitor {
         nextBindingId++,
         /* isSyntactic= */ true,
         /* isToplevelLocal= */ true,
-        first);
+        first,
+        /* enclosing= */ null);
+  }
+
+  private Binding newFreeBinding(int index, Binding enclosing) {
+    return new Binding(
+        Scope.FREE,
+        index,
+        nextBindingId++,
+        /* isSyntactic= */ true,
+        /* isToplevelLocal= */ false,
+        enclosing.first,
+        enclosing);
   }
 
   /** A {@link Binding} for a variable of a list or dict comprehension. */
@@ -208,7 +243,8 @@ public final class Resolver extends NodeVisitor {
           bindingId,
           /* isSyntactic= */ true,
           /* isToplevelLocal= */ false,
-          first);
+          first,
+          /* enclosing= */ null);
       this.node = node;
     }
 
@@ -1091,7 +1127,7 @@ public final class Resolver extends NodeVisitor {
             }
             int index = b.freevars.size();
             b.freevars.add(bind);
-            bind = newBinding(Scope.FREE, index, /* isSyntactic= */ true, bind.first);
+            bind = newFreeBinding(index, bind);
           }
         }
 

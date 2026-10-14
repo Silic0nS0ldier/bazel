@@ -723,6 +723,50 @@ public final class StaticTypeCheckTest {
   }
 
   @Test
+  public void loadedTypeConstructors_usableInFunctions() throws Exception {
+    Module depModule = Module.create();
+    try (Mutability depMutability = Mutability.create("dep")) {
+      StarlarkThread depThread = StarlarkThread.createTransient(depMutability, semantics);
+      var unused =
+          Starlark.execFile(
+              ParserInput.fromLines("type int_or_str = int | str"),
+              options.build(),
+              depModule,
+              depThread);
+    }
+
+    loader = name -> name.equals("dep.bzl") ? depModule : null;
+
+    assertValid(
+        """
+        load("dep.bzl", "int_or_str")
+        def f(x: int_or_str) -> int_or_str:
+            y: int_or_str = x
+            def g(z: int_or_str) -> int_or_str:
+                w: int_or_str = z
+                return w
+            return g(y)
+        """);
+
+    assertInvalid(
+        "cannot assign type 'bool' to 'y' of type 'int | str'",
+        """
+        load("dep.bzl", "int_or_str")
+        def f():
+            y: int_or_str = False
+        """);
+
+    assertInvalid(
+        "cannot assign type 'bool' to 'w' of type 'int | str'",
+        """
+        load("dep.bzl", "int_or_str")
+        def f():
+            def g(z: int_or_str):
+                w: int_or_str = False
+        """);
+  }
+
+  @Test
   public void nonTypeConstructorLoadedValues_cannotBeUsedAsTypeConstructors() throws Exception {
     Module depModule = Module.create();
     try (Mutability depMutability = Mutability.create("dep")) {
