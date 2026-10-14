@@ -125,10 +125,10 @@ public final class ActionExecutedEvent implements BuildEventWithConfiguration {
   @Override
   public BuildEventIdRepr getEventId() {
     if (action.getOwner() == null) {
-      return new BuildEventIdRepr.ActionCompletedId(actionId.toString(), null, null);
+      return new BuildEventIdRepr.ActionCompletedId(actionId, null, null);
     } else {
       return new BuildEventIdRepr.ActionCompletedId(
-          actionId.toString(),
+          actionId,
           action.getOwner().getLabel(),
           action.getOwner().getConfigurationChecksum());
     }

@@ -66,7 +66,6 @@ public class ActionFailed implements Cause {
 
   @Override
   public BuildEventIdRepr getId() {
-    return new BuildEventIdRepr.ActionCompletedId(
-        execPath.toString(), label, configurationChecksum);
+    return new BuildEventIdRepr.ActionCompletedId(execPath, label, configurationChecksum);
   }
 }

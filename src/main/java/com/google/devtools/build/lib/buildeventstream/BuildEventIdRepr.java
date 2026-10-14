@@ -20,6 +20,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.List;
 import javax.annotation.Nullable;
 
@@ -234,7 +235,7 @@ public sealed interface BuildEventIdRepr {
   }
 
   record ActionCompletedId(
-      String primaryOutput, @Nullable Label label, @Nullable String configurationId)
+      PathFragment primaryOutput, @Nullable Label label, @Nullable String configurationId)
       implements BuildEventIdRepr {
     public ActionCompletedId {
       requireNonNull(primaryOutput);
@@ -244,7 +245,7 @@ public sealed interface BuildEventIdRepr {
     @Override
     public BuildEventId toProto() {
       BuildEventId.ActionCompletedId.Builder actionId =
-          BuildEventId.ActionCompletedId.newBuilder().setPrimaryOutput(primaryOutput);
+          BuildEventId.ActionCompletedId.newBuilder().setPrimaryOutput(primaryOutput.toString());
       if (label != null) {
         actionId.setLabel(label.toString());
       }
