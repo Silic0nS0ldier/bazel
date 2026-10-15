@@ -14,9 +14,8 @@
 
 package com.google.devtools.build.lib.skyframe;
 
-import static com.google.devtools.build.lib.analysis.producers.TargetAndConfigurationProducer.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.analysis.producers.TargetAndConfigurationProducer.createDetailedExitCode;
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
@@ -468,14 +467,13 @@ final class ToplevelStarlarkAspectFunction implements SkyFunction {
       Cause cause =
           new AnalysisFailedCause(
               baseConfiguredTargetKey.getLabel(),
-              configurationIdMessage(
-                  baseConfiguredTargetKey.getConfigurationKey().getOptionsChecksum()),
+              baseConfiguredTargetKey.getConfigurationKey().getOptionsChecksum(),
               exitCode != null ? exitCode : createDetailedExitCode(message));
       return new ConfiguredValueCreationException(
           location,
           message,
           target.getLabel(),
-          configurationId(baseConfiguredTargetKey.getConfigurationKey()),
+          configurationChecksum(baseConfiguredTargetKey.getConfigurationKey()),
           NestedSetBuilder.create(Order.STABLE_ORDER, cause),
           exitCode != null ? exitCode : createDetailedExitCode(message));
     }

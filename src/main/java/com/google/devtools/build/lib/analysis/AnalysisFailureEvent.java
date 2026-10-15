@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
@@ -23,9 +23,8 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionLookupKey;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.causes.Cause;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -110,8 +109,8 @@ public class AnalysisFailureEvent implements BuildEvent {
 
   @VisibleForTesting
   @Nullable
-  BuildEventId getConfigurationId() {
-    return isConfigured ? configurationId(failedTarget.getConfigurationKey()) : null;
+  String getConfigurationChecksum() {
+    return isConfigured ? configurationChecksum(failedTarget.getConfigurationKey()) : null;
   }
 
   /**
@@ -132,20 +131,21 @@ public class AnalysisFailureEvent implements BuildEvent {
   public BuildEventId getEventId() {
     Label label = failedTarget.getLabel();
     if (!isConfigured) {
-      return BuildEventIdUtil.targetConfigured(label);
+      return new BuildEventId.TargetConfiguredId(label, null);
     }
     if (failedAspect == null) {
-      return BuildEventIdUtil.targetCompleted(
-          label, configurationId(failedTarget.getConfigurationKey()));
+      return new BuildEventId.TargetCompletedId(
+          label, configurationChecksum(failedTarget.getConfigurationKey()), null);
     }
-    return BuildEventIdUtil.aspectCompleted(
-        label, configurationId(failedAspect.getConfigurationKey()), failedAspect.getAspectName());
+    return new BuildEventId.TargetCompletedId(
+        label,
+        configurationChecksum(failedAspect.getConfigurationKey()),
+        failedAspect.getAspectName());
   }
 
   @Override
   public Collection<BuildEventId> getChildrenEvents() {
-    return ImmutableList.copyOf(
-        Iterables.transform(rootCauses.toList(), cause -> cause.getIdProto()));
+    return ImmutableList.copyOf(Iterables.transform(rootCauses.toList(), cause -> cause.getId()));
   }
 
   @Override

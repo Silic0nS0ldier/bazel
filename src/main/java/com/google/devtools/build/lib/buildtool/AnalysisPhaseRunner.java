@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.buildtool;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
 import static com.google.devtools.build.lib.buildtool.AnalysisPhaseRunner.FeaturesUsingProjectFile.ANALYSIS_CACHING_DOWNLOAD;
 import static com.google.devtools.build.lib.buildtool.AnalysisPhaseRunner.FeaturesUsingProjectFile.ANALYSIS_CACHING_UPLOAD;
 import static com.google.devtools.build.lib.buildtool.AnalysisPhaseRunner.FeaturesUsingProjectFile.SCL_CONFIG;
@@ -44,7 +43,7 @@ import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.buildeventstream.AbortedEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
 import com.google.devtools.build.lib.buildtool.buildevent.NoAnalyzeEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.TestFilteringCompleteEvent;
@@ -335,7 +334,8 @@ public final class AnalysisPhaseRunner {
       env.getEventBus()
           .post(
               new AbortedEvent(
-                  BuildEventIdUtil.targetCompleted(label, configurationId(config)),
+                  new BuildEventId.TargetCompletedId(
+                      label, BuildConfigurationValue.configurationChecksum(config), null),
                   AbortReason.SKIPPED,
                   String.format("Target %s build was skipped.", label),
                   label));

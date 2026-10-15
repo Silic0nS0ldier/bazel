@@ -18,10 +18,9 @@ import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.BaseEncoding;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.buildeventstream.ReplaceableBuildEvent;
@@ -62,7 +61,7 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
 
   @Override
   public Collection<BuildEventId> postedAfter() {
-    return ImmutableList.of(BuildEventIdUtil.buildStartedId());
+    return ImmutableList.of(BuildEventId.BUILD_STARTED);
   }
 
   /** A CommandLineEvent that stores functions and values common to both Bazel command lines. */
@@ -287,7 +286,7 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
 
     @Override
     public BuildEventId getEventId() {
-      return BuildEventIdUtil.structuredCommandlineId(LABEL);
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     /**
@@ -393,7 +392,7 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
 
     @Override
     public BuildEventId getEventId() {
-      return BuildEventIdUtil.structuredCommandlineId(LABEL);
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     @Override
@@ -527,7 +526,7 @@ public abstract class CommandLineEvent implements BuildEventWithOrderConstraint 
      */
     @Override
     public BuildEventId getEventId() {
-      return BuildEventIdUtil.structuredCommandlineId(LABEL);
+      return new BuildEventId.StructuredCommandLineId(LABEL);
     }
 
     /**

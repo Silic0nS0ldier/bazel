@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.buildeventstream;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import java.util.Collection;
 
 /**
@@ -26,8 +25,8 @@ public final class NullConfiguration implements BuildEvent {
   public static final NullConfiguration INSTANCE = new NullConfiguration();
 
   @Override
-  public BuildEventId getEventId() {
-    return BuildEventIdUtil.nullConfigurationId();
+  public BuildEventId.ConfigurationId getEventId() {
+    return BuildEventId.ConfigurationId.NULL;
   }
 
   @Override

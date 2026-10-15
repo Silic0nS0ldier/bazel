@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis.test;
 
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -22,9 +22,8 @@ import com.google.common.collect.ImmutableMultimap;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TestStatus;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -191,19 +190,21 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.testResult(
+    return BuildEventId.TestResultId.fromIndexes(
         testAction.getOwner().getLabel(),
+        configurationChecksum(testAction.getConfiguration()),
         testAction.getRunNumber(),
         testAction.getShardNum(),
-        attempt,
-        configurationId(testAction.getConfiguration()));
+        attempt);
   }
 
   @Override
   public Collection<BuildEventId> postedAfter() {
     return ImmutableList.of(
-        BuildEventIdUtil.targetCompleted(
-            testAction.getOwner().getLabel(), configurationId(testAction.getConfiguration())));
+        new BuildEventId.TargetCompletedId(
+            testAction.getOwner().getLabel(),
+            configurationChecksum(testAction.getConfiguration()),
+            null));
   }
 
   @Override
@@ -212,12 +213,12 @@ public class TestAttempt implements BuildEventWithOrderConstraint {
       return ImmutableList.of();
     } else {
       return ImmutableList.of(
-          BuildEventIdUtil.testResult(
+          BuildEventId.TestResultId.fromIndexes(
               testAction.getOwner().getLabel(),
+              configurationChecksum(testAction.getConfiguration()),
               testAction.getRunNumber(),
               testAction.getShardNum(),
-              attempt + 1,
-              configurationId(testAction.getConfiguration())));
+              attempt + 1));
     }
   }
 

@@ -49,7 +49,7 @@ import com.google.devtools.build.lib.analysis.config.InvalidConfigurationExcepti
 import com.google.devtools.build.lib.analysis.platform.PlatformValue;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventArtifactUploader.UploadContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
 import com.google.devtools.build.lib.buildtool.AnalysisPhaseRunner.ProjectEvaluationResult;
 import com.google.devtools.build.lib.buildtool.SkyframeMemoryDumper.DisplayMode;
@@ -370,7 +370,7 @@ public class BuildTool {
         env.getEventBus()
             .post(
                 new ReleaseReplaceableBuildEvent(
-                    BuildEventIdUtil.structuredCommandlineId(
+                    new BuildEventId.StructuredCommandLineId(
                         CommandLineEvent.CanonicalCommandLineEvent.LABEL)));
       }
       buildOptions = runtime.createBuildOptions(optionsParser);
@@ -1326,8 +1326,7 @@ public class BuildTool {
           .post(
               new BuildCompleteEvent(
                   result,
-                  ImmutableList.of(
-                      BuildEventIdUtil.buildToolLogs(), BuildEventIdUtil.buildMetrics())));
+                  ImmutableList.of(BuildEventId.BUILD_TOOL_LOGS, BuildEventId.BUILD_METRICS)));
     }
     // Post the build tool logs event; the corresponding local files may be contributed from
     // modules, and this has to happen after posting the BuildCompleteEvent because that's when

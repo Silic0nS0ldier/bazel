@@ -16,9 +16,8 @@ package com.google.devtools.build.lib.skyframe.serialization.analysis;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.skyframe.serialization.FrontierNodeVersion;
 import com.google.devtools.build.lib.skyframe.serialization.PackedFingerprint;
@@ -49,7 +48,7 @@ final class SkyValueUploadedEvent implements BuildEvent {
   }
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.skyValueUploadedId(fingerprint.toHex());
+    return new BuildEventId.SkyValueUploadedId(fingerprint.lo(), fingerprint.hi());
   }
 
   @Override

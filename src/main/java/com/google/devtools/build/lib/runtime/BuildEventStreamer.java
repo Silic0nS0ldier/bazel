@@ -44,10 +44,9 @@ import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.buildeventstream.AbortedEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventTransport;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithConfiguration;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
@@ -408,17 +407,17 @@ public class BuildEventStreamer {
    * {@link BuildCompletingEvent} that caused the early end of the stream.
    */
   private synchronized void clearMissingStartEvent(BuildEventId id) {
-    if (pendingEvents.containsKey(BuildEventIdUtil.buildStartedId())) {
+    if (pendingEvents.containsKey(BuildEventId.BUILD_STARTED)) {
       ImmutableSet.Builder<BuildEventId> children = ImmutableSet.builder();
       children.add(ProgressEvent.INITIAL_PROGRESS_UPDATE);
       children.add(id);
       children.addAll(
-          pendingEvents.get(BuildEventIdUtil.buildStartedId()).stream()
+          pendingEvents.get(BuildEventId.BUILD_STARTED).stream()
               .map(BuildEvent::getEventId)
               .collect(ImmutableSet.toImmutableSet()));
       buildEvent(
           new AbortedEvent(
-              BuildEventIdUtil.buildStartedId(),
+              BuildEventId.BUILD_STARTED,
               children.build(),
               getLastAbortReason(),
               getAbortReasonDetails()));
@@ -711,7 +710,7 @@ public class BuildEventStreamer {
     }
 
     if (event instanceof BuildCompletingEvent
-        && !event.getEventId().equals(BuildEventIdUtil.buildStartedId())) {
+        && !event.getEventId().equals(BuildEventId.BUILD_STARTED)) {
       clearMissingStartEvent(event.getEventId());
     }
 

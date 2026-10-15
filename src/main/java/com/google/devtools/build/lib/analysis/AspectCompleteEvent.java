@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.analysis;
 
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -24,10 +24,9 @@ import com.google.devtools.build.lib.actions.CompletionContext;
 import com.google.devtools.build.lib.actions.EventReportingArtifacts;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactHelper.ArtifactsInOutputGroup;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.causes.Cause;
@@ -135,9 +134,9 @@ public final class AspectCompleteEvent
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.aspectCompleted(
+    return new BuildEventId.TargetCompletedId(
         aspectKey.getLabel(),
-        configurationId(aspectKey.getConfigurationKey()),
+        configurationChecksum(aspectKey.getConfigurationKey()),
         aspectKey.getAspectDescriptor().getDescription());
   }
 
@@ -148,7 +147,7 @@ public final class AspectCompleteEvent
     }
     ImmutableList.Builder<BuildEventId> postedAfter = ImmutableList.builder();
     for (Cause cause : rootCauses.toList()) {
-      postedAfter.add(cause.getIdProto());
+      postedAfter.add(cause.getId());
     }
     return postedAfter.build();
   }

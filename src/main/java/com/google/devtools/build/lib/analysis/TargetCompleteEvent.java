@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.analysis;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationId;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -40,10 +39,9 @@ import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext.OutputGroupFileMode;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.File;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.OutputGroup;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.TargetComplete;
@@ -124,7 +122,7 @@ public final class TargetCompleteEvent
   @Nullable private final Long testTimeoutSeconds;
   @Nullable private final TestProvider.TestParams testParams;
   private final BuildEvent configurationEvent;
-  private final BuildEventId configEventId;
+  private final String configChecksum;
   private final Iterable<String> tags;
   private final ExecutableTargetData executableTargetData;
   @Nullable private final DetailedExitCode detailedExitCode;
@@ -156,7 +154,7 @@ public final class TargetCompleteEvent
     this.announceTargetSummary = announceTargetSummary;
     this.testTimeoutSeconds = isTest ? getTestTimeoutSeconds(targetAndData) : null;
     BuildConfigurationValue configuration = targetAndData.getConfiguration();
-    this.configEventId = configurationId(configuration);
+    this.configChecksum = BuildConfigurationValue.configurationChecksum(configuration);
     this.configurationEvent = configuration != null ? configuration.toBuildEvent() : null;
     this.testParams =
         isTest
@@ -247,14 +245,14 @@ public final class TargetCompleteEvent
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.targetCompleted(originalLabel, configEventId);
+    return new BuildEventId.TargetCompletedId(originalLabel, configChecksum, null);
   }
 
   @Override
   public ImmutableList<BuildEventId> getChildrenEvents() {
     ImmutableList.Builder<BuildEventId> childrenBuilder = ImmutableList.builder();
     for (Cause cause : rootCauses.toList()) {
-      childrenBuilder.add(cause.getIdProto());
+      childrenBuilder.add(cause.getId());
     }
     if (isTest) {
       // For tests, announce all the test actions that will minimally happen (except for
@@ -262,13 +260,14 @@ public final class TargetCompleteEvent
       // it will be announced with the action that made the new attempt necessary.
       for (int run = 0; run < Math.max(testParams.getRuns(), 1); run++) {
         for (int shard = 0; shard < Math.max(testParams.getShards(), 1); shard++) {
-          childrenBuilder.add(BuildEventIdUtil.testResult(label, run, shard, configEventId));
+          childrenBuilder.add(
+              BuildEventId.TestResultId.fromIndexes(label, configChecksum, run, shard, 1));
         }
       }
-      childrenBuilder.add(BuildEventIdUtil.testSummary(label, configEventId));
+      childrenBuilder.add(new BuildEventId.TestSummaryId(label, configChecksum));
     }
     if (announceTargetSummary) {
-      childrenBuilder.add(BuildEventIdUtil.targetSummary(originalLabel, configEventId));
+      childrenBuilder.add(new BuildEventId.TargetSummaryId(originalLabel, configChecksum));
     }
     return childrenBuilder.build();
   }
@@ -465,14 +464,14 @@ public final class TargetCompleteEvent
 
   @Override
   public ImmutableList<BuildEventId> postedAfter() {
-    var targetConfiguredEventId = BuildEventIdUtil.targetConfigured(originalLabel);
+    var targetConfiguredEventId = new BuildEventId.TargetConfiguredId(originalLabel, null);
     if (rootCauses.isEmpty()) {
       return ImmutableList.of(targetConfiguredEventId);
     }
     ImmutableList.Builder<BuildEventId> postedAfter = ImmutableList.builder();
     postedAfter.add(targetConfiguredEventId);
     for (Cause cause : rootCauses.toList()) {
-      postedAfter.add(cause.getIdProto());
+      postedAfter.add(cause.getId());
     }
     return postedAfter.build();
   }

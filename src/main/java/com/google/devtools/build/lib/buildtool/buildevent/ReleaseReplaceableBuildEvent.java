@@ -13,7 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.buildtool.buildevent;
 
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 
 /**
  * Posts a pending {@link ReplaceableBuildEvent} immediately. It no longer waits for either the

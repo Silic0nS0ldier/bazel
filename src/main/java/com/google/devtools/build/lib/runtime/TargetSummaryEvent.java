@@ -15,17 +15,16 @@
 package com.google.devtools.build.lib.runtime;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationId;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -43,15 +42,15 @@ public final class TargetSummaryEvent implements BuildEventWithOrderConstraint {
       boolean expectTestSummary,
       @Nullable BlazeTestStatus overallTestStatus) {
     Label label = target.getOriginalLabel();
-    BuildEventId configId = configurationId(target.getLookupKey().getConfigurationKey());
+    String configChecksum = configurationChecksum(target.getLookupKey().getConfigurationKey());
     ImmutableList.Builder<BuildEventId> postAfter = ImmutableList.builder();
-    postAfter.add(BuildEventIdUtil.targetCompleted(label, configId));
+    postAfter.add(new BuildEventId.TargetCompletedId(label, configChecksum, null));
     if (expectTestSummary) {
       // Always post after test summary, even if we get here without having seen it yet
-      postAfter.add(BuildEventIdUtil.testSummary(label, configId));
+      postAfter.add(new BuildEventId.TestSummaryId(label, configChecksum));
     }
     return new TargetSummaryEvent(
-        BuildEventIdUtil.targetSummary(label, configId),
+        new BuildEventId.TargetSummaryId(label, configChecksum),
         overallBuildSuccess,
         overallBuildSuccess && expectTestSummary ? overallTestStatus : null,
         postAfter.build());
@@ -67,7 +66,7 @@ public final class TargetSummaryEvent implements BuildEventWithOrderConstraint {
       boolean overallBuildSuccess,
       @Nullable BlazeTestStatus overallTestStatus,
       ImmutableList<BuildEventId> postedAfter) {
-    checkArgument(id.hasTargetSummary(), "Unexpected event id: %s", id);
+    checkArgument(id instanceof BuildEventId.TargetSummaryId, "Unexpected event id: %s", id);
     this.id = id;
     this.overallBuildSuccess = overallBuildSuccess;
     this.overallTestStatus = overallTestStatus;

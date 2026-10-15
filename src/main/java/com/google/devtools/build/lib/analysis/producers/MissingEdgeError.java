@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.analysis.producers;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
-import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.cmdline.LabelConstants.EXTERNAL_PACKAGE_IDENTIFIER;
 
 import com.google.devtools.build.lib.analysis.AnalysisRootCauseEvent;
@@ -91,7 +91,7 @@ public final class MissingEdgeError {
           AnalysisRootCauseEvent.withConfigurationValue(configuration, label, cause.getMessage()));
       transitiveState.addTransitiveCause(
           new AnalysisFailedCause(
-              label, configurationIdMessage(configuration), cause.getDetailedExitCode()));
+              label, configurationChecksum(configuration), cause.getDetailedExitCode()));
     } else if (cause instanceof NoSuchTargetException) {
       // If the child target was present, it already has an associated LoadingFailedCause.
       if (!((NoSuchTargetException) cause).hasTarget()) {

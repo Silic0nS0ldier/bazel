@@ -54,12 +54,11 @@ import com.google.devtools.build.lib.analysis.config.InvalidConfigurationExcepti
 import com.google.devtools.build.lib.buildeventstream.AnnounceBuildEventTransportsEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions.OutputGroupFileModes;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.Aborted.AbortReason;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.IdCase;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.NamedSetOfFilesId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventTransport;
@@ -260,7 +259,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
   }
 
   private static BuildEventId testId(String opaque) {
-    return BuildEventIdUtil.unknownBuildEventId(opaque);
+    return new BuildEventId.UnknownBuildEventId(opaque);
   }
 
   private static class EventBusHandler {
@@ -284,7 +283,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     streamer.buildEvent(startEvent);
 
     assertThat(streamer.hasRetainedEventState()).isTrue();
@@ -317,7 +316,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     streamer.buildEvent(startEvent);
     streamer.buildEvent(
         new GenericConfigurationEvent(
@@ -351,7 +350,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
 
     streamer.buildEvent(startEvent);
 
@@ -371,7 +370,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(ImmutableSet.of(finalStream.get(1).getEventId(), finalStream.get(2).getEventId()))
         .isEqualTo(
             ImmutableSet.of(
-                BuildEventIdUtil.buildFinished(), ProgressEvent.INITIAL_PROGRESS_UPDATE));
+                new BuildEventId.BuildFinishedId(), ProgressEvent.INITIAL_PROGRESS_UPDATE));
 
     // verify the "last_message" flag.
     assertThat(transport.getEventProtos().get(0).getLastMessage()).isFalse();
@@ -454,7 +453,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEvent earlyEvent = new GenericBuildEvent(testId("unexpected"), ImmutableSet.of());
     BuildEvent lateReference =
         new GenericBuildEvent(testId("late reference"), ImmutableSet.of(earlyEvent.getEventId()));
@@ -520,7 +519,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     streamer.buildEvent(startEvent);
 
     int numThreads = 12;
@@ -573,7 +572,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
           new GenericBuildEvent(
               testId("Initial"),
               ImmutableSet.of(
-                  ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                  ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
       streamer.buildEvent(startEvent);
 
       int numThreads = 12;
@@ -628,7 +627,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
             ImmutableSet.of(
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
                 expectedId,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
     BuildEventId rootCauseId = testId("failure event");
     BuildEvent failedTarget = new GenericOrderEvent(expectedId, ImmutableSet.of(rootCauseId));
 
@@ -640,7 +639,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     List<BuildEvent> allEventsSeen = transport.getEvents();
     assertThat(allEventsSeen).hasSize(6);
     assertThat(allEventsSeen.get(0).getEventId()).isEqualTo(startEvent.getEventId());
-    assertThat(allEventsSeen.get(1).getEventId()).isEqualTo(BuildEventIdUtil.buildFinished());
+    assertThat(allEventsSeen.get(1).getEventId()).isEqualTo(new BuildEventId.BuildFinishedId());
     BuildEvent linkEvent = allEventsSeen.get(2);
     assertThat(linkEvent.getEventId()).isEqualTo(ProgressEvent.INITIAL_PROGRESS_UPDATE);
     assertThat(allEventsSeen.get(3).getEventId()).isEqualTo(rootCauseId);
@@ -950,9 +949,9 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(allEventsSeen.get(0).getEventId()).isEqualTo(startEvent.getEventId());
     assertThat(allEventsSeen.get(1).getEventId()).isEqualTo(ProgressEvent.INITIAL_PROGRESS_UPDATE);
     assertThat(allEventsSeen.get(2)).isEqualTo(configuration.toBuildEvent());
-    assertThat(allEventsSeen.get(3).getEventId()).isEqualTo(BuildEventIdUtil.progressId(1));
+    assertThat(allEventsSeen.get(3).getEventId()).isEqualTo(new BuildEventId.ProgressId(1));
     assertThat(allEventsSeen.get(4)).isEqualTo(firstWithConfiguration);
-    assertThat(allEventsSeen.get(5).getEventId()).isEqualTo(BuildEventIdUtil.progressId(2));
+    assertThat(allEventsSeen.get(5).getEventId()).isEqualTo(new BuildEventId.ProgressId(2));
     assertThat(allEventsSeen.get(6)).isEqualTo(secondWithConfiguration);
   }
 
@@ -1007,7 +1006,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(allEventsSeen.get(1).getEventId()).isEqualTo(ProgressEvent.INITIAL_PROGRESS_UPDATE);
     assertThat(allEventsSeen.get(2)).isEqualTo(configuration.toBuildEvent());
     for (int idx = 3; idx < allEventsSeen.size(); idx++) {
-      assertThat(allEventsSeen.get(idx).getEventId().getIdCase())
+      assertThat(allEventsSeen.get(idx).getEventId().toProto().getIdCase())
           .isNotEqualTo(IdCase.CONFIGURATION);
     }
   }
@@ -1253,7 +1252,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericOrderEvent(
             testId("event depending on start"),
             ImmutableList.of(),
-            ImmutableList.of(BuildEventIdUtil.buildStartedId()));
+            ImmutableList.of(new BuildEventId.BuildStartedId()));
 
     streamer.buildEvent(orderEvent);
     streamer.buildEvent(new BuildCompleteEvent(new BuildResult(0)));
@@ -1261,12 +1260,12 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(streamer.isClosed()).isTrue();
     List<BuildEvent> eventsSeen = transport.getEvents();
     assertThat(eventsSeen).hasSize(4);
-    assertThat(eventsSeen.get(0).getEventId()).isEqualTo(BuildEventIdUtil.buildStartedId());
+    assertThat(eventsSeen.get(0).getEventId()).isEqualTo(new BuildEventId.BuildStartedId());
     assertThat(eventsSeen.get(1).getEventId()).isEqualTo(orderEvent.getEventId());
     assertThat(ImmutableSet.of(eventsSeen.get(2).getEventId(), eventsSeen.get(3).getEventId()))
         .isEqualTo(
             ImmutableSet.of(
-                BuildEventIdUtil.buildFinished(), ProgressEvent.INITIAL_PROGRESS_UPDATE));
+                new BuildEventId.BuildFinishedId(), ProgressEvent.INITIAL_PROGRESS_UPDATE));
     assertThat(transport.getEventProtos().get(3).getLastMessage()).isTrue();
   }
 
@@ -1277,7 +1276,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEvent lateEvent = new GenericBuildEvent(lateId, ImmutableSet.of(testId("nonexistent")));
     BuildEvent finishedEvent = new BuildCompleteEvent(new BuildResult(0), ImmutableList.of(lateId));
 
@@ -1297,7 +1296,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEventId lateId = testId("late event");
     BuildEvent finishedEvent = new BuildCompleteEvent(new BuildResult(0), ImmutableList.of(lateId));
 
@@ -1310,7 +1309,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     List<BuildEvent> eventsSeen = transport.getEvents();
     assertThat(eventsSeen).hasSize(4);
     assertThat(eventsSeen.get(0).getEventId()).isEqualTo(startEvent.getEventId());
-    assertThat(eventsSeen.get(1).getEventId()).isEqualTo(BuildEventIdUtil.buildFinished());
+    assertThat(eventsSeen.get(1).getEventId()).isEqualTo(new BuildEventId.BuildFinishedId());
     assertThat(ImmutableSet.of(eventsSeen.get(2).getEventId(), eventsSeen.get(3).getEventId()))
         .isEqualTo(ImmutableSet.of(lateId, ProgressEvent.INITIAL_PROGRESS_UPDATE));
   }
@@ -1324,21 +1323,21 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEventId lateId = testId("late event");
     BuildEvent finishedEvent = new BuildCompleteEvent(new BuildResult(0), ImmutableList.of(lateId));
 
     streamer.buildEvent(startEvent);
     streamer.buildEvent(
         new GenericOrderEvent(
-            lateId, ImmutableSet.of(), ImmutableList.of(BuildEventIdUtil.buildFinished())));
+            lateId, ImmutableSet.of(), ImmutableList.of(new BuildEventId.BuildFinishedId())));
     streamer.buildEvent(finishedEvent);
     assertThat(streamer.isClosed()).isTrue();
 
     List<BuildEvent> eventsSeen = transport.getEvents();
     assertThat(eventsSeen).hasSize(4);
     assertThat(eventsSeen.get(0).getEventId()).isEqualTo(startEvent.getEventId());
-    assertThat(eventsSeen.get(1).getEventId()).isEqualTo(BuildEventIdUtil.buildFinished());
+    assertThat(eventsSeen.get(1).getEventId()).isEqualTo(new BuildEventId.BuildFinishedId());
     assertThat(ImmutableSet.of(eventsSeen.get(2).getEventId(), eventsSeen.get(3).getEventId()))
         .isEqualTo(ImmutableSet.of(lateId, ProgressEvent.INITIAL_PROGRESS_UPDATE));
   }
@@ -1368,7 +1367,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEventId lateId = testId("late event");
     BuildEvent finishedEvent =
         buildCompleteEvent(
@@ -1393,7 +1392,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(eventsSeen).hasSize(5);
     assertThat(eventsSeen.get(0).getEventId()).isEqualTo(startEvent.getEventId());
     assertThat(eventsSeen.get(1).getEventId()).isEqualTo(ProgressEvent.INITIAL_PROGRESS_UPDATE);
-    assertThat(eventsSeen.get(2).getEventId()).isEqualTo(BuildEventIdUtil.buildFinished());
+    assertThat(eventsSeen.get(2).getEventId()).isEqualTo(new BuildEventId.BuildFinishedId());
     assertThat(eventsSeen.get(3).getEventId())
         .isEqualTo(ProgressEvent.progressUpdate(1).getEventId());
     // Progress events received after the build is finished do not have an incremented progress ID.
@@ -1435,7 +1434,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
         new GenericBuildEvent(
             testId("Initial"),
             ImmutableSet.of(
-                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished()));
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, new BuildEventId.BuildFinishedId()));
     BuildEventId lateId = testId("late event");
     BuildEvent finishedEvent =
         buildCompleteEvent(
@@ -1544,11 +1543,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
     BuildCompleteEvent buildCompleteEvent =
         buildCompleteEvent(createGenericDetailedExitCode(), true, null, false);
 
@@ -1568,11 +1567,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
     BuildCompleteEvent buildCompleteEvent =
         buildCompleteEvent(createGenericDetailedExitCode(), true, new RuntimeException(), false);
 
@@ -1592,11 +1591,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
     BuildCompleteEvent buildCompleteEvent =
         buildCompleteEvent(createGenericDetailedExitCode(), true, null, true);
 
@@ -1613,8 +1612,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
 
   @Test
   public void testBuildCatastropheOom_testCommand() {
-    BuildEventId abortedEventId =
-        BuildEventIdUtil.targetPatternExpanded(ImmutableList.of("//foo:bar"));
+    BuildEventId abortedEventId = new BuildEventId.PatternExpandedId(ImmutableList.of("//foo:bar"));
     BuildEvent startEvent =
         BuildStartingEvent.create(
             "tmpfs",
@@ -1653,8 +1651,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
 
   @Test
   public void testBuildFailsToComplete_testCommand() {
-    BuildEventId abortedEventId =
-        BuildEventIdUtil.targetPatternExpanded(ImmutableList.of("//foo:bar"));
+    BuildEventId abortedEventId = new BuildEventId.PatternExpandedId(ImmutableList.of("//foo:bar"));
     BuildEvent startEvent =
         BuildStartingEvent.create(
             "tmpfs",
@@ -1694,11 +1691,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
 
     streamer.buildEvent(startEvent);
     streamer.closeOnAbort(AbortReason.TIME_OUT);
@@ -1709,7 +1706,7 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     assertThat(aborted0.getAborted().getReason()).isEqualTo(AbortReason.TIME_OUT);
     assertThat(aborted0.getAborted().getDescription()).isEmpty();
 
-    BuildEventStreamProtos.BuildEvent aborted1 = getBepEvent(BuildEventIdUtil.buildFinished());
+    BuildEventStreamProtos.BuildEvent aborted1 = getBepEvent(BuildEventId.BUILD_FINISHED);
     assertThat(aborted1).isNotNull();
     assertThat(aborted1.hasAborted()).isTrue();
     assertThat(aborted1.getAborted().getReason()).isEqualTo(AbortReason.TIME_OUT);
@@ -1721,11 +1718,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
     BuildCompleteEvent buildCompleteEvent =
         buildCompleteEvent(createGenericDetailedExitCode(), false, new RuntimeException(), false);
 
@@ -1747,11 +1744,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
 
     streamer.buildEvent(startEvent);
     streamer.closeOnAbort(AbortReason.INTERNAL);
@@ -1765,11 +1762,11 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId buildEventId = testId("abort_expected");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 buildEventId,
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
 
     streamer.buildEvent(startEvent);
     streamer.closeOnAbort(AbortReason.OUT_OF_MEMORY);
@@ -1856,12 +1853,12 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     BuildEventId bufferedEvent3Id = testId("buffered_event_3");
     BuildEvent startEvent =
         new GenericBuildEvent(
-            BuildEventIdUtil.buildStartedId(),
+            new BuildEventId.BuildStartedId(),
             ImmutableSet.of(
                 abortedEventId,
                 bufferedEvent2Id, // We announce one of the three events.
                 ProgressEvent.INITIAL_PROGRESS_UPDATE,
-                BuildEventIdUtil.buildFinished()));
+                new BuildEventId.BuildFinishedId()));
 
     streamer.buildEvent(startEvent);
     ImmutableSet<BuildEventId> postedAfter = ImmutableSet.of(abortedEventId);
@@ -1880,13 +1877,15 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
     // that had already been announced.
     BuildEventStreamProtos.BuildEvent aborted = getBepEvent(abortedEventId);
     assertThat(aborted.hasAborted()).isTrue();
-    assertThat(aborted.getChildrenList()).containsExactly(bufferedEvent1Id, bufferedEvent3Id);
+    assertThat(aborted.getChildrenList())
+        .containsExactly(bufferedEvent1Id.toProto(), bufferedEvent3Id.toProto());
   }
 
   @Nullable
   private BuildEventStreamProtos.BuildEvent getBepEvent(BuildEventId buildEventId) {
+    BuildEventStreamProtos.BuildEventId proto = buildEventId.toProto();
     return transport.getEventProtos().stream()
-        .filter(e -> e.getId().equals(buildEventId))
+        .filter(e -> e.getId().equals(proto))
         .findFirst()
         .orElse(null);
   }

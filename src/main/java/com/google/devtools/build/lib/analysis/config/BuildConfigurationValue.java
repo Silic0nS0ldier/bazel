@@ -32,9 +32,8 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration.TestOptions;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.NullConfiguration;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.BlazeInterners;
@@ -149,9 +148,6 @@ public class BuildConfigurationValue
 
   @Nullable // lazily initialized
   private transient volatile BuildConfigurationEvent buildEvent;
-
-  @Nullable // lazily initialized
-  private transient volatile BuildEventId buildEventId;
 
   /**
    * Validates the options for this BuildConfigurationValue. Issues warnings for the use of
@@ -950,17 +946,6 @@ public class BuildConfigurationValue
     return starlarkVisibleFragments.keySet();
   }
 
-  public BuildEventId getEventId() {
-    if (buildEventId == null) {
-      synchronized (this) {
-        if (buildEventId == null) {
-          buildEventId = BuildEventIdUtil.configurationId(checksum());
-        }
-      }
-    }
-    return buildEventId;
-  }
-
   @Override
   public BuildConfigurationEvent toBuildEvent() {
     if (buildEvent == null) {
@@ -978,11 +963,10 @@ public class BuildConfigurationValue
     if (options.getIncompatibleBepCpuFromPlatform()) {
       cpu = platformCpu;
     }
-    BuildEventId eventId = getEventId();
     BuildEventStreamProtos.BuildEvent.Builder builder =
         BuildEventStreamProtos.BuildEvent.newBuilder();
     builder
-        .setId(eventId)
+        .setId(new BuildEventId.ConfigurationId(checksum()).toProto())
         .setConfiguration(
             BuildEventStreamProtos.Configuration.newBuilder()
                 .setMnemonic(getMnemonic())
@@ -991,22 +975,17 @@ public class BuildConfigurationValue
                 .setCpu(cpu)
                 .setIsTool(isToolConfiguration())
                 .build());
-    return new BuildConfigurationEvent(eventId, builder.build());
+    return new BuildConfigurationEvent(builder.build());
   }
 
-  public static BuildEventId.ConfigurationId configurationIdMessage(
-      @Nullable BuildConfigurationValue configuration) {
-    if (configuration == null) {
-      return BuildEventIdUtil.nullConfigurationIdMessage();
-    }
-    return BuildEventIdUtil.configurationIdMessage(configuration.checksum());
+  /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code config}. */
+  public static String configurationChecksum(@Nullable BuildConfigurationValue config) {
+    return config == null ? BuildEventId.ConfigurationId.NULL_CHECKSUM : config.checksum();
   }
 
-  public static BuildEventId configurationId(@Nullable BuildConfigurationValue configuration) {
-    if (configuration == null) {
-      return BuildEventIdUtil.nullConfigurationId();
-    }
-    return configuration.getEventId();
+  /** Returns the configuration checksum used as the {@code ConfigurationId} of {@code key}. */
+  public static String configurationChecksum(@Nullable BuildConfigurationKey key) {
+    return key == null ? BuildEventId.ConfigurationId.NULL_CHECKSUM : key.getOptions().checksum();
   }
 
   public static BuildEvent buildEvent(@Nullable BuildConfigurationValue configuration) {

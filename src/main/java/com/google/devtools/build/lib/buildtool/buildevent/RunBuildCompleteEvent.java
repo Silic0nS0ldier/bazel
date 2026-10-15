@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.buildtool.buildevent;
 
 import com.google.devtools.build.lib.buildeventstream.BuildCompletingEvent;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.util.ExitCode;
 import java.util.Collection;
 

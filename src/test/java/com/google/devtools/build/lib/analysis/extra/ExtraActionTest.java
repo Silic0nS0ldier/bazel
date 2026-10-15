@@ -238,9 +238,7 @@ public class ExtraActionTest extends FoundationTestCase {
             /* targetKind= */ "dummy-kind",
             /* buildConfigurationMnemonic= */ "dummy-configuration-mnemonic",
             /* configurationChecksum= */ "dummy-configuration",
-            new BuildConfigurationEvent(
-                BuildEventStreamProtos.BuildEventId.getDefaultInstance(),
-                BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
+            new BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
             /* isToolConfiguration= */ false,
             /* executionPlatform= */ PlatformInfo.EMPTY_PLATFORM_INFO,
             /* aspectDescriptors= */ ImmutableList.of(),

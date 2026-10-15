@@ -29,9 +29,8 @@ import com.google.devtools.build.lib.buildeventstream.ArtifactGroupNamer;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile.LocalFileType;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.buildeventstream.PathConverter;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -61,7 +60,7 @@ class NamedArtifactGroup implements BuildEvent {
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.fromArtifactGroupName(name);
+    return new BuildEventId.NamedSetOfFilesId(name);
   }
 
   @Override

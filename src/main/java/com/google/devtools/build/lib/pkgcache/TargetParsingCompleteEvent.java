@@ -21,9 +21,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSetMultimap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.buildeventstream.BuildEventContext;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.PatternExpanded;
 import com.google.devtools.build.lib.buildeventstream.BuildEventWithOrderConstraint;
 import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
@@ -153,12 +152,12 @@ public final class TargetParsingCompleteEvent implements BuildEventWithOrderCons
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.targetPatternExpanded(originalTargetPattern);
+    return new BuildEventId.PatternExpandedId(originalTargetPattern);
   }
 
   @Override
   public Collection<BuildEventId> postedAfter() {
-    return ImmutableList.of(BuildEventIdUtil.buildStartedId());
+    return ImmutableList.of(BuildEventId.BUILD_STARTED);
   }
 
   @Override
@@ -166,13 +165,13 @@ public final class TargetParsingCompleteEvent implements BuildEventWithOrderCons
     ImmutableList.Builder<BuildEventId> childrenBuilder = ImmutableList.builder();
     for (String failedTargetPattern : failedTargetPatterns) {
       childrenBuilder.add(
-          BuildEventIdUtil.targetPatternExpanded(ImmutableList.of(failedTargetPattern)));
+          new BuildEventId.PatternExpandedId(ImmutableList.of(failedTargetPattern)));
     }
     for (ThinTarget target : expandedTargets) {
       // Test suites won't produce target configuration and target-complete events, so do not
       // announce here completion as children.
       if (!target.isTestSuiteRule()) {
-        childrenBuilder.add(BuildEventIdUtil.targetConfigured(target.getLabel()));
+        childrenBuilder.add(new BuildEventId.TargetConfiguredId(target.getLabel(), null));
       }
     }
     return childrenBuilder.build();

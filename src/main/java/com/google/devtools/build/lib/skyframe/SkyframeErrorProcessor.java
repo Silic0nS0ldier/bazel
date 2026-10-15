@@ -14,7 +14,7 @@
 package com.google.devtools.build.lib.skyframe;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
-import static com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil.configurationIdMessage;
+import static com.google.devtools.build.lib.analysis.config.BuildConfigurationValue.configurationChecksum;
 import static com.google.devtools.build.lib.skyframe.ActionArtifactCycleReporter.ACTION_OR_ARTIFACT_OR_TRANSITIVE_RDEP;
 import static java.util.Objects.requireNonNull;
 
@@ -680,7 +680,7 @@ public final class SkyframeErrorProcessor {
                   Order.STABLE_ORDER,
                   new AnalysisFailedCause(
                       actionLookupKey.getLabel(),
-                      configurationIdMessage(actionLookupKey.getConfigurationKey()),
+                      configurationChecksum(actionLookupKey.getConfigurationKey()),
                       e.getDetailedExitCode()));
           default -> {
             BugReport.logUnexpected(

@@ -425,9 +425,7 @@ public final class ActionsTestUtil {
           /* targetKind= */ "dummy-kind",
           /* buildConfigurationMnemonic= */ "dummy-configuration-mnemonic",
           /* configurationChecksum= */ "dummy-configuration",
-          new BuildConfigurationEvent(
-              BuildEventStreamProtos.BuildEventId.getDefaultInstance(),
-              BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
+          new BuildConfigurationEvent(BuildEventStreamProtos.BuildEvent.getDefaultInstance()),
           /* isToolConfiguration= */ false,
           /* executionPlatform= */ PlatformInfo.EMPTY_PLATFORM_INFO,
           /* aspectDescriptors= */ ImmutableList.of(),
@@ -1073,7 +1071,7 @@ public final class ActionsTestUtil {
   public static void ensureMemoizedIsInitializedIsSet(ActionAnalysisMetadata action) {
     BuildConfigurationEvent buildConfigurationEvent =
         action.getOwner().getBuildConfigurationEvent();
-    assertThat(buildConfigurationEvent.getEventId().isInitialized()).isTrue();
+    assertThat(buildConfigurationEvent.getEventId().toProto().isInitialized()).isTrue();
     assertThat(buildConfigurationEvent.asStreamProto(/* unusedConverters= */ null).isInitialized())
         .isTrue();
   }

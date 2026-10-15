@@ -141,6 +141,7 @@ java_library(
         ":action_lookup_key",
         ":artifact_owner",
         ":artifacts",
+        ":build_configuration_event",
         ":commandline_item",
         ":commandline_limits",
         ":exec_exception",

@@ -15,7 +15,6 @@
 package com.google.devtools.build.lib.buildeventstream;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
 import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId.FetchId.Downloader;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import java.util.Collection;
@@ -32,7 +31,7 @@ public record FetchEvent(String url, Downloader downloader, boolean success)
 
   @Override
   public BuildEventId getEventId() {
-    return BuildEventIdUtil.fetchId(url, downloader);
+    return new BuildEventId.FetchId(url, downloader);
   }
 
   @Override

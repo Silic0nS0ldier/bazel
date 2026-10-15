@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.actions.ActionConflictException;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil.NullAction;
+import com.google.devtools.build.lib.analysis.config.BuildConfigurationValue;
 import com.google.devtools.build.lib.analysis.config.ExecutionTransitionFactory;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestCase;
@@ -42,8 +43,7 @@ import com.google.devtools.build.lib.analysis.util.TestAspects.AspectInfo;
 import com.google.devtools.build.lib.analysis.util.TestAspects.DummyRuleFactory;
 import com.google.devtools.build.lib.analysis.util.TestAspects.ExtraAttributeAspect;
 import com.google.devtools.build.lib.analysis.util.TestAspects.RuleInfo;
-import com.google.devtools.build.lib.buildeventstream.BuildEventIdUtil;
-import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
@@ -927,12 +927,9 @@ public class AspectTest extends AnalysisTestCase {
     AspectConfiguredEvent configuredEvent = getOnlyElement(collector.events);
     BuildEventId targetCompletedId = getOnlyElement(configuredEvent.getChildrenEvents());
     AspectKey key = getOnlyElement(analysisResult.getAspectsMap().keySet());
+    String configId = BuildConfigurationValue.configurationChecksum(key.getConfigurationKey());
     assertThat(targetCompletedId)
-        .isEqualTo(
-            BuildEventIdUtil.aspectCompleted(
-                label,
-                BuildEventIdUtil.configurationId(key.getConfigurationKey()),
-                "AspectApplyingToFiles"));
+        .isEqualTo(new BuildEventId.TargetCompletedId(label, configId, "AspectApplyingToFiles"));
   }
 
   @Test
