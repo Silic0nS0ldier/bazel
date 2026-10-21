@@ -1056,6 +1056,34 @@ public final class BuildEventStreamerTest extends BuildEventStreamerTestBase {
   }
 
   @Test
+  public void testEarlyFlushDoesNotDuplicateInitialProgressAtCompletion() {
+    BuildEventStreamer.OutErrProvider outErr = mock(BuildEventStreamer.OutErrProvider.class);
+    String stdoutMsg = "Output flushed before the build-started event.";
+    when(outErr.getOut()).thenReturn(ImmutableList.of(stdoutMsg)).thenReturn(ImmutableList.of());
+    when(outErr.getErr()).thenReturn(ImmutableList.of());
+    streamer.registerOutErrProvider(outErr);
+
+    streamer.flush();
+    streamer.buildEvent(
+        new GenericBuildEvent(
+            BuildEventIdUtil.buildStartedId(),
+            ImmutableSet.of(
+                ProgressEvent.INITIAL_PROGRESS_UPDATE, BuildEventIdUtil.buildFinished())));
+    streamer.buildEvent(new BuildCompleteEvent(new BuildResult(0)));
+
+    assertThat(streamer.isClosed()).isTrue();
+    List<BuildEventStreamProtos.BuildEvent> eventsSeen = transport.getEventProtos();
+    BuildEventStreamProtos.BuildEvent initialProgress = eventsSeen.get(1);
+    assertThat(initialProgress.getId()).isEqualTo(ProgressEvent.INITIAL_PROGRESS_UPDATE);
+    assertThat(initialProgress.hasProgress()).isTrue();
+    assertThat(initialProgress.getProgress().getStdout()).isEqualTo(stdoutMsg);
+    // Completing the build must not emit an aborted event for the already sent progress #0.
+    assertThat(eventsSeen.stream().map(BuildEventStreamProtos.BuildEvent::getId).toList())
+        .containsNoDuplicates();
+    assertThat(eventsSeen.get(eventsSeen.size() - 1).getLastMessage()).isTrue();
+  }
+
+  @Test
   public void testChunkedFlush() {
     // Verify that the streamer calls to flush() that return multiple chunked buffers.
     BuildEventStreamer.OutErrProvider outErr = mock(BuildEventStreamer.OutErrProvider.class);
