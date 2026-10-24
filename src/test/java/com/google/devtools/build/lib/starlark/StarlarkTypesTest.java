@@ -853,6 +853,30 @@ public class StarlarkTypesTest extends BuildViewTestCase {
   }
 
   @Test
+  public void loadedProvider_usableAsTypeInFunctionBody() throws Exception {
+    setBuildLanguageOptions(
+        "--experimental_starlark_type_syntax", "--experimental_starlark_static_type_checking");
+    scratch.file("lib/provider.bzl", "MyInfo = provider()");
+    scratch.file("lib/BUILD");
+
+    checkValid(
+        """
+        load("//lib:provider.bzl", "MyInfo")
+        def f(x: Any) -> struct:
+            info: MyInfo = x
+            return info
+        """);
+
+    checkInvalid(
+        "cannot assign type 'struct' to 'info' of type 'MyInfo'",
+        """
+        load("//lib:provider.bzl", "MyInfo")
+        def f(x: struct):
+            info: MyInfo = x
+        """);
+  }
+
+  @Test
   public void schemafulProvider_noInit() throws Exception {
     setBuildLanguageOptions(
         "--experimental_starlark_type_syntax", "--experimental_starlark_static_type_checking");

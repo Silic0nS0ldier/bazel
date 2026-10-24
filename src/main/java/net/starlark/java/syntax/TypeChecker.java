@@ -131,7 +131,8 @@ public final class TypeChecker extends NodeVisitor {
         switch (binding.getScope()) {
           case UNIVERSAL -> checkNotNull(module.getUniversalSymbolType(binding.getName()));
           case PREDECLARED -> checkNotNull(module.getPredeclaredSymbolType(binding.getName()));
-          default -> typeTable.getType(binding);
+          // A FREE binding shares the type of the enclosing function's binding it captures.
+          default -> typeTable.getType(binding.getOrigin());
         };
     return type != null ? type : Types.ANY;
   }
