@@ -33,6 +33,7 @@ import static com.google.devtools.build.lib.packages.Type.INTEGER;
 import static com.google.devtools.build.lib.packages.Type.STRING;
 import static com.google.devtools.build.lib.packages.Type.STRING_NO_INTERN;
 import static com.google.devtools.build.lib.packages.Types.INTEGER_LIST;
+import static com.google.devtools.build.lib.packages.Types.STARLARK_VALUE;
 import static com.google.devtools.build.lib.packages.Types.STRING_DICT;
 import static com.google.devtools.build.lib.packages.Types.STRING_LIST;
 import static com.google.devtools.build.lib.packages.Types.STRING_LIST_DICT;
@@ -56,7 +57,13 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
+import net.starlark.java.eval.Dict;
+import net.starlark.java.eval.NoneType;
+import net.starlark.java.eval.StarlarkFloat;
 import net.starlark.java.eval.StarlarkInt;
+import net.starlark.java.eval.StarlarkList;
+import net.starlark.java.eval.StarlarkSet;
+import net.starlark.java.eval.Tuple;
 
 /** Common utilities for serializing {@link Attribute}s as protocol buffers. */
 public class AttributeFormatter {
@@ -286,9 +293,55 @@ public class AttributeFormatter {
                 .setValue(internalToUnicode(dictEntry.getValue()));
         builder.addLabelKeyedStringDictValue(entry);
       }
+    } else if (type == STARLARK_VALUE) {
+      builder.setStarlarkValue(starlarkValueToProto(value));
     } else {
       throw new AssertionError("Unknown type: " + type);
     }
+  }
+
+  private static Build.StarlarkValue.Builder starlarkValueToProto(Object value) {
+    Build.StarlarkValue.Builder builder = Build.StarlarkValue.newBuilder();
+    if (value instanceof NoneType) {
+      builder.setType(Build.StarlarkValue.Type.NONE);
+    } else if (value instanceof Boolean b) {
+      builder.setType(Build.StarlarkValue.Type.BOOL).setBoolValue(b);
+    } else if (value instanceof StarlarkInt i) {
+      builder.setType(Build.StarlarkValue.Type.INT).setIntValue(i.toString());
+    } else if (value instanceof StarlarkFloat f) {
+      builder.setType(Build.StarlarkValue.Type.FLOAT).setFloatValue(f.toDouble());
+    } else if (value instanceof String s) {
+      builder.setType(Build.StarlarkValue.Type.STRING).setStringValue(internalToUnicode(s));
+    } else if (value instanceof Tuple tuple) {
+      builder.setType(Build.StarlarkValue.Type.SEQUENCE);
+      builder.setSequenceKind(Build.StarlarkValue.SequenceKind.TUPLE);
+      for (Object elem : tuple) {
+        builder.addSequenceValue(starlarkValueToProto(elem));
+      }
+    } else if (value instanceof StarlarkSet<?> set) {
+      builder.setType(Build.StarlarkValue.Type.SEQUENCE);
+      builder.setSequenceKind(Build.StarlarkValue.SequenceKind.SET);
+      for (Object elem : set) {
+        builder.addSequenceValue(starlarkValueToProto(elem));
+      }
+    } else if (value instanceof StarlarkList<?> list) {
+      builder.setType(Build.StarlarkValue.Type.SEQUENCE);
+      builder.setSequenceKind(Build.StarlarkValue.SequenceKind.LIST);
+      for (Object elem : list) {
+        builder.addSequenceValue(starlarkValueToProto(elem));
+      }
+    } else if (value instanceof Dict<?, ?> dict) {
+      builder.setType(Build.StarlarkValue.Type.DICT);
+      for (Map.Entry<?, ?> entry : dict.entrySet()) {
+        builder.addDictValue(
+            Build.StarlarkValue.DictEntry.newBuilder()
+                .setKey(starlarkValueToProto(entry.getKey()))
+                .setValue(starlarkValueToProto(entry.getValue())));
+      }
+    } else {
+      throw new AssertionError("Unexpected Starlark value: " + value);
+    }
+    return builder;
   }
 
   private static Tristate triStateToProto(TriState value) {
@@ -322,6 +375,8 @@ public class AttributeFormatter {
     void setIntValue(int i);
 
     void setLicense(Build.License.Builder builder);
+
+    void setStarlarkValue(Build.StarlarkValue.Builder builder);
 
     void setStringValue(String s);
 
@@ -401,6 +456,11 @@ public class AttributeFormatter {
     @Override
     public void setLicense(Build.License.Builder builder) {
       attributeBuilder.setLicense(builder);
+    }
+
+    @Override
+    public void setStarlarkValue(Build.StarlarkValue.Builder builder) {
+      attributeBuilder.setStarlarkValue(builder);
     }
 
     @Override
@@ -496,6 +556,11 @@ public class AttributeFormatter {
     @Override
     public void setLicense(Build.License.Builder builder) {
       selectorEntryBuilder.setLicense(builder);
+    }
+
+    @Override
+    public void setStarlarkValue(Build.StarlarkValue.Builder builder) {
+      selectorEntryBuilder.setStarlarkValue(builder);
     }
 
     @Override
