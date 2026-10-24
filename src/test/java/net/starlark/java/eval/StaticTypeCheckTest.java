@@ -512,6 +512,63 @@ public final class StaticTypeCheckTest {
     assertInvalid("'my_type_value' is not callable; got type 'MyType'", "_: str = my_type_value()");
   }
 
+  @StarlarkBuiltin(name = "MyIndexableType")
+  public static final class MyIndexableType implements StarlarkIndexable {
+    @Override
+    public Object getIndex(StarlarkSemantics semantics, Object key) {
+      return key;
+    }
+
+    @Override
+    public boolean containsKey(StarlarkSemantics semantics, Object key) {
+      return true;
+    }
+  }
+
+  @StarlarkBuiltin(name = "MyThreadedIndexableType")
+  public static final class MyThreadedIndexableType
+      implements StarlarkValue, StarlarkIndexable.Threaded {
+    @Override
+    public Object getIndex(StarlarkThread starlarkThread, StarlarkSemantics semantics, Object key) {
+      return key;
+    }
+
+    @Override
+    public boolean containsKey(
+        StarlarkThread starlarkThread, StarlarkSemantics semantics, Object key) {
+      return true;
+    }
+  }
+
+  @Test
+  public void indexableBuiltinTypes() throws Exception {
+    module =
+        Module.withPredeclared(
+            StarlarkSemantics.DEFAULT,
+            ImmutableMap.of(
+                "indexable", new MyIndexableType(),
+                "threaded_indexable", new MyThreadedIndexableType(),
+                "my_type_value", new MyType()));
+
+    assertValid(
+        """
+        a: str = indexable["abc"]
+        b: int = threaded_indexable[123]
+        """);
+
+    assertInvalid(
+        "cannot index 'my_type_value' of type 'MyType'",
+        """
+        _: Any = my_type_value["abc"]
+        """);
+    assertInvalid(
+        "indexable of type 'MyIndexableType' does not support item assignment",
+        """
+        _: None  # ensure file uses type syntax
+        indexable["abc"] = 123
+        """);
+  }
+
   @Test
   public void unannotatedStarlarkValues_notAutoTyped() throws Exception {
     module =
